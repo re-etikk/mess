@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Next.js build output
+.next/
+out/
+build/
+dist/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.lock
+!package-lock.json
+!pubspec.lock
+build/
+android/app/debug/
+android/app/profile/
+android/app/release/
+ios/.symlinks/
+ios/Pods/
+ios/Podfile.lock
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local Certificates & Keystores
+android_certs/
+*.jks
+*.keystore
+*.cer
+*.crt
+
+# Supabase Local Cache
+.temp/
+supabase/.temp/
+
+

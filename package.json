@@ -1,0 +1,27 @@
+{
+  "name": "smart-tiffin-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Smart Tiffin Subscription & Delivery Platform for India",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace=apps/web run dev",
+    "build:web": "npm --workspace=apps/web run build",
+    "start:web": "npm --workspace=apps/web run start",
+    "lint:web": "npm --workspace=apps/web run lint",
+    "test": "npm --workspace=apps/web run test"
+  },
+  "keywords": [
+    "tiffin",
+    "subscription",
+    "food-delivery",
+    "qr-redemption",
+    "flutter",
+    "nextjs",
+    "supabase"
+  ],
+  "author": "Smart Tiffin Team",
+  "license": "UNLICENSED"
+}

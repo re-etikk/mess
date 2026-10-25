@@ -1,0 +1,17 @@
+flowchart TD
+  A[Customer app or website] --> B[Browse provider + plan]
+  B --> C[Server-calculated checkout]
+  C --> D[Payment gateway]
+  D --> E{Verified by server?}
+  E -- No --> F[Pending/failed; no entitlement]
+  E -- Yes --> G[Activate subscription or paid meal]
+  G --> H{Pickup or delivery?}
+  H -- Pickup --> I[Short-lived QR]
+  I --> J[Provider scan endpoint]
+  J --> K[Atomic one-time redemption]
+  H -- Delivery --> L[Delivery assignment]
+  L --> M[Rider pickup]
+  M --> N[OTP/QR drop-off verification]
+  N --> O[Atomic delivery completion + redemption]
+  K --> P[History + ledger + provider view]
+  O --> P

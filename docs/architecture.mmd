@@ -1,0 +1,35 @@
+flowchart LR
+  subgraph Clients
+    CA[Customer Flutter]
+    PA[Provider Flutter]
+    DA[Delivery Flutter]
+    WEB[Next.js website + customer portal]
+    PROV[Provider portal]
+    ADM[Admin portal]
+  end
+  subgraph Backend
+    AUTH[Supabase Auth]
+    EDGE[Edge Functions / privileged APIs]
+    DB[(PostgreSQL + RLS)]
+    STORAGE[Private Storage]
+  end
+  PG[Payment gateway sandbox/live when approved]
+  MAP[Optional maps/routing provider]
+  MSG[Configured email/SMS/push providers]
+  CA --> AUTH
+  PA --> AUTH
+  DA --> AUTH
+  WEB --> AUTH
+  PROV --> AUTH
+  ADM --> AUTH
+  CA --> EDGE
+  PA --> EDGE
+  DA --> EDGE
+  WEB --> EDGE
+  PROV --> EDGE
+  ADM --> EDGE
+  EDGE --> DB
+  EDGE --> STORAGE
+  EDGE <--> PG
+  EDGE -. optional .-> MAP
+  EDGE -. optional .-> MSG
