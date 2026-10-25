@@ -1,0 +1,73 @@
+name: Thali Platform CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  web-ci:
+    name: Next.js Web & API Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/web/package.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Test Suite
+        run: npm test
+
+      - name: Build Next.js Application
+        run: npm run build
+        env:
+          NEXT_PUBLIC_BRAND_NAME: 'MESS'
+          NEXT_PUBLIC_CURRENCY_SYMBOL: '₹'
+          QR_HMAC_SECRET: 'test-only-qr-signing-secret-not-for-production-0001'
+
+  flutter-ci:
+    name: Flutter Mobile Apps Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [apps/mobile_customer, apps/mobile_provider, apps/mobile_delivery]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.app }}
+        run: flutter pub get
+
+      - name: Static Analysis
+        working-directory: ${{ matrix.app }}
+        run: flutter analyze
+
+      - name: Run Widget Tests
+        working-directory: ${{ matrix.app }}
+        run: flutter test

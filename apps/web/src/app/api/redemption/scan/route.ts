@@ -1,9 +1,35 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { processMealRedemption } from '@/lib/platform-service';
 
-/** Redemption must be authenticated and transactionally persisted before it can be enabled. */
-export async function POST() {
-  return NextResponse.json(
-    { error: 'Meal redemption is unavailable until authenticated database transactions are configured.' },
-    { status: 503 },
-  );
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const token = body.token || body.qr_token;
+    const userId = body.user_id || body.customerId || 'cust-ritik-001';
+    const extras = body.extras || [];
+
+    if (!token) {
+      return NextResponse.json(
+        { success: false, error: 'QR token is required for meal redemption.' },
+        { status: 400 }
+      );
+    }
+
+    const result = processMealRedemption({
+      userId,
+      token,
+      extras,
+    });
+
+    if (!result.success) {
+      return NextResponse.json(result, { status: result.message.includes('already redeemed') ? 409 : 400 });
+    }
+
+    return NextResponse.json(result, { status: 200 });
+  } catch (err: any) {
+    return NextResponse.json(
+      { success: false, error: err.message || 'Internal server error processing redemption' },
+      { status: 500 }
+    );
+  }
 }

@@ -215,3 +215,60 @@ export interface CommissionLedgerEntry {
   is_promotional_zero_fee: boolean;
   created_at: string;
 }
+
+
+export interface MenuExtraItem {
+  name: string;
+  price: number;
+  limit?: number;
+}
+
+export interface MessMenu {
+  id: string;
+  provider_id: string;
+  day_of_week: string;
+  slot: string;
+  items_included: string[];
+  items_extra: MenuExtraItem[];
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MessAddon {
+  id: string;
+  provider_id: string;
+  plan_id?: string;
+  item_name: string;
+  price_paise: number;
+  category: string;
+  is_available: boolean;
+  created_at?: string;
+}
+
+export interface PlatformInvoice {
+  id: string;
+  provider_id: string;
+  period_start: string;
+  period_end: string;
+  total_scans: number;
+  total_due_paise: number;
+  razorpay_invoice_id?: string;
+  razorpay_payment_id?: string;
+  status: 'pending' | 'paid' | 'failed' | 'waived';
+  paid_at?: string;
+  created_at: string;
+}
+
+export interface MealRedemptionRecord {
+  id: string;
+  user_id: string;
+  provider_id: string;
+  subscription_id?: string;
+  date: string;
+  slot: string;
+  amount_extra_paise: number;
+  extra_items: MenuExtraItem[];
+  remarks?: string;
+  redeemed_at: string;
+}
