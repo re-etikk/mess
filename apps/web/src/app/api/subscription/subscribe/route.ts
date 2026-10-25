@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, SubscriptionData } from '@/lib/platform-service';
+import { platformStore, SubscriptionData, validateAndApplyPromo } from '@/lib/platform-service';
 import crypto from 'crypto';
 
 export async function POST(req: NextRequest) {
@@ -8,12 +8,25 @@ export async function POST(req: NextRequest) {
     const customerId = body.customer_id || body.userId || 'cust-ritik-001';
     const providerId = body.provider_id || 'prov-radhe-001';
     const planId = body.plan_id;
-    const planType = body.plan_type || 'meal_credits'; // 'fixed_period' | 'meal_credits' | 'daily'
+    const planType = body.plan_type || 'meal_credits';
     const durationDays = body.duration_days || (planType === 'fixed_period' ? 30 : 60);
     const mealCredits = body.meal_credits !== undefined ? body.meal_credits : (planType === 'meal_credits' ? 60 : null);
-    const pricePaise = body.price_paise || (planType === 'fixed_period' ? 280000 : 480000);
-    const paymentId = body.payment_id || `pay_${crypto.randomBytes(6).toString('hex')}`;
+    let pricePaise = body.price_paise || (planType === 'fixed_period' ? 280000 : 480000);
+    const promoCode = body.promo_code;
+    let discountPaise = 0;
 
+    if (promoCode) {
+      const promoResult = validateAndApplyPromo({
+        code: promoCode,
+        orderAmountPaise: pricePaise,
+      });
+      if (promoResult.isValid) {
+        discountPaise = promoResult.discountPaise;
+        pricePaise = promoResult.finalAmountPaise;
+      }
+    }
+
+    const paymentId = body.payment_id || `pay_${crypto.randomBytes(6).toString('hex')}`;
     const plan = planId ? platformStore.plans.get(planId) : null;
     const planName = plan ? plan.name : (planType === 'fixed_period' ? 'Fixed-Period Plan' : 'Meal-Tracker Plan');
 
@@ -40,7 +53,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       subscription: newSub,
-      message: `Successfully subscribed to ${planName}!`,
+      discount_applied: discountPaise > 0 ? discountPaise / 100 : 0,
+      final_price_inr: pricePaise / 100,
+      message: `Successfully subscribed to ${planName}!${discountPaise > 0 ? ` (Saved ₹${discountPaise / 100} with ${promoCode})` : ''}`,
     });
   } catch (err: any) {
     return NextResponse.json(

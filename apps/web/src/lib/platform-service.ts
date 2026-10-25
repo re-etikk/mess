@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { APP_CONFIG, calculateProviderDailyUsageFee } from './config';
 import { getIndiaDateString, verifyCounterQRToken, verifySignedQRToken } from './crypto';
+import { MessReview, PromoCode, Announcement, CustomerNotification } from '@/types';
 
 export interface PlanData {
   id: string;
@@ -83,6 +84,11 @@ export interface ProviderData {
   address: string;
   locality: string;
   city: string;
+  rating: number;
+  total_reviews: number;
+  cuisines: string[];
+  dietary_types: ('veg' | 'non_veg' | 'jain')[];
+  distance_km?: number;
   status: 'draft' | 'pending_review' | 'active' | 'rejected' | 'suspended';
   created_at: string;
 }
@@ -96,6 +102,10 @@ class PlatformStore {
   redemptions: Map<string, RedemptionData> = new Map();
   invoices: Map<string, InvoiceData> = new Map();
   providerScanCounts: Map<string, { total: number; unbilled: number }> = new Map();
+  reviews: Map<string, MessReview> = new Map();
+  promos: Map<string, PromoCode> = new Map();
+  announcements: Map<string, Announcement> = new Map();
+  notifications: Map<string, CustomerNotification> = new Map();
 
   constructor() {
     this.seedDemoData();
@@ -114,11 +124,37 @@ class PlatformStore {
       address: '14, 5th Cross, 1st Main, Marathahalli',
       locality: 'Marathahalli',
       city: 'Bengaluru',
+      rating: 4.8,
+      total_reviews: 124,
+      cuisines: ['North Indian', 'Home Tiffin', 'Gujarati'],
+      dietary_types: ['veg', 'jain'],
+      distance_km: 0.8,
       status: 'active',
       created_at: new Date().toISOString(),
     });
 
-    // Plans
+    const provId2 = 'prov-annapurna-002';
+    this.providers.set(provId2, {
+      id: provId2,
+      owner_user_id: 'user-owner-002',
+      display_name: 'Annapurna Student Mess',
+      slug: 'annapurna-mess',
+      description: 'Budget-friendly unlimited student meals with special Sunday feasts.',
+      phone: '+91 98765 43211',
+      email: 'contact@annapurnamess.in',
+      address: '88, Near BIMS Hostel, BTM 2nd Stage',
+      locality: 'BTM Layout',
+      city: 'Bengaluru',
+      rating: 4.6,
+      total_reviews: 89,
+      cuisines: ['South Indian', 'North Indian'],
+      dietary_types: ['veg'],
+      distance_km: 1.4,
+      status: 'active',
+      created_at: new Date().toISOString(),
+    });
+
+    // Plans for Provider 1
     const fixedPlanId = 'plan-fixed-1m';
     this.plans.set(fixedPlanId, {
       id: fixedPlanId,
@@ -143,7 +179,7 @@ class PlatformStore {
       description: 'Deducts 1 credit per redemption. Valid for 60 days.',
       plan_type: 'meal_credits',
       duration_days: 60,
-      price_paise: 480000, // ₹4,800
+      price_paise: 480000, // ₹4,800 (₹80/meal)
       currency: 'INR',
       meal_credits: 60,
       daily_meal_limit: 2,
@@ -218,6 +254,78 @@ class PlatformStore {
     });
 
     this.providerScanCounts.set(provId, { total: 185, unbilled: 95 });
+
+    // Seed Promo Codes
+    this.promos.set('WELCOME10', {
+      id: 'promo-welcome10',
+      code: 'WELCOME10',
+      title: 'Welcome 10% Off',
+      description: 'Get 10% discount on any monthly subscription plan.',
+      discount_percent: 10,
+      min_order_paise: 100000, // min ₹1,000
+      max_discount_paise: 50000, // max ₹500
+      is_active: true,
+    });
+
+    this.promos.set('STUDENT50', {
+      id: 'promo-student50',
+      code: 'STUDENT50',
+      title: 'Flat ₹50 Off',
+      description: 'Flat ₹50 off on student flexi meal packs.',
+      flat_discount_paise: 5000, // ₹50
+      min_order_paise: 50000, // min ₹500
+      is_active: true,
+    });
+
+    // Seed Reviews
+    this.reviews.set('rev-001', {
+      id: 'rev-001',
+      provider_id: provId,
+      customer_id: 'cust-demo-002',
+      customer_name: 'Aakash Verma',
+      rating: 5,
+      review_text: 'Best homely food near the engineering college! Soft rotis and excellent dal tadka every single day.',
+      food_quality_score: 5,
+      hygiene_score: 5,
+      tags: ['Homely Taste', 'Soft Rotis', 'Clean'],
+      created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    this.reviews.set('rev-002', {
+      id: 'rev-002',
+      provider_id: provId,
+      customer_id: 'cust-ritik-001',
+      customer_name: 'Ritik Chaurasia',
+      rating: 5,
+      review_text: 'The QR scan redemption is lightning fast at the counter. Paneer butter masala add-on is fantastic.',
+      food_quality_score: 5,
+      hygiene_score: 5,
+      tags: ['Fast Check-in', 'Great Addons'],
+      created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    // Seed Announcements
+    this.announcements.set('ann-001', {
+      id: 'ann-001',
+      provider_id: provId,
+      title: 'Sunday Special Feast!',
+      body: 'Paneer Butter Masala, Gulab Jamun & Jeera Pulao included in all active meal plans this Sunday lunch.',
+      badge_text: 'FEAST',
+      is_featured: true,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    });
+
+    // Seed Notification
+    this.notifications.set('notif-001', {
+      id: 'notif-001',
+      customer_id: 'cust-ritik-001',
+      title: 'Lunch is Served!',
+      message: 'Radhe Mess lunch counter is open till 03:00 PM. Scan today’s QR code to redeem.',
+      notification_type: 'menu_update',
+      is_read: false,
+      created_at: new Date().toISOString(),
+    });
   }
 }
 
@@ -431,6 +539,18 @@ export function processMealRedemption(params: {
   scanRecord.unbilled += 1;
   platformStore.providerScanCounts.set(providerId, scanRecord);
 
+  // 7. Add In-App Notification for customer
+  const notifId = `notif-${Date.now()}`;
+  platformStore.notifications.set(notifId, {
+    id: notifId,
+    customer_id: params.userId,
+    title: `Meal Redeemed: ${activeSlot}`,
+    message: `Your ${activeSlot} meal was redeemed successfully.${newCredits !== null ? ` Remaining meals: ${newCredits}.` : ''}`,
+    notification_type: 'meal_redemption',
+    is_read: false,
+    created_at: new Date().toISOString(),
+  });
+
   return {
     success: true,
     slot: activeSlot,
@@ -438,6 +558,155 @@ export function processMealRedemption(params: {
     amount_extra: extraPaise / 100,
     redemption_id: redemptionId,
     message: `Meal successfully redeemed for ${activeSlot}!${extraPaise > 0 ? ` Extras added: ₹${extraPaise / 100}` : ''}`,
+  };
+}
+
+/** Provider Check-In Flow: Provider scans customer ID / QR code */
+export function processStudentCheckin(params: {
+  providerId: string;
+  studentIdOrQr: string;
+  slot?: string;
+}): {
+  success: boolean;
+  student_id: string;
+  slot: string;
+  plan_type?: string;
+  remaining_credits?: number | null;
+  message: string;
+} {
+  const activeSlot = params.slot || getCurrentMealSlot();
+  const today = getIndiaDateString();
+
+  // Extract student id from QR payload or direct string
+  let studentId = params.studentIdOrQr.trim();
+  if (studentId.includes('|')) {
+    studentId = studentId.split('|')[0];
+  }
+
+  // 1. Check duplicate checkin
+  const alreadyRedeemed = Array.from(platformStore.redemptions.values()).find(
+    (r) => r.user_id === studentId && r.provider_id === params.providerId && r.date === today && r.slot === activeSlot
+  );
+
+  if (alreadyRedeemed) {
+    return {
+      success: false,
+      student_id: studentId,
+      slot: activeSlot,
+      message: `Student already checked in for ${activeSlot} today.`,
+    };
+  }
+
+  // 2. Check active subscription
+  const activeSub = Array.from(platformStore.subscriptions.values()).find(
+    (s) => s.customer_id === studentId && s.provider_id === params.providerId && s.status === 'active'
+  );
+
+  if (!activeSub) {
+    return {
+      success: false,
+      student_id: studentId,
+      slot: activeSlot,
+      message: 'No active meal plan found for this student at your mess.',
+    };
+  }
+
+  // 3. Deduct credit if Tracker plan
+  let newCredits: number | null = null;
+  if (activeSub.plan_type === 'meal_credits') {
+    const currentCredits = activeSub.remaining_meal_credits ?? 0;
+    if (currentCredits <= 0) {
+      return {
+        success: false,
+        student_id: studentId,
+        slot: activeSlot,
+        message: 'Student has zero meal credits remaining.',
+      };
+    }
+    newCredits = currentCredits - 1;
+    activeSub.remaining_meal_credits = newCredits;
+    if (newCredits === 0) activeSub.status = 'expired';
+  }
+
+  // 4. Record redemption
+  const redId = `red-staff-${Date.now()}`;
+  platformStore.redemptions.set(redId, {
+    id: redId,
+    user_id: studentId,
+    provider_id: params.providerId,
+    subscription_id: activeSub.id,
+    date: today,
+    slot: activeSlot,
+    amount_extra_paise: 0,
+    extra_items: [],
+    remarks: 'Counter staff manual check-in',
+    redeemed_at: new Date().toISOString(),
+  });
+
+  const scanRecord = platformStore.providerScanCounts.get(params.providerId) || { total: 0, unbilled: 0 };
+  scanRecord.total += 1;
+  scanRecord.unbilled += 1;
+  platformStore.providerScanCounts.set(params.providerId, scanRecord);
+
+  return {
+    success: true,
+    student_id: studentId,
+    slot: activeSlot,
+    plan_type: activeSub.plan_type,
+    remaining_credits: newCredits,
+    message: `Student verified & checked in for ${activeSlot}!`,
+  };
+}
+
+/** Validate promo code and calculate discount */
+export function validateAndApplyPromo(params: {
+  code: string;
+  orderAmountPaise: number;
+}): {
+  isValid: boolean;
+  code: string;
+  discountPaise: number;
+  finalAmountPaise: number;
+  message: string;
+} {
+  const promo = platformStore.promos.get(params.code.trim().toUpperCase());
+  if (!promo || !promo.is_active) {
+    return {
+      isValid: false,
+      code: params.code,
+      discountPaise: 0,
+      finalAmountPaise: params.orderAmountPaise,
+      message: 'Invalid or expired promo code.',
+    };
+  }
+
+  if (params.orderAmountPaise < promo.min_order_paise) {
+    return {
+      isValid: false,
+      code: promo.code,
+      discountPaise: 0,
+      finalAmountPaise: params.orderAmountPaise,
+      message: `Minimum order amount of ₹${promo.min_order_paise / 100} required to use code ${promo.code}.`,
+    };
+  }
+
+  let discount = 0;
+  if (promo.discount_percent) {
+    discount = Math.round((params.orderAmountPaise * promo.discount_percent) / 100);
+    if (promo.max_discount_paise && discount > promo.max_discount_paise) {
+      discount = promo.max_discount_paise;
+    }
+  } else if (promo.flat_discount_paise) {
+    discount = promo.flat_discount_paise;
+  }
+
+  const finalAmount = Math.max(0, params.orderAmountPaise - discount);
+  return {
+    isValid: true,
+    code: promo.code,
+    discountPaise: discount,
+    finalAmountPaise: finalAmount,
+    message: `Promo code ${promo.code} applied! Saved ₹${discount / 100}.`,
   };
 }
 
