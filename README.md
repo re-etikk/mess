@@ -163,11 +163,15 @@ erDiagram
 
 ### Customer Endpoints
 - `GET /api/customer/dashboard`: Active subscription status, remaining credits/validity, today's menu, and recent redemption history.
-- `GET /api/mess/search?q=...&city=...`: Search messes by name, food item, locality, or cuisine.
+- `GET /api/mess/search?q=...&city=...&cuisine=...&dietary=...&sort=...`: Search messes by name, food item, locality, or cuisine with dietary filters and sorting (`rating`, `distance`, `popular`).
 - `GET /api/mess/:id/menu?slot=...`: Today's menu with included items and optional paid extras with prices.
-- `POST /api/subscription/subscribe`: Subscribe to Fixed-Period or Meal-Tracker plan.
+- `POST /api/subscription/subscribe`: Subscribe to Fixed-Period or Meal-Tracker plan with optional promo code discount.
 - `POST /api/subscription/renew`: Renew an expired or existing subscription.
 - `POST /api/meal/daily_purchase`: Buy a single daily meal pass.
+- `GET /api/mess/reviews?provider_id=...` & `POST /api/mess/reviews`: Read and submit customer reviews (1-5 stars, comments, photo URLs).
+- `POST /api/promos/validate`: Validate promo codes (e.g. `WELCOME10`, `STUDENT50`) and calculate instant discounts.
+- `GET /api/notifications` & `PATCH /api/notifications`: Retrieve and mark customer alerts (low meal credits, subscription renewal reminders).
+- `GET /api/announcements`: Broadcast banners and promotional campaigns (e.g., "Midnight Meal 20% off").
 
 ### QR Code & Redemption
 - `POST /api/scan`: Scan provider QR code token to redeem meal.
@@ -184,6 +188,7 @@ erDiagram
 - `GET /api/provider/subscriptions`: List all active subscribers and their plan types.
 - `GET /api/provider/redemptions`: Real-time attendance and scan ledger.
 - `GET /api/provider/reports`: Attendance breakdown by slot, extra revenue, and billing statements.
+- `POST /api/provider/checkin`: Manual/backup student check-in by provider scanning student ID or QR.
 
 ### Admin & Billing Endpoints
 - `GET /api/admin/metrics`: Platform-wide GMV, total redemptions, active subscriptions, and unbilled scans.
@@ -215,7 +220,7 @@ erDiagram
 
 ## 6. Testing & Quality Assurance
 
-- **Vitest Test Suite (`apps/web`)**: 23/23 tests passing covering QR cryptography, tracker deductions, idempotency, extras charges, ₹25/90 scans billing, and webhook validation.
+- **Vitest Test Suite (`apps/web`)**: 30/30 tests passing across 3 test suites covering QR cryptography, tracker deductions, idempotency, extras charges, ₹25/90 scans billing, webhook validation, reviews & ratings, promo code engine, notifications, and student check-in.
 - **Flutter Test Suite**: All unit and widget tests passing across customer and provider apps.
 - **CI/CD Pipeline**: Automated GitHub Actions workflow (`.github/workflows/ci.yml`) runs linting, tests, and build checks on every push to `main`.
 
