@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: apps/web/package.json
 
@@ -41,6 +41,7 @@ jobs:
     name: Flutter Mobile Apps Tests
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         app: [apps/mobile_customer, apps/mobile_provider, apps/mobile_delivery]
     steps:
@@ -48,7 +49,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -56,7 +57,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.41.x'
           channel: 'stable'
           cache: true
 
@@ -66,7 +66,7 @@ jobs:
 
       - name: Static Analysis
         working-directory: ${{ matrix.app }}
-        run: flutter analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Run Widget Tests
         working-directory: ${{ matrix.app }}

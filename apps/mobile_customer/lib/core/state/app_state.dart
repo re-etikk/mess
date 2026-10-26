@@ -188,7 +188,7 @@ class AppState extends ChangeNotifier {
     final redemption = await repository.redeemMeal(qrPayload: payload, customerId: customerId);
     _redeemedSlots.add(entitlementKey);
     _history.insert(0, redemption);
-    if (validSubscription && subscription!.type == SubscriptionType.mealTracker) {
+    if (validSubscription && subscription.type == SubscriptionType.mealTracker) {
       _activeSubscription = ActiveSubscription(
         id: subscription.id,
         providerId: subscription.providerId,
