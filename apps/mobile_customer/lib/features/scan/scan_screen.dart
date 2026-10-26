@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import '../../core/data/demo_data.dart';
 import '../../core/models/mess_models.dart';
 import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
+import '../checkout/checkout_screen.dart';
+import '../plans/plans_screen.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -23,7 +24,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _controller = MobileScannerController(formats: const [BarcodeFormat.qrCode], detectionSpeed: DetectionSpeed.noDuplicates, torchEnabled: false);
+    _controller = MobileScannerController(
+      formats: const [BarcodeFormat.qrCode],
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      torchEnabled: false,
+    );
   }
 
   @override
@@ -50,25 +55,82 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     await _controller.stop();
     if (!mounted) return;
     final state = AppStateScope.of(context);
+    final provider = state.activeProvider;
+
     try {
-      final redemption = await state.redeemDemoQr(payload);
+      final redemption = await state.redeemMealQr(payload);
       if (!mounted) return;
-      await showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.check_circle_rounded, color: MessColors.green, size: 44),
-        title: const Text('Meal marked'),
-        content: Text('${redemption.slotName} at ${redemption.providerName} has been recorded in the local demo.\n\nThe production app must use server-side QR signature verification and atomic meal redemption.'),
-        actions: [FilledButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Done'))],
-      ));
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.check_circle_rounded, color: MessColors.green, size: 48),
+          title: const Text('Meal Verified & Redeemed!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${redemption.slotName} at ${redemption.providerName}',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: MessColors.ink),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                redemption.status,
+                style: const TextStyle(color: MessColors.muted, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              style: FilledButton.styleFrom(backgroundColor: MessColors.orange, foregroundColor: MessColors.ink),
+              child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      );
       if (!mounted) return;
       Navigator.pop(context);
     } on RepositoryException catch (error) {
       if (!mounted) return;
-      await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.error_outline_rounded, color: MessColors.red, size: 40),
-        title: const Text('Could not redeem meal'),
-        content: Text(error.message),
-        actions: [FilledButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Try again'))],
-      ));
+
+      if (error.code == 'no_entitlement') {
+        // Show actionable modal for missing subscription
+        await _showSubscriptionRequiredModal(context, provider, error.message);
+      } else if (error.code == 'duplicate_redemption') {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.warning_amber_rounded, color: MessColors.orange, size: 44),
+            title: const Text('Already Redeemed'),
+            content: Text(error.message, textAlign: TextAlign.center),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Understood'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.error_outline_rounded, color: MessColors.red, size: 40),
+            title: const Text('Could Not Redeem Meal'),
+            content: Text(error.message, textAlign: TextAlign.center),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Try Again'),
+              ),
+            ],
+          ),
+        );
+      }
+
       if (!mounted) return;
       setState(() => _processing = false);
       await _controller.start();
@@ -80,38 +142,173 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _tryDemo() async {
-    final state = AppStateScope.of(context);
-    final provider = state.activeProvider ?? DemoData.providers.first;
-    final now = DateTime.now();
-    final date = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    await _handlePayload('MESS_DEMO|${provider.id}|$date|local-demo-only');
+  Future<void> _showSubscriptionRequiredModal(BuildContext context, MessProvider? provider, String message) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => Container(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF0D8),
+                  borderRadius: BorderRadius.circular(26),
+                ),
+                child: const Icon(Icons.lock_outline_rounded, color: MessColors.orange, size: 30),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'No Active Subscription',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: MessColors.ink),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You do not have an active plan or daily pass for this mess.\n$message',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF68737D), height: 1.45),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(sheetContext);
+                Navigator.pop(context); // close scanner
+                Navigator.push(
+                  context,
+                  messRoute(PlansScreen(provider: provider)),
+                );
+              },
+              icon: const Icon(Icons.star_outline, size: 18),
+              label: const Text('View Plans & Subscribe', style: TextStyle(fontWeight: FontWeight.w800)),
+              style: FilledButton.styleFrom(
+                backgroundColor: MessColors.orange,
+                foregroundColor: MessColors.ink,
+                minimumSize: const Size.fromHeight(50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(sheetContext);
+                if (provider != null) {
+                  final dailyPlan = provider.plans.where((p) => p.type == SubscriptionType.dailyMeal).firstOrNull ??
+                      provider.plans.first;
+                  Navigator.pop(context); // close scanner
+                  Navigator.push(
+                    context,
+                    messRoute(CheckoutScreen(provider: provider, plan: dailyPlan)),
+                  );
+                }
+              },
+              icon: const Icon(Icons.receipt_long_outlined, size: 18),
+              label: const Text('Buy Single Meal Pass (₹95)', style: TextStyle(fontWeight: FontWeight.w700)),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                side: const BorderSide(color: MessColors.orange),
+                foregroundColor: MessColors.orange,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.pop(sheetContext),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF68737D))),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
-    final provider = state.activeProvider ?? DemoData.providers.first;
+    final provider = state.activeProvider;
+    final title = provider != null ? provider.name : 'Counter QR';
+
     return Scaffold(
       backgroundColor: MessColors.navy,
-      appBar: AppBar(backgroundColor: MessColors.navy, foregroundColor: Colors.white, leading: IconButton(onPressed: () => Navigator.maybePop(context), icon: const Icon(Icons.close_rounded)), title: const Text('Scan mess QR', style: TextStyle(color: Colors.white)), actions: [IconButton(tooltip: _torch ? 'Turn torch off' : 'Turn torch on', onPressed: () async { await _controller.toggleTorch(); setState(() => _torch = !_torch); }, icon: Icon(_torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Colors.white))]),
+      appBar: AppBar(
+        backgroundColor: MessColors.navy,
+        foregroundColor: Colors.white,
+        leading: IconButton(
+          onPressed: () => Navigator.maybePop(context),
+          icon: const Icon(Icons.close_rounded),
+        ),
+        title: const Text('Scan Mess QR', style: TextStyle(color: Colors.white)),
+        actions: [
+          IconButton(
+            tooltip: _torch ? 'Turn torch off' : 'Turn torch on',
+            onPressed: () async {
+              await _controller.toggleTorch();
+              setState(() => _torch = !_torch);
+            },
+            icon: Icon(_torch ? Icons.flash_on_rounded : Icons.flash_off_rounded, color: Colors.white),
+          ),
+        ],
+      ),
       body: Column(children: [
-        Padding(padding: const EdgeInsets.fromLTRB(22, 12, 22, 18), child: Column(children: [Text(provider.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20)), const SizedBox(height: 5), const Text('Scan the daily QR displayed at the mess counter.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFD1DBE2), fontSize: 13))])),
-        Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 22), child: ClipRRect(borderRadius: BorderRadius.circular(24), child: Stack(fit: StackFit.expand, children: [
-          MobileScanner(controller: _controller, onDetect: (capture) {
-            final barcode = capture.barcodes.where((b) => b.rawValue != null && b.rawValue!.isNotEmpty).firstOrNull;
-            if (barcode?.rawValue != null) _handlePayload(barcode!.rawValue!);
-          }),
-          IgnorePointer(child: CustomPaint(painter: _ScanOverlayPainter())),
-          if (_processing) Container(color: Colors.black54, child: const Center(child: CircularProgressIndicator(color: MessColors.orange))),
-        ])))),
-        Padding(padding: const EdgeInsets.fromLTRB(22, 18, 22, 26), child: Column(children: [
-          const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.shield_outlined, color: Color(0xFFB8C5CF), size: 17), SizedBox(width: 7), Flexible(child: Text('Only scan the QR shown by your selected mess.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFB8C5CF), fontSize: 11.5)))]),
-          const SizedBox(height: 14),
-          Container(padding: const EdgeInsets.all(11), decoration: BoxDecoration(color: const Color(0xFF243442), borderRadius: BorderRadius.circular(11)), child: const Text('Local demo mode: the server is not connected. A scanned code is not production-verified.', style: TextStyle(color: Color(0xFFE0E6EB), fontSize: 11.5, height: 1.35), textAlign: TextAlign.center)),
-          const SizedBox(height: 12),
-          SizedBox(width: double.infinity, child: TextButton.icon(onPressed: _processing ? null : _tryDemo, icon: const Icon(Icons.science_outlined, color: MessColors.orange), label: const Text('Try demo redemption', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)))),
-        ])),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 12, 22, 18),
+          child: Column(children: [
+            Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20)),
+            const SizedBox(height: 5),
+            const Text('Scan the daily QR code displayed at the mess counter to redeem your meal.', textAlign: TextAlign.center, style: TextStyle(color: Color(0xFFD1DBE2), fontSize: 13)),
+          ]),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Stack(fit: StackFit.expand, children: [
+                MobileScanner(
+                  controller: _controller,
+                  onDetect: (capture) {
+                    final barcode = capture.barcodes.where((b) => b.rawValue != null && b.rawValue!.isNotEmpty).firstOrNull;
+                    if (barcode?.rawValue != null) _handlePayload(barcode!.rawValue!);
+                  },
+                ),
+                IgnorePointer(child: CustomPaint(painter: _ScanOverlayPainter())),
+                if (_processing)
+                  Container(
+                    color: Colors.black54,
+                    child: const Center(child: CircularProgressIndicator(color: MessColors.orange)),
+                  ),
+              ]),
+            ),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(22, 18, 22, 26),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.shield_outlined, color: Color(0xFFB8C5CF), size: 17),
+              SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  'Verified counter redemption · Token valid for today only.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFB8C5CF), fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
       ]),
     );
   }
@@ -122,9 +319,16 @@ class _ScanOverlayPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final dim = Paint()..color = Colors.black.withOpacity(.36);
     final frame = Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: size.width * .72, height: size.width * .72);
-    final path = Path()..addRect(Offset.zero & size)..addRRect(RRect.fromRectAndRadius(frame, const Radius.circular(25)))..fillType = PathFillType.evenOdd;
+    final path = Path()
+      ..addRect(Offset.zero & size)
+      ..addRRect(RRect.fromRectAndRadius(frame, const Radius.circular(25)))
+      ..fillType = PathFillType.evenOdd;
     canvas.drawPath(path, dim);
-    final cornerPaint = Paint()..color = MessColors.orange..strokeWidth = 5..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
+    final cornerPaint = Paint()
+      ..color = MessColors.orange
+      ..strokeWidth = 5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
     const corner = 30.0;
     final r = frame;
     final lines = <List<Offset>>[
@@ -133,10 +337,19 @@ class _ScanOverlayPainter extends CustomPainter {
       [Offset(r.left, r.bottom - corner), Offset(r.left, r.bottom), Offset(r.left + corner, r.bottom)],
       [Offset(r.right - corner, r.bottom), Offset(r.right, r.bottom), Offset(r.right, r.bottom - corner)],
     ];
-    for (final points in lines) { final p = Path()..moveTo(points.first.dx, points.first.dy)..lineTo(points[1].dx, points[1].dy)..lineTo(points.last.dx, points.last.dy); canvas.drawPath(p, cornerPaint); }
+    for (final points in lines) {
+      final p = Path()
+        ..moveTo(points.first.dx, points.first.dy)
+        ..lineTo(points[1].dx, points[1].dy)
+        ..lineTo(points.last.dx, points.last.dy);
+      canvas.drawPath(p, cornerPaint);
+    }
   }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-extension _FirstOrNull<T> on Iterable<T> { T? get firstOrNull => isEmpty ? null : first; }
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}

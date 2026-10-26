@@ -1,0 +1,197 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+class ProviderSession {
+  ProviderSession({
+    required this.token,
+    required this.userId,
+    required this.email,
+    required this.providerId,
+    required this.businessName,
+  });
+
+  final String token;
+  final String userId;
+  final String email;
+  final String providerId;
+  final String businessName;
+}
+
+class DashboardMetrics {
+  DashboardMetrics({
+    required this.todayScans,
+    required this.totalScans,
+    required this.unbilledScans,
+    required this.activeSubscribers,
+    required this.activePlans,
+    required this.currentSlot,
+    required this.todayDate,
+    required this.recentRedemptions,
+  });
+
+  final int todayScans;
+  final int totalScans;
+  final int unbilledScans;
+  final int activeSubscribers;
+  final int activePlans;
+  final String currentSlot;
+  final String todayDate;
+  final List<Map<String, dynamic>> recentRedemptions;
+}
+
+class ProviderApiService {
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://mess-beta.vercel.app',
+  );
+
+  static ProviderSession? currentSession;
+
+  static Future<ProviderSession> login({
+    required String email,
+    required String password,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/auth/login');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'email': email.trim(),
+            'password': password,
+            'role': 'provider',
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+      final provider = data['provider'] as Map<String, dynamic>?;
+      final providerId = user['provider_id'] ?? provider?['id'] ?? 'prov-radhe-001';
+      final businessName = user['provider_name'] ?? provider?['display_name'] ?? 'Radhe Mess';
+
+      final session = ProviderSession(
+        token: data['token'] as String? ?? '',
+        userId: user['id'] as String? ?? 'usr-provider',
+        email: email.trim(),
+        providerId: providerId.toString(),
+        businessName: businessName.toString(),
+      );
+      currentSession = session;
+      return session;
+    } else {
+      throw Exception(data['error'] ?? data['message'] ?? 'Login failed. Please verify credentials.');
+    }
+  }
+
+  static Future<ProviderSession> register({
+    required String businessName,
+    required String ownerName,
+    required String phone,
+    required String email,
+    required String password,
+    required String address,
+    required String city,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/auth/register');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'email': email.trim().isNotEmpty ? email.trim() : '${businessName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}@mess.in',
+            'password': password.isNotEmpty ? password : 'ProviderPass@123',
+            'role': 'provider',
+            'business_name': businessName.trim(),
+            'name': ownerName.trim(),
+            'phone': phone.trim(),
+            'address': address.trim(),
+            'city': city.trim(),
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+      final provider = data['provider'] as Map<String, dynamic>?;
+      final providerId = user['provider_id'] ?? provider?['id'] ?? 'prov-new';
+      final name = user['provider_name'] ?? provider?['display_name'] ?? businessName;
+
+      final session = ProviderSession(
+        token: data['token'] as String? ?? '',
+        userId: user['id'] as String? ?? 'usr-provider',
+        email: email.trim(),
+        providerId: providerId.toString(),
+        businessName: name.toString(),
+      );
+      currentSession = session;
+      return session;
+    } else {
+      throw Exception(data['error'] ?? data['message'] ?? 'Registration failed. Please check inputs.');
+    }
+  }
+
+  static Future<DashboardMetrics> fetchDashboard(String providerId) async {
+    final uri = Uri.parse('$baseUrl/api/provider/dashboard?provider_id=$providerId');
+    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final metrics = data['metrics'] as Map<String, dynamic>? ?? {};
+      final redemptions = (data['today_redemptions'] as List<dynamic>? ?? [])
+          .map((item) => item as Map<String, dynamic>)
+          .toList();
+
+      return DashboardMetrics(
+        todayScans: (metrics['today_scans_count'] as num?)?.toInt() ?? 0,
+        totalScans: (metrics['total_scans'] as num?)?.toInt() ?? 0,
+        unbilledScans: (metrics['unbilled_scans'] as num?)?.toInt() ?? 0,
+        activeSubscribers: (metrics['active_subscribers'] as num?)?.toInt() ?? 0,
+        activePlans: (metrics['active_plans_count'] as num?)?.toInt() ?? 0,
+        currentSlot: (data['current_slot'] as String?) ?? 'LUNCH',
+        todayDate: (data['today_date'] as String?) ?? '',
+        recentRedemptions: redemptions,
+      );
+    }
+    throw Exception('Failed to load dashboard metrics.');
+  }
+
+  static Future<String> fetchDailyQrToken(String providerId, {String? slot}) async {
+    final slotQuery = slot != null ? '&slot=$slot' : '';
+    final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
+    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return (data['token'] as String?) ?? '';
+    }
+    throw Exception('Failed to generate daily QR token.');
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchSubscribers(String providerId) async {
+    final uri = Uri.parse('$baseUrl/api/provider/subscriptions?provider_id=$providerId');
+    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = (data['subscriptions'] as List<dynamic>? ?? [])
+          .map((e) => e as Map<String, dynamic>)
+          .toList();
+      return list;
+    }
+    return [];
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchAttendance(String providerId, {String? date}) async {
+    final dateQuery = date != null ? '&date=$date' : '';
+    final uri = Uri.parse('$baseUrl/api/provider/redemptions?provider_id=$providerId$dateQuery');
+    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final list = (data['redemptions'] as List<dynamic>? ?? [])
+          .map((e) => e as Map<String, dynamic>)
+          .toList();
+      return list;
+    }
+    return [];
+  }
+}

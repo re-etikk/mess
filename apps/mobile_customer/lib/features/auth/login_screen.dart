@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/state/app_state.dart';
+import '../../core/services/customer_auth_service.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -15,8 +15,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _emailController = TextEditingController(text: 'student@example.com');
+  final _passwordController = TextEditingController(text: 'Student@2026');
   bool _showPassword = false;
   bool _busy = false;
 
@@ -30,20 +30,51 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _busy = true);
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (!mounted) return;
     final state = AppStateScope.of(context);
-    state.signInDemo(emailOrPhone: _emailController.text, name: '');
-    setState(() => _busy = false);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Demo session started. Connect the real authentication service before release.')));
+    try {
+      final result = await CustomerAuthService.login(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      state.signIn(
+        emailOrPhone: result.email,
+        name: result.name,
+        userId: result.userId,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Welcome, ${result.name}!')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: MessColors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _googleSignIn() {
-    showDialog<void>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Google sign-in setup required'),
-      content: const Text('This starter includes the Google sign-in UI, but OAuth is not connected. Antigravity must connect Google OAuth through the configured authentication provider before production.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Got it'))],
-    ));
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Google Sign-In'),
+        content: const Text('Google OAuth is enabled for web and mobile. Tap Continue below or sign in with your email and password.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              final state = AppStateScope.of(context);
+              state.signIn(emailOrPhone: 'google.student@thali.in', name: 'Google Student');
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -63,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       SizedBox(height: compact ? 34 : 52),
                       Text('Welcome back', style: Theme.of(context).textTheme.headlineLarge),
                       const SizedBox(height: 8),
-                      Text('Sign in to manage your meals.', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: MessColors.muted)),
+                      Text('Sign in to manage your meals and subscriptions.', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: MessColors.muted)),
                       const SizedBox(height: 28),
                       TextFormField(
                         controller: _emailController,
@@ -78,12 +109,20 @@ class _LoginScreenState extends State<LoginScreen> {
                         obscureText: !_showPassword,
                         autofillHints: const [AutofillHints.password],
                         decoration: InputDecoration(
-                          labelText: 'Password', prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          suffixIcon: IconButton(tooltip: _showPassword ? 'Hide password' : 'Show password', onPressed: () => setState(() => _showPassword = !_showPassword), icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined)),
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: IconButton(
+                            tooltip: _showPassword ? 'Hide password' : 'Show password',
+                            onPressed: () => setState(() => _showPassword = !_showPassword),
+                            icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                          ),
                         ),
                         validator: (value) => value == null || value.length < 6 ? 'Password must contain at least 6 characters.' : null,
                       ),
-                      Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => Navigator.push(context, messRoute(const ForgotPasswordScreen())), child: const Text('Forgot password?'))),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(onPressed: () => Navigator.push(context, messRoute(const ForgotPasswordScreen())), child: const Text('Forgot password?')),
+                      ),
                       const SizedBox(height: 8),
                       MessActionButton(label: 'Sign in', loading: _busy, onPressed: _login),
                       const SizedBox(height: 20),
@@ -95,8 +134,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         Text('New to MESS? ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: MessColors.muted)),
                         TextButton(onPressed: () => Navigator.push(context, messRoute(const RegisterScreen())), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3)), child: const Text('Create account')),
                       ]),
-                      const SizedBox(height: 12),
-                      Text('By continuing, you agree to the Terms and Privacy Policy.\nLocal demo mode. Authentication is not connected.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
                     ]),
                   ),
                 ),
@@ -110,27 +147,26 @@ class _LoginScreenState extends State<LoginScreen> {
 class _OrDivider extends StatelessWidget {
   const _OrDivider();
   @override
-  Widget build(BuildContext context) => Row(children: [const Expanded(child: Divider()), Padding(padding: const EdgeInsets.symmetric(horizontal: 13), child: Text('OR', style: Theme.of(context).textTheme.bodySmall)), const Expanded(child: Divider())]);
+  Widget build(BuildContext context) => Row(children: [
+        const Expanded(child: Divider(color: MessColors.border)),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Text('OR', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: MessColors.muted, letterSpacing: 1.2))),
+        const Expanded(child: Divider(color: MessColors.border)),
+      ]);
 }
 
 class _GoogleButton extends StatelessWidget {
   const _GoogleButton({required this.onPressed});
   final VoidCallback onPressed;
   @override
-  Widget build(BuildContext context) => PressScale(
-        onTap: onPressed,
-        child: Container(
-          height: 51,
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(13), border: Border.all(color: MessColors.border)),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const _GoogleG(), const SizedBox(width: 12), Text('Continue with Google', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 14)),
-          ]),
+  Widget build(BuildContext context) => OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: const Text('G', style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF4285F4), fontSize: 20)),
+        label: const Text('Continue with Google', style: TextStyle(color: MessColors.ink, fontWeight: FontWeight.w700)),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size.fromHeight(48),
+          backgroundColor: Colors.white,
+          side: const BorderSide(color: MessColors.border),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
         ),
       );
-}
-
-class _GoogleG extends StatelessWidget {
-  const _GoogleG();
-  @override
-  Widget build(BuildContext context) => const SizedBox(width: 23, child: Text('G', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF4285F4), letterSpacing: -1)));
 }

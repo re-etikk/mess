@@ -1,41 +1,27 @@
 import 'package:flutter/foundation.dart';
 
-import '../data/demo_data.dart';
 import '../models/mess_models.dart';
-import '../repositories/demo_mess_repository.dart';
+import '../repositories/http_mess_repository.dart';
 import '../repositories/mess_repository.dart';
 
 class AppState extends ChangeNotifier {
-  AppState({MessRepository? repository}) : repository = repository ?? DemoMessRepository() {
-    final now = DateTime.now();
-    _activeSubscription = ActiveSubscription(
-      id: 'demo-active-subscription',
-      providerId: 'radhe-mess',
-      providerName: 'Radhe Mess',
-      planName: '30-meal tracker',
-      type: SubscriptionType.mealTracker,
-      startDate: now.subtract(const Duration(days: 12)),
-      endDate: now.add(const Duration(days: 18)),
-      slotIds: const ['lunch', 'dinner'],
-      totalMeals: 30,
-      mealsUsed: 12,
-    );
-  }
+  AppState({MessRepository? repository}) : repository = repository ?? HttpMessRepository();
 
   final MessRepository repository;
   bool isSignedIn = false;
-  bool isDemoMode = true;
-  String customerId = 'demo-customer-001';
+  bool isDemoMode = false;
+  String customerId = 'cust-ritik-001';
   String customerName = 'Student';
   String customerEmail = 'student@example.com';
   String location = 'IIT Hostel, Sector 62';
-  String selectedProviderId = 'radhe-mess';
+  String selectedProviderId = 'prov-radhe-001';
   ActiveSubscription? _activeSubscription;
   DailyMealEntitlement? _dailyMeal;
   final Set<String> _redeemedSlots = <String>{};
   final List<MealRedemption> _history = <MealRedemption>[];
   final Map<String, int> _pendingAddOns = <String, int>{};
   int currentTab = 0;
+  List<MessProvider> _cachedProviders = [];
 
   ActiveSubscription? get activeSubscription => _activeSubscription;
   DailyMealEntitlement? get dailyMeal => _dailyMeal;
@@ -43,27 +29,50 @@ class AppState extends ChangeNotifier {
   Map<String, int> get pendingAddOns => Map.unmodifiable(_pendingAddOns);
   bool get hasActiveSubscription => _activeSubscription != null && _activeSubscription!.isValidToday && _activeSubscription!.hasMealsRemaining;
   bool get hasAnyMealAccess => hasActiveSubscription || (_dailyMeal?.isPaid == true && _dailyMeal!.isForToday(DateTime.now()));
-  bool get canOpenScanner => hasAnyMealAccess;
+  bool get canOpenScanner => true;
 
   MessProvider? get activeProvider {
     final activeId = _activeSubscription?.isValidToday == true ? _activeSubscription!.providerId : null;
     final dailyId = _dailyMeal != null && _dailyMeal!.isForToday(DateTime.now()) ? _dailyMeal!.providerId : null;
     final id = activeId ?? dailyId ?? selectedProviderId;
-    return DemoData.providers.where((item) => item.id == id).firstOrNull;
+    return _cachedProviders.where((item) => item.id == id).firstOrNull;
   }
 
-  Future<List<MessProvider>> getProviders() => repository.getProviders();
-  Future<MessProvider?> getProvider(String id) => repository.getProvider(id);
+  Future<List<MessProvider>> getProviders() async {
+    final providers = await repository.getProviders();
+    _cachedProviders = providers;
+    if (_cachedProviders.isNotEmpty && (selectedProviderId.isEmpty || !_cachedProviders.any((p) => p.id == selectedProviderId))) {
+      selectedProviderId = _cachedProviders.first.id;
+    }
+    return providers;
+  }
 
-  void signInDemo({required String emailOrPhone, required String name}) {
-    customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@demo.local';
+  Future<MessProvider?> getProvider(String id) async {
+    final provider = await repository.getProvider(id);
+    if (provider != null && !_cachedProviders.any((p) => p.id == provider.id)) {
+      _cachedProviders.add(provider);
+    }
+    return provider;
+  }
+
+  void signIn({required String emailOrPhone, required String name, String? userId}) {
+    customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
     customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
+    if (userId != null && userId.isNotEmpty) {
+      customerId = userId;
+    }
     isSignedIn = true;
     notifyListeners();
   }
 
+  void signInDemo({required String emailOrPhone, required String name}) => signIn(emailOrPhone: emailOrPhone, name: name);
+
   void signOut() {
     isSignedIn = false;
+    _activeSubscription = null;
+    _dailyMeal = null;
+    _redeemedSlots.clear();
+    _pendingAddOns.clear();
     currentTab = 0;
     notifyListeners();
   }
@@ -75,32 +84,6 @@ class AppState extends ChangeNotifier {
 
   void selectTab(int index) {
     currentTab = index;
-    notifyListeners();
-  }
-
-  void previewNoSubscription() {
-    _activeSubscription = null;
-    _dailyMeal = null;
-    _redeemedSlots.clear();
-    _pendingAddOns.clear();
-    notifyListeners();
-  }
-
-  void previewTrackerSubscription() {
-    final now = DateTime.now();
-    _activeSubscription = ActiveSubscription(
-      id: 'demo-preview-tracker',
-      providerId: 'radhe-mess',
-      providerName: 'Radhe Mess',
-      planName: '30-meal tracker',
-      type: SubscriptionType.mealTracker,
-      startDate: now.subtract(const Duration(days: 12)),
-      endDate: now.add(const Duration(days: 18)),
-      slotIds: const ['lunch', 'dinner'],
-      totalMeals: 30,
-      mealsUsed: 12,
-    );
-    _dailyMeal = null;
     notifyListeners();
   }
 
@@ -124,9 +107,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) async {
+  Future<ActiveSubscription> purchasePlan(MealPlan plan) async {
     if (plan.type == SubscriptionType.dailyMeal) {
-      throw const RepositoryException('Use purchaseDailyMealDemo for a daily meal.', code: 'wrong_plan_type');
+      throw const RepositoryException('Use purchaseDailyMeal for a daily meal pass.', code: 'wrong_plan_type');
     }
     final subscription = await repository.purchasePlan(plan: plan, customerId: customerId);
     _activeSubscription = subscription;
@@ -137,7 +120,9 @@ class AppState extends ChangeNotifier {
     return subscription;
   }
 
-  Future<DailyMealEntitlement> purchaseDailyMealDemo(MealPlan plan, String slotId) async {
+  Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) => purchasePlan(plan);
+
+  Future<DailyMealEntitlement> purchaseDailyMeal(MealPlan plan, String slotId) async {
     if (plan.type != SubscriptionType.dailyMeal) {
       throw const RepositoryException('This plan is not a daily meal.', code: 'wrong_plan_type');
     }
@@ -149,82 +134,81 @@ class AppState extends ChangeNotifier {
     return entitlement;
   }
 
-  Future<MealRedemption> redeemDemoQr(String payload) async {
-    final parts = payload.split('|');
-    if (parts.length < 3) {
-      throw const RepositoryException('This QR code is not recognised.', code: 'invalid_qr');
+  Future<DailyMealEntitlement> purchaseDailyMealDemo(MealPlan plan, String slotId) => purchaseDailyMeal(plan, slotId);
+
+  Future<MealRedemption> redeemMealQr(String payload) async {
+    final trimmed = payload.trim();
+    String providerId = selectedProviderId;
+    String slotName = 'Lunch';
+
+    if (trimmed.startsWith('MESS_QR|') || trimmed.startsWith('MESS_DEMO|')) {
+      final parts = trimmed.split('|');
+      if (parts.length >= 2) providerId = parts[1];
+      if (parts.length >= 4 && parts[3] != 'ALL') slotName = parts[3];
     }
-    final providerId = parts[1];
+
     final today = _dateKey(DateTime.now());
-    if (parts.length < 4 || parts[0] != 'MESS_DEMO' || parts[2] != today) {
-      throw const RepositoryException('This code is invalid or expired. Ask the mess staff for today’s QR.', code: 'expired_or_invalid_qr');
-    }
-    final provider = await repository.getProvider(providerId);
-    if (provider == null) throw const RepositoryException('Mess not found.', code: 'provider_not_found');
-    final now = DateTime.now();
-    final slot = provider.mealSlots.where((item) => item.contains(now)).firstOrNull;
-    if (slot == null) throw const RepositoryException('No meal is being served right now.', code: 'no_active_slot');
-
-    final entitlementKey = '$providerId|$today|${slot.id}';
+    final entitlementKey = '$providerId|$today|${slotName.toLowerCase()}';
     if (_redeemedSlots.contains(entitlementKey)) {
-      throw const RepositoryException('This meal has already been marked for today.', code: 'duplicate_meal');
+      throw RepositoryException('Meal already redeemed for $slotName today.', code: 'duplicate_redemption');
     }
 
-    final subscription = _activeSubscription;
-    final validSubscription = subscription != null &&
-        subscription.providerId == providerId &&
-        subscription.isValidToday &&
-        subscription.slotIds.contains(slot.id) &&
-        subscription.hasMealsRemaining;
-    final validDaily = _dailyMeal != null &&
-        _dailyMeal!.providerId == providerId &&
-        _dailyMeal!.slotId == slot.id &&
-        _dailyMeal!.isPaid &&
-        _dailyMeal!.isForToday(now);
-    if (!validSubscription && !validDaily) {
-      throw const RepositoryException('No eligible plan or paid daily meal was found for this mess and meal slot.', code: 'no_entitlement');
-    }
-
+    // Call backend API /api/scan to verify QR token & customer entitlement
     final redemption = await repository.redeemMeal(qrPayload: payload, customerId: customerId);
+
     _redeemedSlots.add(entitlementKey);
     _history.insert(0, redemption);
-    if (validSubscription && subscription.type == SubscriptionType.mealTracker) {
+
+    // If tracker plan, decrement locally to keep UI in sync
+    final sub = _activeSubscription;
+    if (sub != null && sub.type == SubscriptionType.mealTracker && sub.mealsRemaining != null) {
       _activeSubscription = ActiveSubscription(
-        id: subscription.id,
-        providerId: subscription.providerId,
-        providerName: subscription.providerName,
-        planName: subscription.planName,
-        type: subscription.type,
-        startDate: subscription.startDate,
-        endDate: subscription.endDate,
-        slotIds: subscription.slotIds,
-        totalMeals: subscription.totalMeals,
-        mealsUsed: subscription.mealsUsed + 1,
+        id: sub.id,
+        providerId: sub.providerId,
+        providerName: sub.providerName,
+        planName: sub.planName,
+        type: sub.type,
+        startDate: sub.startDate,
+        endDate: sub.endDate,
+        slotIds: sub.slotIds,
+        totalMeals: sub.totalMeals,
+        mealsUsed: sub.mealsUsed + 1,
       );
     }
-    if (validDaily) _dailyMeal = null;
+    if (_dailyMeal != null) _dailyMeal = null;
+
     notifyListeners();
     return redemption;
   }
 
-  void recordDemoAddOnPayment({required String providerName, required List<CartAddOn> addOns}) {
+  Future<MealRedemption> redeemDemoQr(String payload) => redeemMealQr(payload);
+
+  void recordAddOnPayment({required String providerName, required List<CartAddOn> addOns}) {
     if (addOns.isEmpty) return;
     final now = DateTime.now();
-    _history.insert(0, MealRedemption(id: 'demo-addon-${now.microsecondsSinceEpoch}', providerName: providerName, slotName: 'Food extras', redeemedAt: now, status: 'Paid in local demo'));
+    _history.insert(
+      0,
+      MealRedemption(
+        id: 'addon-${now.microsecondsSinceEpoch}',
+        providerName: providerName,
+        slotName: 'Food extras',
+        redeemedAt: now,
+        status: 'Paid successfully',
+      ),
+    );
     _pendingAddOns.clear();
     notifyListeners();
   }
 
-  bool isSlotRedeemed(String providerId, String slotId, DateTime date) => _redeemedSlots.contains('$providerId|${_dateKey(date)}|$slotId');
+  void recordDemoAddOnPayment({required String providerName, required List<CartAddOn> addOns}) => recordAddOnPayment(providerName: providerName, addOns: addOns);
+
+  bool isSlotRedeemed(String providerId, String slotId, DateTime date) => _redeemedSlots.contains('$providerId|${_dateKey(date)}|${slotId.toLowerCase()}');
 
   static String _dateKey(DateTime date) => '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
   static String _nameFromEmail(String email) {
     final local = email.split('@').first.replaceAll(RegExp(r'[._-]+'), ' ').trim();
     if (local.isEmpty) return 'Student';
     return local.split(' ').map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}').join(' ');
   }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }
