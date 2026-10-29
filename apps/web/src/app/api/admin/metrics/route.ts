@@ -29,6 +29,11 @@ export async function GET() {
   return NextResponse.json({
     success: true,
     platform: 'Thali (MESS)',
+    backend_status: {
+      backend_enabled: process.env.NEXT_PUBLIC_BACKEND_ENABLED || 'not_set',
+      has_supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    },
     providers: {
       total: providers.length,
       active: providers.filter((p) => p.status === 'active').length,
