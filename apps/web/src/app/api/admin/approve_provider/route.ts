@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
 import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
 
 export async function POST(req: NextRequest) {
   try {
+    // Enforce administrative authentication & authorization
+    const auth = await requireAdmin(req);
+    if (!auth.ok) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.status }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
     const providerId = body.provider_id || body.providerId;
     const decision = body.decision; // 'approve' | 'reject' | 'suspend'
@@ -20,7 +29,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Update in Supabase
     try {
-      const admin = getAdminClient();
+      const admin = auth.admin || getAdminClient();
       if (admin) {
         await admin
           .from('providers')

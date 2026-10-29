@@ -8,7 +8,8 @@ import 'features/auth/login_screen.dart';
 import 'features/home/home_shell.dart';
 
 class MessApp extends StatelessWidget {
-  const MessApp({super.key});
+  const MessApp({super.key, required this.appState});
+  final AppState appState;
 
   @override
   Widget build(BuildContext context) {
@@ -16,6 +17,10 @@ class MessApp extends StatelessWidget {
       title: 'MESS | Your Meals, Your Choice',
       debugShowCheckedModeBanner: false,
       theme: MessTheme.light(),
+      builder: (context, child) => AppStateScope(
+        notifier: appState,
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: const _MessRootGate(),
       onGenerateRoute: (settings) {
         if (settings.name == '/login') return messRoute(const LoginScreen());

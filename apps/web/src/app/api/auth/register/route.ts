@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { getAdminClient } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const email = body.email?.trim().toLowerCase();
     const password = body.password;
-    const role = body.role || 'customer'; // 'customer' | 'provider' | 'admin'
+    const requestedRole = (body.role || 'customer').toLowerCase();
     const name = body.name || body.display_name || body.business_name || email?.split('@')[0] || 'User';
     const phone = body.phone || '';
 
@@ -18,8 +19,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (password.length < 6) {
+      return NextResponse.json(
+        { success: false, error: 'Password must be at least 6 characters long.' },
+        { status: 400 }
+      );
+    }
+
+    // Security check: Prevent public self-registration of administrative privileges
+    if (requestedRole === 'admin') {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Administrator accounts cannot be self-registered.' },
+        { status: 403 }
+      );
+    }
+
+    const role = requestedRole === 'provider' ? 'provider' : 'customer';
     const userId = `usr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-    const token = `jwt_mock_${Buffer.from(JSON.stringify({ userId, email, role })).toString('base64url')}`;
+    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email, role })).toString('base64url')}`;
 
     let providerData = null;
     if (role === 'provider') {
@@ -41,11 +58,57 @@ export async function POST(req: NextRequest) {
         total_reviews: 0,
         cuisines: body.cuisines || ['North Indian', 'Homestyle'],
         dietary_types: body.dietary_types || ['veg'],
-        status: 'active' as const,
+        status: 'pending_review' as const,
         created_at: new Date().toISOString(),
       };
       platformStore.providers.set(providerId, providerData);
       seedProviderPlansAndMenu(providerId);
+
+      // Persist to Supabase GoTrue Auth and Providers table if admin client available
+      try {
+        const admin = getAdminClient();
+        if (admin) {
+          await admin.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              role: 'provider',
+              display_name: businessName,
+              phone,
+              application: {
+                id: providerId,
+                display_name: businessName,
+                public_phone: phone,
+                email,
+                status: 'pending_review',
+                created_at: new Date().toISOString(),
+              },
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('Supabase provider registration note:', err);
+      }
+    } else {
+      // Customer registration in Supabase
+      try {
+        const admin = getAdminClient();
+        if (admin) {
+          await admin.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              role: 'customer',
+              display_name: name,
+              phone,
+            },
+          });
+        }
+      } catch (err) {
+        console.warn('Supabase customer registration note:', err);
+      }
     }
 
     return NextResponse.json({

@@ -597,7 +597,10 @@ class ProviderApiService {
       final response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+            },
             body: jsonEncode({
               'provider_id': providerId,
               'is_open': isOpen,

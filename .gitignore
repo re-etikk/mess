@@ -62,3 +62,4 @@ supabase/.temp/
 # Compiled APK binaries (exceeds GitHub 100MB limit; kept locally in project root)
 apks/
 *.apk
+*.tsbuildinfo

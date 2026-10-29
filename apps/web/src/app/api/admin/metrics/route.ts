@@ -1,10 +1,15 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { platformStore } from '@/lib/platform-service';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+
   const providers = Array.from(platformStore.providers.values());
   const subscriptions = Array.from(platformStore.subscriptions.values());
   const redemptions = Array.from(platformStore.redemptions.values());

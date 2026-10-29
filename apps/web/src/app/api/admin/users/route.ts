@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/supabase/admin';
 
 export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+
   // Returns user directory
   const users = [
     {

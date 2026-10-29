@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { createClient as createSessionClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,90 +22,144 @@ export async function POST(req: NextRequest) {
     const email = rawIdentifier.toLowerCase();
     const cleanDigits = rawIdentifier.replace(/\D/g, '');
 
-    let role = requestedRole || 'customer';
-    if (email.includes('admin') || email === 'ritik45chaurasia@gmail.com') {
-      role = 'admin';
-    } else if (email.includes('owner') || email.includes('provider') || requestedRole === 'provider') {
-      role = 'provider';
-    }
-
+    let authenticatedUserId: string | null = null;
+    let authenticatedEmail: string = email;
+    let resolvedRole: string = requestedRole || 'customer';
     let providerData: any = null;
 
-    if (role === 'provider') {
-      // 1. Check in platformStore
-      let found = Array.from(platformStore.providers.values()).find(
-        (p) =>
-          p.email.toLowerCase() === email ||
-          (cleanDigits.length >= 7 && p.phone.replace(/\D/g, '').includes(cleanDigits)) ||
-          p.id === rawIdentifier ||
-          p.slug === email
-      );
+    // 1. Attempt Supabase Auth Password Verification
+    let supabaseAuthSucceeded = false;
+    try {
+      const sessionClient = await createSessionClient();
+      const { data: authData, error: authError } = await sessionClient.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      // 2. Check in Supabase Auth users metadata
-      if (!found) {
+      if (!authError && authData.user) {
+        supabaseAuthSucceeded = true;
+        authenticatedUserId = authData.user.id;
+        authenticatedEmail = authData.user.email || email;
+
+        // Check if user has explicit admin role
+        const { data: roleRow } = await sessionClient
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', authData.user.id)
+          .is('revoked_at', null)
+          .maybeSingle();
+
+        if (roleRow?.role === 'admin' || authenticatedEmail === 'ritik45chaurasia@gmail.com') {
+          resolvedRole = 'admin';
+        } else if (authData.user.user_metadata?.role === 'provider' || requestedRole === 'provider') {
+          resolvedRole = 'provider';
+        } else {
+          resolvedRole = 'customer';
+        }
+      }
+    } catch {
+      // Supabase unconfigured or offline fallback
+    }
+
+    // 2. If Supabase Auth failed or unconfigured, check Supabase Admin / user metadata credentials
+    if (!supabaseAuthSucceeded) {
+      const admin = getAdminClient();
+      let matchedUser: any = null;
+
+      if (admin) {
         try {
-          const admin = getAdminClient();
-          if (admin) {
-            const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 100 });
-            if (usersData?.users) {
-              const matchedUser = usersData.users.find((u) => {
-                const meta = u.user_metadata || {};
-                const uPhoneDigits = (meta.phone || '').replace(/\D/g, '');
-                return (
-                  u.id === rawIdentifier ||
-                  u.email?.toLowerCase() === email ||
-                  (cleanDigits.length >= 7 && uPhoneDigits.includes(cleanDigits)) ||
-                  meta.application?.id === rawIdentifier
-                );
-              });
+          const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 100 });
+          if (usersData?.users) {
+            matchedUser = usersData.users.find((u) => {
+              const meta = u.user_metadata || {};
+              const uPhoneDigits = (meta.phone || '').replace(/\D/g, '');
+              const matchesIdentifier =
+                u.id === rawIdentifier ||
+                u.email?.toLowerCase() === email ||
+                (cleanDigits.length >= 7 && uPhoneDigits.includes(cleanDigits)) ||
+                meta.application?.id === rawIdentifier;
 
-              if (matchedUser) {
-                const meta = matchedUser.user_metadata || {};
-                const app = meta.application || {};
-                found = {
-                  id: app.id || matchedUser.id,
-                  owner_user_id: matchedUser.id,
-                  display_name: app.display_name || meta.display_name || 'My Mess',
-                  slug: app.slug || `mess-${matchedUser.id.slice(0, 6)}`,
-                  description: app.description || 'Homestyle daily meals.',
-                  phone: app.public_phone || meta.phone || rawIdentifier,
-                  email: matchedUser.email || `${app.id || matchedUser.id}@thali.mess`,
-                  address: app.address_line1 || 'Address on file',
-                  locality: app.locality || 'Campus Area',
-                  city: app.city || 'Campus Area',
-                  rating: 5.0,
-                  total_reviews: 0,
-                  cuisines: ['North Indian', 'Homestyle'],
-                  dietary_types: ['veg'],
-                  status: app.status || 'active',
-                  created_at: app.created_at || matchedUser.created_at,
-                };
-                platformStore.providers.set(found.id, found);
-                seedProviderPlansAndMenu(found.id);
+              return matchesIdentifier;
+            });
+
+            if (matchedUser) {
+              const meta = matchedUser.user_metadata || {};
+              // Verify password against stored password or initial password
+              const expectedPassword = meta.initial_password || meta.login_password || meta.password;
+              if (expectedPassword && expectedPassword === password) {
+                supabaseAuthSucceeded = true;
+                authenticatedUserId = matchedUser.id;
+                authenticatedEmail = matchedUser.email || email;
+                resolvedRole = (meta.role === 'admin' || authenticatedEmail === 'ritik45chaurasia@gmail.com')
+                  ? 'admin'
+                  : (meta.role === 'provider' || requestedRole === 'provider' ? 'provider' : 'customer');
               }
             }
           }
         } catch {}
       }
+    }
 
-      // 3. Check in PostgreSQL table if available
+    // 3. Fallback verification for demo / offline platformStore accounts
+    if (!supabaseAuthSucceeded) {
+      // Only recognize hardcoded platform accounts if password matches
+      if (email === 'ritik45chaurasia@gmail.com' && (password === 'admin123' || password === 'admin@123' || password === 'Ritik@2026')) {
+        authenticatedUserId = 'usr-admin-ritik';
+        resolvedRole = 'admin';
+        supabaseAuthSucceeded = true;
+      } else if (email === 'owner@radhemess.in' && (password === 'owner123' || password === 'mess123')) {
+        authenticatedUserId = 'prov-radhe-001';
+        resolvedRole = 'provider';
+        supabaseAuthSucceeded = true;
+      } else {
+        // Check if there is an in-memory provider registered with matching password
+        const inMemProvider = Array.from(platformStore.providers.values()).find(
+          (p: any) => (p.email?.toLowerCase() === email || p.id === rawIdentifier) && p.password === password
+        );
+        if (inMemProvider) {
+          authenticatedUserId = inMemProvider.id;
+          resolvedRole = 'provider';
+          providerData = inMemProvider;
+          supabaseAuthSucceeded = true;
+        }
+      }
+    }
+
+    // If all credential verifications failed, reject with 401 Unauthorized
+    if (!supabaseAuthSucceeded) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid email/phone or password. Please verify your credentials.' },
+        { status: 401 }
+      );
+    }
+
+    // 4. If Provider role, resolve associated Kitchen entity
+    if (resolvedRole === 'provider') {
+      // Check in platformStore
+      let found = Array.from(platformStore.providers.values()).find(
+        (p) =>
+          p.email.toLowerCase() === authenticatedEmail ||
+          p.id === authenticatedUserId ||
+          p.owner_user_id === authenticatedUserId ||
+          (cleanDigits.length >= 7 && p.phone.replace(/\D/g, '').includes(cleanDigits))
+      );
+
+      // Check in Supabase DB if not in platformStore
       if (!found) {
         try {
           const admin = getAdminClient();
           if (admin) {
-            let query = admin.from('providers').select('*');
-            if (cleanDigits.length >= 7) {
-              query = query.or(`public_phone.ilike.%${cleanDigits}%,public_email.ilike.%${email}%,id.eq.${rawIdentifier}`);
-            } else {
-              query = query.or(`public_email.ilike.%${email}%,slug.ilike.%${email}%,id.eq.${rawIdentifier}`);
-            }
+            const { data: dbMatches } = await admin
+              .from('providers')
+              .select('*')
+              .or(`owner_user_id.eq.${authenticatedUserId},id.eq.${authenticatedUserId},public_email.ilike.%${authenticatedEmail}%`)
+              .limit(1);
 
-            const { data: dbMatches } = await query.limit(1);
             if (dbMatches && dbMatches.length > 0) {
               const dbP = dbMatches[0];
               found = {
                 id: dbP.id,
-                owner_user_id: dbP.owner_user_id,
+                owner_user_id: dbP.owner_user_id || authenticatedUserId,
                 display_name: dbP.display_name,
                 slug: dbP.slug,
                 description: dbP.description || 'Homestyle daily meals.',
@@ -117,7 +172,7 @@ export async function POST(req: NextRequest) {
                 total_reviews: 0,
                 cuisines: ['North Indian', 'Homestyle'],
                 dietary_types: ['veg'],
-                status: dbP.status,
+                status: dbP.status || 'active',
                 created_at: dbP.created_at,
               };
               platformStore.providers.set(found.id, found);
@@ -132,16 +187,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const userId = providerData?.id || `usr-${role}-${Buffer.from(email).toString('hex').slice(0, 8)}`;
-    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email, role })).toString('base64url')}`;
+    const userId = authenticatedUserId || `usr-${resolvedRole}-${Buffer.from(authenticatedEmail).toString('hex').slice(0, 8)}`;
+    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email: authenticatedEmail, role: resolvedRole })).toString('base64url')}`;
 
     return NextResponse.json({
       success: true,
       user: {
         id: userId,
-        email,
-        name: providerData ? providerData.display_name : email.split('@')[0],
-        role,
+        email: authenticatedEmail,
+        name: providerData ? providerData.display_name : authenticatedEmail.split('@')[0],
+        role: resolvedRole,
         provider_id: providerData?.id,
         provider_name: providerData?.display_name,
       },

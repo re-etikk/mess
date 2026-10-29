@@ -660,85 +660,94 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.85,
-      ),
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: bottomInset + 16,
-      ),
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final screenHeight = MediaQuery.of(context).size.height;
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: SafeArea(
+        top: false,
+        child: Container(
+          constraints: BoxConstraints(
+            maxHeight: screenHeight * 0.80,
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Select Delivery Location',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: MessColors.ink),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Select Delivery Location',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: MessColors.ink),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.close, size: 20),
-                onPressed: () => Navigator.pop(context),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                onChanged: _onQueryChanged,
+                decoration: InputDecoration(
+                  hintText: 'Search hostel, landmark or city (Google Maps)',
+                  prefixIcon: const Icon(Icons.search, color: MessColors.orangeDark),
+                  suffixIcon: _searching
+                      ? const SizedBox(width: 20, height: 20, child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2, color: MessColors.orangeDark)))
+                      : (_controller.text.isNotEmpty
+                          ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _controller.clear(); _onQueryChanged(''); })
+                          : null),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFFE8F5E9),
+                  child: Icon(Icons.my_location_rounded, color: Color(0xFF2E7D32)),
+                ),
+                title: const Text('Use Live Detected Location', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: MessColors.ink)),
+                subtitle: const Text('Auto-detect your hostel or campus area', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+                onTap: () => Navigator.pop(context, 'Sector 62, Noida (Live GPS)'),
+              ),
+              const Divider(height: 16),
+              Flexible(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_suggestions.isNotEmpty) ...[
+                        const Text('Google Maps Suggestions', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: MessColors.muted)),
+                        const SizedBox(height: 8),
+                        ..._suggestions.take(5).map((loc) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.location_on_outlined, color: MessColors.orangeDark),
+                          title: Text(loc, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: MessColors.ink)),
+                          trailing: widget.currentLocation == loc ? const Icon(Icons.check, color: MessColors.green) : null,
+                          onTap: () => Navigator.pop(context, loc),
+                        )),
+                      ] else ...[
+                        const Text('Popular Areas', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: MessColors.muted)),
+                        const SizedBox(height: 8),
+                        ..._quickLocations.map((loc) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.location_on_outlined, color: MessColors.muted),
+                          title: Text(loc, style: const TextStyle(fontSize: 13, color: MessColors.ink)),
+                          trailing: widget.currentLocation == loc ? const Icon(Icons.check, color: MessColors.green) : null,
+                          onTap: () => Navigator.pop(context, loc),
+                        )),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            onChanged: _onQueryChanged,
-            decoration: InputDecoration(
-              hintText: 'Search hostel, landmark or city (Google Maps)',
-              prefixIcon: const Icon(Icons.search, color: MessColors.orangeDark),
-              suffixIcon: _searching
-                  ? const SizedBox(width: 20, height: 20, child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2, color: MessColors.orangeDark)))
-                  : (_controller.text.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _controller.clear(); _onQueryChanged(''); })
-                      : null),
-            ),
-          ),
-          const SizedBox(height: 14),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xFFE8F5E9),
-              child: Icon(Icons.my_location_rounded, color: Color(0xFF2E7D32)),
-            ),
-            title: const Text('Use Live Detected Location', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: MessColors.ink)),
-            subtitle: const Text('Auto-detect your hostel or campus area', style: TextStyle(fontSize: 12, color: MessColors.muted)),
-            onTap: () => Navigator.pop(context, 'Sector 62, Noida (Live GPS)'),
-          ),
-          const Divider(height: 20),
-          if (_suggestions.isNotEmpty) ...[
-            const Text('Google Maps Suggestions', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: MessColors.muted)),
-            const SizedBox(height: 8),
-            ..._suggestions.take(5).map((loc) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.location_on_outlined, color: MessColors.orangeDark),
-              title: Text(loc, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: MessColors.ink)),
-              trailing: widget.currentLocation == loc ? const Icon(Icons.check, color: MessColors.green) : null,
-              onTap: () => Navigator.pop(context, loc),
-            )),
-          ] else ...[
-            const Text('Popular Areas', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: MessColors.muted)),
-            const SizedBox(height: 8),
-            ..._quickLocations.map((loc) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.location_on_outlined, color: MessColors.muted),
-              title: Text(loc, style: const TextStyle(fontSize: 13, color: MessColors.ink)),
-              trailing: widget.currentLocation == loc ? const Icon(Icons.check, color: MessColors.green) : null,
-              onTap: () => Navigator.pop(context, loc),
-            )),
-          ],
-        ],
-      ),
+        ),
       ),
     );
   }

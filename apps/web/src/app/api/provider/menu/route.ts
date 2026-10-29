@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { platformStore, MenuData } from '@/lib/platform-service';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const providerId = body.provider_id || 'prov-radhe-001';
+
+    // Enforce Tenant Authorization / IDOR Protection
+    const auth = await requireProviderOwnership(req, providerId);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const slot = (body.slot || 'LUNCH').toUpperCase();
     const dayOfWeek = body.day_of_week || 'Daily';
     const action = body.action || 'set_menu';

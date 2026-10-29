@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { platformStore, updateProviderStatus, isProviderOpen } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,16 @@ export async function POST(req: NextRequest) {
     const isOpen = Boolean(body.is_open ?? body.isOpen);
 
     if (!providerId) {
-      return NextResponse.json({ error: 'provider_id is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'provider_id is required' }, { status: 400 });
+    }
+
+    // Enforce Tenant Authorization / Prevent IDOR
+    const auth = await requireProviderOwnership(req, providerId);
+    if (!auth.ok) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.status }
+      );
     }
 
     updateProviderStatus(providerId, isOpen);
@@ -57,6 +67,6 @@ export async function POST(req: NextRequest) {
         : '🔴 Kitchen is now marked CLOSED / OFF TODAY. Dark shade applied and scans are paused.',
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Failed to update status' }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message || 'Failed to update status' }, { status: 500 });
   }
 }

@@ -18,7 +18,12 @@ const defaultSettings = {
   updated_at: new Date().toISOString(),
 };
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+
   let settings = defaultSettings;
   let providerAccounts: any[] = [];
 
@@ -75,6 +80,11 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();

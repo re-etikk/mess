@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
 import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
 import { sendProviderApprovalNotice } from '@/lib/notifications';
 
@@ -13,6 +13,11 @@ const ReviewSchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+
   const { searchParams } = new URL(req.url);
   const includeActive = searchParams.get('all') === 'true';
 
@@ -38,7 +43,6 @@ export async function GET(req: NextRequest) {
                 display_name: appData.display_name || meta.display_name || 'Mess Partner',
                 public_phone: appData.public_phone || meta.phone || u.phone || '',
                 email: appData.email || meta.email || u.email || '',
-                initial_password: meta.initial_password || meta.login_password || null,
                 description: appData.description || meta.description || null,
                 address_line1: appData.address_line1 || 'Address on file',
                 locality: appData.locality || null,
@@ -136,6 +140,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();
@@ -291,3 +300,5 @@ export async function PATCH(request: NextRequest) {
       : `Provider application rejected.`,
   });
 }
+
+export const POST = PATCH;
