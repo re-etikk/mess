@@ -13,13 +13,15 @@ void main() async {
   runApp(MessProviderApp(initialSession: savedSession));
 }
 
-const Color ink = Color(0xFF142433);
-const Color orange = Color(0xFFF59A16);
-const Color cream = Color(0xFFFAF6EE);
-const Color card = Color(0xFFFFFDF8);
-const Color muted = Color(0xFF68737D);
-const Color line = Color(0xFFE8E1D6);
-const Color green = Color(0xFF218653);
+const Color ink = Color(0xFF182435);
+const Color orange = Color(0xFFFF6B1A);
+const Color orangePressed = Color(0xFFE94E12);
+const Color orangeSoft = Color(0xFFFFF0E5);
+const Color cream = Color(0xFFFBF6EE);
+const Color card = Color(0xFFFFFFFF);
+const Color muted = Color(0xFF687382);
+const Color line = Color(0xFFE9E0D5);
+const Color green = Color(0xFF1F9D63);
 
 class MessProviderApp extends StatefulWidget {
   const MessProviderApp({super.key, this.initialSession});

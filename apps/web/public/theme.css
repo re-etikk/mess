@@ -1,113 +1,170 @@
-/* theme.css - Thali Customer App Minimal Premium Theme */
+/* theme.css - THALI / MESS Unified Design System */
 :root {
-  --color-cream:   #FCF6E8;
-  --color-navy:    #0B2545;
-  --color-orange:  #FF6F21;
-  --color-white:   #FFFFFF;
-  --color-muted:   #6C7883;
-  --font-sans:     'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-heading:  'Montserrat', sans-serif;
-  --font-lg:       24px;
-  --font-md:       16px;
-  --font-sm:       12px;
-  --radius-card:   12px;
-  --radius-btn:    8px;
-  --shadow:        0 2px 6px rgba(11, 37, 69, 0.08);
+  /* Brand */
+  --mess-bg: #FBF6EE;
+  --mess-surface: #FFFFFF;
+  --mess-ink: #182435;
+  --mess-muted: #687382;
+
+  /* Accent */
+  --mess-orange: #FF6B1A;
+  --mess-orange-pressed: #E94E12;
+  --mess-orange-soft: #FFF0E5;
+
+  /* Status */
+  --mess-success: #1F9D63;
+  --mess-success-soft: #E7F7EE;
+  --mess-error: #B42318;
+  --mess-disabled: #9AA3AC;
+
+  /* Borders and elevation */
+  --mess-border: #E9E0D5;
+  --mess-shadow: 0 4px 18px rgba(42, 31, 20, 0.07);
+
+  /* Shape */
+  --mess-radius-control: 14px;
+  --mess-radius-card: 16px;
+  --mess-radius-feature: 20px;
+  --mess-radius-pill: 999px;
+
+  /* Spacing */
+  --mess-space-1: 4px;
+  --mess-space-2: 8px;
+  --mess-space-3: 12px;
+  --mess-space-4: 16px;
+  --mess-space-5: 20px;
+  --mess-space-6: 24px;
+
+  /* Aliases */
+  --color-cream: var(--mess-bg);
+  --color-navy: var(--mess-ink);
+  --color-orange: var(--mess-orange);
+  --color-white: var(--mess-surface);
+  --color-muted: var(--mess-muted);
+  --font-sans: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-heading: 'Montserrat', sans-serif;
+  --font-lg: 24px;
+  --font-md: 16px;
+  --font-sm: 12px;
+  --radius-card: var(--mess-radius-card);
+  --radius-btn: var(--mess-radius-control);
+  --shadow: var(--mess-shadow);
 }
 
 body {
-  background-color: var(--color-cream);
-  color: var(--color-navy);
+  background-color: var(--mess-bg);
+  color: var(--mess-ink);
   font-family: var(--font-sans);
   margin: 0;
   padding: 0;
 }
 
-.home-container {
+.home-container, .mess-search-page {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: var(--color-cream);
+  background-color: var(--mess-bg);
+  color: var(--mess-ink);
 }
 
 .app-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: var(--color-cream);
+  background-color: var(--mess-bg);
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(11, 37, 69, 0.1);
+  border-bottom: 1px solid var(--mess-border);
 }
 
 .app-bar h1 {
   font-family: var(--font-heading);
   font-size: var(--font-lg);
-  font-weight: 700;
+  font-weight: 800;
   margin: 0;
-  color: var(--color-navy);
+  color: var(--mess-ink);
 }
 
-.button-primary {
-  background-color: var(--color-orange);
-  color: var(--color-white);
-  border: none;
-  border-radius: var(--radius-btn);
-  padding: 14px 24px;
-  min-width: 44px;
+.mess-search-input {
+  min-height: 56px;
+  width: 100%;
+  background: var(--mess-surface);
+  border: 1px solid var(--mess-border);
+  border-radius: var(--mess-radius-feature);
+  color: var(--mess-ink);
+  padding: 0 18px;
+  box-sizing: border-box;
+  font-size: 15px;
+}
+
+.mess-search-input::placeholder {
+  color: var(--mess-muted);
+  opacity: 1;
+}
+
+.mess-filter-control {
   min-height: 44px;
-  font-size: var(--font-md);
+  background: var(--mess-surface);
+  color: var(--mess-ink);
+  border: 1px solid var(--mess-border);
+  border-radius: var(--mess-radius-control);
+  padding: 10px 14px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  width: 100%;
-  display: inline-flex;
+}
+
+.card, .mess-result-card {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 12px rgba(255, 111, 33, 0.25);
-  transition: transform 0.15s ease, background-color 0.15s ease;
-}
-
-.button-primary:hover {
-  background-color: #E85D12;
-}
-
-.button-primary:active {
-  transform: scale(0.98);
-}
-
-.card {
-  background-color: var(--color-white);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow);
-  padding: 20px;
-  margin: 12px 16px;
-  border: 1px solid rgba(11, 37, 69, 0.05);
+  gap: 16px;
+  padding: 18px;
+  background: var(--mess-surface);
+  border: 1px solid var(--mess-border);
+  border-radius: var(--mess-radius-card);
+  box-shadow: var(--mess-shadow);
+  margin: 10px 16px;
 }
 
 .card h2, .card h3 {
   font-family: var(--font-heading);
-  color: var(--color-navy);
+  color: var(--mess-ink);
   margin-top: 0;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .card p {
-  color: var(--color-muted);
-  margin: 6px 0;
+  color: var(--mess-muted);
+  margin: 4px 0;
   font-size: 14px;
 }
 
-.qr-cta {
-  padding: 8px 16px;
+.button-primary, .mess-primary-action {
+  min-height: 48px;
+  border: 0;
+  border-radius: var(--mess-radius-control);
+  padding: 12px 18px;
+  background: var(--mess-orange);
+  color: var(--mess-surface);
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
 }
 
-.bottom-nav {
+.button-primary:active, .mess-primary-action:active {
+  background: var(--mess-orange-pressed);
+}
+
+.bottom-nav, .mess-bottom-nav {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  background-color: var(--color-cream);
-  border-top: 1px solid rgba(11, 37, 69, 0.1);
+  background: var(--mess-surface);
+  border-top: 1px solid var(--mess-border);
   padding: 8px 0;
   margin-top: auto;
   position: sticky;
@@ -122,17 +179,30 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-navy);
+  color: var(--mess-ink);
   cursor: pointer;
   border-radius: 50%;
-  transition: background-color 0.15s ease;
 }
 
 .button-icon:hover {
-  background-color: rgba(11, 37, 69, 0.06);
+  background-color: var(--mess-orange-soft);
 }
 
 .button-icon svg {
   width: 24px;
   height: 24px;
+}
+
+.mess-scan-action {
+  width: 64px;
+  height: 64px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--mess-orange);
+  color: var(--mess-ink);
+  box-shadow: 0 6px 18px rgba(233, 78, 18, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
