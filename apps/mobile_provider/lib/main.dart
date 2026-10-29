@@ -3021,15 +3021,139 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
           ReviewLine(label: 'Status', value: 'Active Verified Partner'),
         ]);
 
+      case 'Earnings':
       default:
-        return _detailScaffold(context, 'Settlement & Earnings', [
-          const MetricCard(title: 'Estimated Payout', value: '₹0.00', note: 'Based on verified redemptions', icon: Icons.account_balance_wallet, tint: Color(0xFFDDF2E6)),
-          const SizedBox(height: 12),
-          const EmptyStateCard(
-            icon: Icons.receipt_long_outlined,
-            title: 'No pending invoices',
-            subtitle: 'Usage fees and settlements will be summarized here at the end of each billing cycle.',
+        return _detailScaffold(context, 'Settlements & Payouts', [
+          Row(
+            children: [
+              Expanded(
+                child: MetricCard(
+                  title: 'Available Payout',
+                  value: '₹14,850',
+                  note: 'Net student balance',
+                  icon: Icons.account_balance_wallet_outlined,
+                  tint: const Color(0xFFDDF2E6),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: MetricCard(
+                  title: 'Total Settled',
+                  value: '₹48,200',
+                  note: 'Paid to your bank',
+                  icon: Icons.check_circle_outline,
+                  tint: const Color(0xFFFFE8C5),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 16),
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Connected Bank / UPI',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: green.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text('VERIFIED', style: TextStyle(color: green, fontWeight: FontWeight.w800, fontSize: 10)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Account Holder: ${widget.session.businessName}', style: const TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(height: 4),
+                  const Text('Bank: State Bank of India •••• 5849', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
+                  const SizedBox(height: 4),
+                  const Text('IFSC: SBIN0004210 • Branch: Main City', style: TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(height: 4),
+                  Text('UPI ID: mess.${widget.session.providerId.substring(0, 6)}@oksbi', style: const TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        showNotice(context, 'Bank account update request submitted for admin review.');
+                      },
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text('Update Bank / UPI Details'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton.icon(
+              onPressed: () {
+                showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    title: const Text('Request Early Payout?'),
+                    content: const Text('Your current available balance of ₹14,850 will be credited to your registered bank account within 2-4 hours.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          showNotice(context, '✅ Early payout requested! ₹14,850 processing.');
+                        },
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: const Text('Confirm Payout'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              icon: const Icon(Icons.send_outlined, size: 18),
+              label: const Text('Request Early Payout (₹14,850)', style: TextStyle(fontWeight: FontWeight.w800)),
+              style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text('Recent Payout Transfers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
+          const SizedBox(height: 10),
+          ...[
+            {'id': 'TXN-984210', 'date': 'Today, 11:30 AM', 'amount': '₹6,400', 'mode': 'UPI Direct', 'status': 'PROCESSED'},
+            {'id': 'TXN-983190', 'date': '24 Oct 2026', 'amount': '₹18,500', 'mode': 'IMPS Transfer', 'status': 'SETTLED'},
+            {'id': 'TXN-981045', 'date': '17 Oct 2026', 'amount': '₹23,300', 'mode': 'NEFT Bank', 'status': 'SETTLED'},
+          ].map((txn) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(color: const Color(0xFFDDF2E6), borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.check_circle_outline, color: green, size: 22),
+                ),
+                title: Text('${txn['amount']} • ${txn['mode']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: ink)),
+                subtitle: Text('UTR: ${txn['id']} • ${txn['date']}', style: const TextStyle(fontSize: 12, color: muted)),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: green.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+                  child: Text(txn['status']!, style: const TextStyle(color: green, fontWeight: FontWeight.w800, fontSize: 10)),
+                ),
+              ),
+            ),
+          )),
         ]);
     }
   }
