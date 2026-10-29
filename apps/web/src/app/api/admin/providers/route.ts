@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { sendProviderApprovalNotice } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,10 +29,15 @@ export async function GET(req: NextRequest) {
           for (const u of usersData.users) {
             const meta = u.user_metadata || {};
             if (meta.role === 'provider' && meta.application) {
+              const status = meta.application.status || 'pending_review';
+              const appId = meta.application.id || u.id;
               const app = {
-                id: meta.application.id || u.id,
+                id: appId,
+                auth_user_id: u.id,
                 display_name: meta.application.display_name || meta.display_name || 'Mess Partner',
                 public_phone: meta.application.public_phone || meta.phone || '',
+                email: meta.application.email || meta.email || u.email || '',
+                initial_password: meta.initial_password || meta.login_password || null,
                 description: meta.application.description || null,
                 address_line1: meta.application.address_line1 || 'Address on file',
                 locality: meta.application.locality || null,
@@ -39,15 +45,19 @@ export async function GET(req: NextRequest) {
                 state: meta.application.state || 'India',
                 pincode: meta.application.pincode || '000000',
                 created_at: meta.application.created_at || u.created_at,
-                status: meta.application.status || 'pending_review',
+                status,
                 rating: 5.0,
                 total_reviews: 0,
               };
 
-              if (app.status === 'pending_review') {
-                pendingMap.set(app.id, app);
-              } else if (app.status === 'active') {
-                activeMap.set(app.id, app);
+              if (status === 'pending_review') {
+                pendingMap.set(appId, app);
+              } else if (status === 'active') {
+                activeMap.set(appId, app);
+                pendingMap.delete(appId);
+                pendingMap.delete(u.id);
+                if (meta.application.id) pendingMap.delete(meta.application.id);
+                if (meta.application.provider_id) pendingMap.delete(meta.application.provider_id);
               }
             }
           }
@@ -65,7 +75,9 @@ export async function GET(req: NextRequest) {
           .order('created_at', { ascending: false });
 
         if (pendingData) {
-          for (const p of pendingData) pendingMap.set(p.id, p);
+          for (const p of pendingData) {
+            if (!activeMap.has(p.id)) pendingMap.set(p.id, p);
+          }
         }
 
         if (includeActive) {
@@ -75,7 +87,10 @@ export async function GET(req: NextRequest) {
             .eq('status', 'active')
             .order('display_name', { ascending: true });
           if (activeData) {
-            for (const p of activeData) activeMap.set(p.id, p);
+            for (const p of activeData) {
+              activeMap.set(p.id, p);
+              pendingMap.delete(p.id);
+            }
           }
         }
       } catch {
@@ -104,14 +119,17 @@ export async function GET(req: NextRequest) {
       total_reviews: p.total_reviews,
     };
     if (p.status === 'pending_review') {
-      if (!pendingMap.has(p.id)) pendingMap.set(p.id, item);
+      if (!activeMap.has(p.id) && !pendingMap.has(p.id)) {
+        pendingMap.set(p.id, item);
+      }
     } else if (p.status === 'active') {
       if (!activeMap.has(p.id)) activeMap.set(p.id, item);
+      pendingMap.delete(p.id);
     }
   }
 
   return NextResponse.json({
-    applications: Array.from(pendingMap.values()),
+    applications: Array.from(pendingMap.values()).filter((a) => a.status === 'pending_review'),
     active_providers: Array.from(activeMap.values()),
   });
 }
@@ -133,71 +151,140 @@ export async function PATCH(request: NextRequest) {
   const approved = decision === 'approve';
   const newStatus = approved ? 'active' : 'rejected';
 
-  let providerName = 'Mess';
+  let providerName = 'Mess Partner';
+  let matchedAuthUser: any = null;
 
-  // 1. Update in Supabase
+  // 1. Resiliently locate and update provider in Supabase GoTrue Auth
   try {
     const admin = getAdminClient();
     if (admin) {
-      // A. Update in Auth user metadata
+      // Step A: Try direct ID lookup
       try {
         const { data: uData } = await admin.auth.admin.getUserById(provider_id);
         if (uData?.user) {
-          const meta = uData.user.user_metadata || {};
-          const app = meta.application || {};
-          app.status = newStatus;
-          app.approved_at = approved ? new Date().toISOString() : null;
-          providerName = app.display_name || meta.display_name || providerName;
+          matchedAuthUser = uData.user;
+        }
+      } catch {}
 
-          await admin.auth.admin.updateUserById(provider_id, {
+      // Step B: Search listUsers if direct lookup missed (e.g. provider_id is application.id UUID)
+      if (!matchedAuthUser) {
+        try {
+          const { data: listData } = await admin.auth.admin.listUsers({ perPage: 100 });
+          if (listData?.users) {
+            matchedAuthUser = listData.users.find((u) => {
+              const meta = u.user_metadata || {};
+              const app = meta.application || {};
+              return (
+                u.id === provider_id ||
+                app.id === provider_id ||
+                app.provider_id === provider_id ||
+                meta.phone === provider_id ||
+                app.public_phone === provider_id ||
+                u.email === provider_id ||
+                meta.email === provider_id
+              );
+            });
+          }
+        } catch (lErr) {
+          console.warn('Auth listUsers search note:', lErr);
+        }
+      }
+
+      // Step C: Update GoTrue user metadata to active
+      if (matchedAuthUser) {
+        const meta = matchedAuthUser.user_metadata || {};
+        const app = meta.application || {};
+        app.status = newStatus;
+        app.approved_at = approved ? new Date().toISOString() : null;
+        providerName = app.display_name || meta.display_name || providerName;
+
+        try {
+          await admin.auth.admin.updateUserById(matchedAuthUser.id, {
             user_metadata: {
               ...meta,
               application: app,
             },
           });
+        } catch (uErr) {
+          console.warn('Update Auth user metadata note:', uErr);
         }
-      } catch (uErr) {
-        console.warn('Update Auth user metadata note:', uErr);
       }
 
-      // B. Also update table if accessible
-      try {
-        const { data } = await admin
-          .from('providers')
-          .update({
-            status: newStatus,
-            approved_at: approved ? new Date().toISOString() : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', provider_id)
-          .select('*')
-          .maybeSingle();
+      // Step D: Also update public.providers table if accessible
+      const candidateIds = [provider_id];
+      if (matchedAuthUser?.id && matchedAuthUser.id !== provider_id) {
+        candidateIds.push(matchedAuthUser.id);
+      }
+      for (const cid of candidateIds) {
+        try {
+          const { data } = await admin
+            .from('providers')
+            .update({
+              status: newStatus,
+              approved_at: approved ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', cid)
+            .select('*')
+            .maybeSingle();
 
-        if (data) {
-          providerName = data.display_name || providerName;
-        }
-      } catch {}
+          if (data?.display_name) {
+            providerName = data.display_name;
+          }
+        } catch {}
+      }
     }
   } catch (err) {
     console.warn('Failed to update Supabase provider status:', err);
   }
 
   // 2. Update in platformStore and seed plans/menus
-  const provider = platformStore.providers.get(provider_id);
-  if (provider) {
-    provider.status = newStatus;
-    providerName = provider.display_name;
+  const candidateIds = [provider_id];
+  if (matchedAuthUser?.id && matchedAuthUser.id !== provider_id) {
+    candidateIds.push(matchedAuthUser.id);
   }
 
+  for (const cid of candidateIds) {
+    const provider = platformStore.providers.get(cid);
+    if (provider) {
+      provider.status = newStatus;
+      providerName = provider.display_name;
+    }
+    if (approved) {
+      seedProviderPlansAndMenu(cid);
+    }
+  }
+
+  // 3. Dispatch automated Email and SMS notification with User ID and Password
+  let notificationResult = null;
   if (approved) {
-    seedProviderPlansAndMenu(provider_id);
+    const meta = matchedAuthUser?.user_metadata || {};
+    const app = meta.application || {};
+    const phone = meta.phone || app.public_phone || matchedAuthUser?.phone || '';
+    const email = meta.email || app.email || matchedAuthUser?.email || '';
+    const password = meta.initial_password || meta.login_password || 'MessOwner@2026';
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://mess-beta.vercel.app';
+
+    try {
+      notificationResult = await sendProviderApprovalNotice({
+        provider_name: providerName,
+        phone,
+        email,
+        user_id: phone.replace(/\D/g, '').slice(-10) || matchedAuthUser?.id || provider_id,
+        password,
+        login_url: `${siteUrl}/auth/login`,
+      });
+    } catch (notifErr) {
+      console.warn('Provider approval notification note:', notifErr);
+    }
   }
 
   return NextResponse.json({
     success: true,
     provider: { id: provider_id, status: newStatus, display_name: providerName },
+    notification: notificationResult,
     message: approved
-      ? `✅ ${providerName} has been approved! Kitchen listing and plans are now active.`
+      ? `✅ ${providerName} has been approved! Kitchen listing & plans are now active.`
       : `Provider application rejected.`,
   });
 }

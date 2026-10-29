@@ -5,13 +5,15 @@ import Link from 'next/link';
 import { ArrowRight, CheckCircle2, Store } from 'lucide-react';
 
 const fields = [
-  { key: 'display_name', label: 'Mess / business name', required: true, maxLength: 120 },
-  { key: 'phone', label: 'Contact phone', required: true, maxLength: 20 },
-  { key: 'address_line1', label: 'Street address', required: true, maxLength: 200 },
-  { key: 'locality', label: 'Area / locality', required: false, maxLength: 120 },
-  { key: 'city', label: 'City', required: true, maxLength: 100 },
-  { key: 'state', label: 'State', required: true, maxLength: 100 },
-  { key: 'pincode', label: 'PIN code', required: true, maxLength: 6 },
+  { key: 'display_name', label: 'Mess / business name', required: true, maxLength: 120, type: 'text', placeholder: 'e.g. Radhe Krishna Homely Mess' },
+  { key: 'phone', label: 'Contact phone (10 digits)', required: true, maxLength: 20, type: 'tel', placeholder: 'e.g. 9876543210' },
+  { key: 'email', label: 'Mess / owner email', required: true, maxLength: 120, type: 'email', placeholder: 'e.g. owner@example.com' },
+  { key: 'password', label: 'Account login password (min 6 characters)', required: true, minLength: 6, maxLength: 60, type: 'password', placeholder: '••••••••' },
+  { key: 'address_line1', label: 'Street address', required: true, maxLength: 200, type: 'text', placeholder: 'e.g. Near Gate 2, Hostel Lane' },
+  { key: 'locality', label: 'Area / locality', required: false, maxLength: 120, type: 'text', placeholder: 'e.g. Sector 62' },
+  { key: 'city', label: 'City', required: true, maxLength: 100, type: 'text', placeholder: 'e.g. Noida' },
+  { key: 'state', label: 'State', required: true, maxLength: 100, type: 'text', placeholder: 'e.g. Uttar Pradesh' },
+  { key: 'pincode', label: 'PIN code', required: true, maxLength: 6, type: 'text', placeholder: 'e.g. 201301' },
 ] as const;
 
 export default function ProviderPortal() {
@@ -77,13 +79,16 @@ export default function ProviderPortal() {
               <label key={field.key} className={`text-sm font-semibold text-slate-700 ${field.key === 'address_line1' ? 'sm:col-span-2' : ''}`}>
                 {field.label}{field.required && <span aria-hidden="true" className="ml-1 text-red-600">*</span>}
                 <input
+                  type={field.type}
                   required={field.required}
                   maxLength={field.maxLength}
+                  minLength={'minLength' in field ? (field as any).minLength : undefined}
+                  placeholder={field.placeholder}
                   inputMode={field.key === 'phone' || field.key === 'pincode' ? 'tel' : undefined}
-                  autoComplete={field.key === 'phone' ? 'tel' : undefined}
+                  autoComplete={field.key === 'phone' ? 'tel' : field.key === 'email' ? 'email' : undefined}
                   value={values[field.key] ?? ''}
                   onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
-                  className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal text-slate-950 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-100"
+                  className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal text-slate-950 outline-none transition focus:border-amber-600 focus:ring-2 focus:ring-amber-100 placeholder:text-slate-400"
                 />
               </label>
             ))}
@@ -92,9 +97,10 @@ export default function ProviderPortal() {
               <textarea
                 maxLength={1000}
                 rows={3}
+                placeholder="Homestyle healthy food, pure veg thali, student discount..."
                 value={values.description ?? ''}
                 onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))}
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-100"
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-normal outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-100 placeholder:text-slate-400"
               />
             </label>
 
@@ -107,9 +113,12 @@ export default function ProviderPortal() {
             {message && (
               <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950 sm:col-span-2">
                 <div className="flex items-center gap-2 font-bold text-emerald-900">
-                  <CheckCircle2 size={18} className="text-emerald-700" />
+                  <CheckCircle2 size={18} className="text-emerald-700 shrink-0" />
                   {message}
                 </div>
+                <p className="mt-2 text-xs text-emerald-800 leading-relaxed">
+                  Your kitchen application is now in the <strong>Admin Verification Queue</strong>. Once reviewed and approved by the Thali operations team, you will receive your verification confirmation along with your login credentials via Email and SMS.
+                </p>
                 <div className="mt-3 flex flex-wrap gap-3 pt-1">
                   <Link
                     href="/auth/login"
