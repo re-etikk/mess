@@ -312,16 +312,16 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
   final ownerName = TextEditingController();
   final phone = TextEditingController();
   final email = TextEditingController();
-  final password = TextEditingController(text: 'Partner@2026');
+  final password = TextEditingController();
   final address = TextEditingController();
-  final city = TextEditingController(text: 'Noida');
+  final city = TextEditingController();
   final fssai = TextEditingController();
-  final selectedSlots = <String>{'Lunch', 'Dinner'};
-  final selectedDurations = <String>{'15 days', '1 month', '3 months'};
+  final selectedSlots = <String>{};
+  final selectedDurations = <String>{};
   final priceControllers = <String, TextEditingController>{
-    '15 days': TextEditingController(text: '1500'),
-    '1 month': TextEditingController(text: '2800'),
-    '3 months': TextEditingController(text: '7800'),
+    '15 days': TextEditingController(),
+    '1 month': TextEditingController(),
+    '3 months': TextEditingController(),
   };
   bool dailyMeal = true;
   bool acceptTerms = false;
@@ -432,20 +432,58 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
                     : PrimaryButton(
                         label: step == 4 ? 'Activate Business' : 'Continue',
                         onPressed: () {
-                          if (step == 0 && (businessName.text.trim().isEmpty || ownerName.text.trim().isEmpty || phone.text.trim().isEmpty)) {
-                            showNotice(context, 'Enter business name, owner name and phone.', isError: true);
-                            return;
+                          if (step == 0) {
+                            if (businessName.text.trim().length < 3) {
+                              showNotice(context, 'Enter valid business/mess name (min 3 characters).', isError: true);
+                              return;
+                            }
+                            if (ownerName.text.trim().length < 3) {
+                              showNotice(context, 'Enter owner full legal name.', isError: true);
+                              return;
+                            }
+                            final cleanPhone = phone.text.trim().replaceAll(RegExp(r'\D'), '');
+                            if (cleanPhone.length != 10) {
+                              showNotice(context, 'Enter valid 10-digit Indian mobile number.', isError: true);
+                              return;
+                            }
                           }
-                          if (step == 1 && address.text.trim().isEmpty) {
-                            showNotice(context, 'Add your business address.', isError: true);
-                            return;
+                          if (step == 1) {
+                            if (address.text.trim().length < 5) {
+                              showNotice(context, 'Enter complete kitchen/shop address.', isError: true);
+                              return;
+                            }
+                            if (city.text.trim().isEmpty) {
+                              showNotice(context, 'Enter your city.', isError: true);
+                              return;
+                            }
+                            if (!email.text.trim().contains('@') || !email.text.trim().contains('.')) {
+                              showNotice(context, 'Enter a valid login email address.', isError: true);
+                              return;
+                            }
+                            if (password.text.trim().length < 6) {
+                              showNotice(context, 'Create a login password with at least 6 characters.', isError: true);
+                              return;
+                            }
                           }
                           if (step == 2 && selectedSlots.isEmpty) {
-                            showNotice(context, 'Select at least one meal slot.', isError: true);
+                            showNotice(context, 'Select at least one serving meal slot (Lunch, Dinner, Breakfast).', isError: true);
                             return;
                           }
-                          if (step == 3 && selectedDurations.isEmpty) {
-                            showNotice(context, 'Select at least one plan duration.', isError: true);
+                          if (step == 3) {
+                            if (selectedDurations.isEmpty) {
+                              showNotice(context, 'Select at least one subscription duration you offer.', isError: true);
+                              return;
+                            }
+                            for (final d in selectedDurations) {
+                              final p = int.tryParse(priceControllers[d]?.text.trim() ?? '') ?? 0;
+                              if (p <= 0) {
+                                showNotice(context, 'Please enter your custom price for $d plan.', isError: true);
+                                return;
+                              }
+                            }
+                          }
+                          if (step == 4 && !acceptTerms) {
+                            showNotice(context, 'Please accept the platform partnership agreement terms to activate.', isError: true);
                             return;
                           }
                           if (step < 4) {
@@ -1304,7 +1342,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
   void _openAddDishSheet() {
     final nameCtrl = TextEditingController();
-    final priceCtrl = TextEditingController(text: '30');
+    final priceCtrl = TextEditingController();
     bool isExtra = false;
     String targetSlot = slot;
 
@@ -1634,10 +1672,10 @@ class _PlansManagementScreenState extends State<PlansManagementScreen> {
   void _openCreatePlanSheet() {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
-    final durationCtrl = TextEditingController(text: '30');
-    final priceCtrl = TextEditingController(text: '3000');
-    final creditsCtrl = TextEditingController(text: '60');
-    final discountCtrl = TextEditingController(text: '10');
+    final durationCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final creditsCtrl = TextEditingController();
+    final discountCtrl = TextEditingController();
     String planType = 'fixed_period';
 
     showModalBottomSheet<void>(
@@ -2094,10 +2132,10 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   }
 
   void _openAddCounterOrderSheet() {
-    final nameCtrl = TextEditingController(text: 'Walk-in Customer');
+    final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
-    final itemsCtrl = TextEditingController(text: '1x Regular Thali');
-    final amountCtrl = TextEditingController(text: '80');
+    final itemsCtrl = TextEditingController();
+    final amountCtrl = TextEditingController();
     String paymentMode = 'cash';
 
     showModalBottomSheet<void>(

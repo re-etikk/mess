@@ -19,6 +19,7 @@ import {
   Store,
   Trash2,
   Users,
+  Utensils,
   UtensilsCrossed,
 } from 'lucide-react';
 
@@ -51,47 +52,137 @@ export default function ProviderPortal() {
     phone: string;
   } | null>(null);
 
-  // Form State for 5-Step Wizard
+  // Form State for 5-Step Wizard - NO FAKE / PRE-FILLED DEFAULTS
   const [businessName, setBusinessName] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [cuisine, setCuisine] = useState('Homestyle North Indian');
+  const [cuisine, setCuisine] = useState('');
 
   // Step 2: Location
   const [address, setAddress] = useState('');
   const [locality, setLocality] = useState('');
-  const [city, setCity] = useState('Noida');
-  const [stateName, setStateName] = useState('Uttar Pradesh');
-  const [pincode, setPincode] = useState('201301');
+  const [city, setCity] = useState('');
+  const [stateName, setStateName] = useState('');
+  const [pincode, setPincode] = useState('');
 
   // Step 3: Timings
-  const [bfTime, setBfTime] = useState('07:30 AM - 10:00 AM');
+  const [bfTime, setBfTime] = useState('');
   const [lunchTime, setLunchTime] = useState('12:00 PM - 03:30 PM');
   const [dinnerTime, setDinnerTime] = useState('07:30 PM - 10:30 PM');
 
-  // Step 4: Initial Menu
-  const [dishes, setDishes] = useState<MenuDish[]>([
-    { name: 'Dal Tadka', isExtra: false, price: 0, available: true, slot: 'lunch' },
-    { name: 'Steamed Basmati Rice', isExtra: false, price: 0, available: true, slot: 'lunch' },
-    { name: 'Phulka Roti (4 pcs)', isExtra: false, price: 0, available: true, slot: 'lunch' },
-    { name: 'Seasonal Mixed Sabzi', isExtra: false, price: 0, available: true, slot: 'lunch' },
-    { name: 'Paneer Butter Masala', isExtra: true, price: 40, available: true, slot: 'lunch' },
-    { name: 'Extra Roti (Set of 2)', isExtra: true, price: 15, available: true, slot: 'lunch' },
-  ]);
+  // Step 4: Real Custom Menu (starts completely EMPTY - user must add real dishes)
+  const [dishes, setDishes] = useState<MenuDish[]>([]);
   const [newDishName, setNewDishName] = useState('');
-  const [newDishPrice, setNewDishPrice] = useState('35');
+  const [newDishPrice, setNewDishPrice] = useState('');
   const [newDishIsExtra, setNewDishIsExtra] = useState(false);
   const [newDishSlot, setNewDishSlot] = useState('lunch');
 
-  // Step 5: Custom Plans
-  const [plans, setPlans] = useState<CustomPlan[]>([
-    { name: '15-Day Economy Pass', days: 15, price: 1600, type: 'fixed_period' },
-    { name: '30-Day Monthly Fixed', days: 30, price: 3000, type: 'fixed_period', discount: 10 },
-    { name: '60-Meal Flexi Tracker', days: 60, price: 4800, type: 'meal_credits', credits: 60 },
-  ]);
-  const [agreedTerms, setAgreedTerms] = useState(true);
+  // Step 5: Real Custom Plans (starts completely EMPTY - user must configure their real prices)
+  const [plans, setPlans] = useState<CustomPlan[]>([]);
+  const [newPlanName, setNewPlanName] = useState('');
+  const [newPlanDays, setNewPlanDays] = useState('30');
+  const [newPlanPrice, setNewPlanPrice] = useState('');
+  const [newPlanType, setNewPlanType] = useState<'fixed_period' | 'meal_credits'>('fixed_period');
+  const [newPlanCredits, setNewPlanCredits] = useState('60');
+  const [newPlanDiscount, setNewPlanDiscount] = useState('');
+  const [agreedTerms, setAgreedTerms] = useState(false);
+
+  // Exact step validation functions
+  function isStep1Valid(): boolean {
+    const cleanPhone = phone.replace(/\D/g, '');
+    return (
+      businessName.trim().length >= 3 &&
+      ownerName.trim().length >= 3 &&
+      cleanPhone.length === 10 &&
+      email.trim().includes('@') &&
+      email.trim().includes('.') &&
+      password.trim().length >= 6
+    );
+  }
+
+  function isStep2Valid(): boolean {
+    const cleanPin = pincode.replace(/\D/g, '');
+    return (
+      address.trim().length >= 5 &&
+      city.trim().length >= 2 &&
+      stateName.trim().length >= 2 &&
+      cleanPin.length === 6
+    );
+  }
+
+  function isStep3Valid(): boolean {
+    return lunchTime.trim().length >= 4 && dinnerTime.trim().length >= 4;
+  }
+
+  function isStep4Valid(): boolean {
+    return dishes.length > 0;
+  }
+
+  function isStep5Valid(): boolean {
+    return plans.length > 0 && agreedTerms;
+  }
+
+  function handleStepClick(targetStep: number) {
+    if (targetStep === activeStep) return;
+    if (targetStep < activeStep) {
+      setError('');
+      setActiveStep(targetStep);
+      return;
+    }
+    if (targetStep >= 2 && !isStep1Valid()) {
+      setError('Please complete Step 1 (Basics) with business name, owner name, 10-digit phone, email, and password (min 6 chars) before moving forward.');
+      return;
+    }
+    if (targetStep >= 3 && !isStep2Valid()) {
+      setError('Please complete Step 2 (Location) with street address, city, state, and 6-digit PIN code.');
+      return;
+    }
+    if (targetStep >= 4 && !isStep3Valid()) {
+      setError('Please set your meal serving schedule in Step 3.');
+      return;
+    }
+    if (targetStep >= 5 && !isStep4Valid()) {
+      setError('Please add at least one dish to your menu in Step 4 before configuring subscription plans.');
+      return;
+    }
+    setError('');
+    setActiveStep(targetStep);
+  }
+
+  function addCustomPlan() {
+    const name = newPlanName.trim();
+    const price = Number(newPlanPrice) || 0;
+    const days = Number(newPlanDays) || 30;
+    if (!name || name.length < 3) {
+      setError('Please enter a descriptive plan name (e.g. 30 Days Unlimited Standard Thali).');
+      return;
+    }
+    if (price <= 0) {
+      setError('Please enter a valid subscription price in ₹ (greater than ₹0).');
+      return;
+    }
+    setError('');
+    setPlans([
+      ...plans,
+      {
+        name,
+        days,
+        price,
+        type: newPlanType,
+        credits: newPlanType === 'meal_credits' ? (Number(newPlanCredits) || 60) : undefined,
+        discount: Number(newPlanDiscount) > 0 ? Number(newPlanDiscount) : undefined,
+      },
+    ]);
+    setNewPlanName('');
+    setNewPlanPrice('');
+    setNewPlanDiscount('');
+  }
+
+  function removeCustomPlan(index: number) {
+    setPlans(plans.filter((_, i) => i !== index));
+  }
 
   // Portal Management Live Data
   const [subscribers, setSubscribers] = useState<any[]>([]);
@@ -846,37 +937,37 @@ export default function ProviderPortal() {
           </p>
         </div>
 
-        {/* Stepper Bar */}
+        {/* Stepper Bar - Strictly Validated & Locked */}
         <div className="mt-8 flex items-center justify-between border-b border-slate-200 pb-4">
           {[
-            { step: 1, title: 'Basics' },
-            { step: 2, title: 'Location' },
-            { step: 3, title: 'Schedule' },
-            { step: 4, title: 'Menu' },
-            { step: 5, title: 'Plans & Publish' },
+            { step: 1, title: 'Basics', isValid: isStep1Valid() },
+            { step: 2, title: 'Location', isValid: isStep2Valid() },
+            { step: 3, title: 'Schedule', isValid: isStep3Valid() },
+            { step: 4, title: 'Menu', isValid: isStep4Valid() },
+            { step: 5, title: 'Plans & Publish', isValid: isStep5Valid() },
           ].map((s) => (
             <button
               key={s.step}
               type="button"
-              onClick={() => setActiveStep(s.step)}
-              className={`flex items-center gap-2 text-xs font-extrabold ${
+              onClick={() => handleStepClick(s.step)}
+              className={`flex items-center gap-2 text-xs font-extrabold transition ${
                 activeStep === s.step
-                  ? 'text-amber-700'
-                  : activeStep > s.step
+                  ? 'text-amber-700 font-black'
+                  : s.isValid
                   ? 'text-emerald-700'
                   : 'text-slate-400'
               }`}
             >
               <span
-                className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-black ${
-                  activeStep === s.step
-                    ? 'bg-amber-600 text-white'
-                    : activeStep > s.step
+                className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-black transition ${
+                  s.isValid
                     ? 'bg-emerald-600 text-white'
+                    : activeStep === s.step
+                    ? 'bg-amber-600 text-white'
                     : 'bg-slate-200 text-slate-600'
                 }`}
               >
-                {activeStep > s.step ? '✓' : s.step}
+                {s.isValid ? '✓' : s.step}
               </span>
               <span className="hidden sm:inline">{s.title}</span>
             </button>
@@ -967,8 +1058,25 @@ export default function ProviderPortal() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!businessName || !phone || !email) {
-                      setError('Please fill in business name, phone and email.');
+                    if (!businessName.trim() || businessName.trim().length < 3) {
+                      setError('Please enter a valid mess/business name (at least 3 characters).');
+                      return;
+                    }
+                    if (!ownerName.trim() || ownerName.trim().length < 3) {
+                      setError('Please enter the owner full legal name (at least 3 characters).');
+                      return;
+                    }
+                    const cleanPhone = phone.replace(/\D/g, '');
+                    if (cleanPhone.length !== 10) {
+                      setError('Please enter a valid 10-digit Indian mobile number.');
+                      return;
+                    }
+                    if (!email.trim() || !email.includes('@') || !email.includes('.')) {
+                      setError('Please enter a valid email address.');
+                      return;
+                    }
+                    if (!password || password.length < 6) {
+                      setError('Please create a portal login password with at least 6 characters.');
                       return;
                     }
                     setError('');
@@ -1014,6 +1122,7 @@ export default function ProviderPortal() {
                   <input
                     type="text"
                     required
+                    placeholder="e.g. Noida, Kota, Pune, Delhi"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
@@ -1024,17 +1133,19 @@ export default function ProviderPortal() {
                   <input
                     type="text"
                     required
+                    placeholder="e.g. Uttar Pradesh, Rajasthan, Maharashtra"
                     value={stateName}
                     onChange={(e) => setStateName(e.target.value)}
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
                   />
                 </label>
                 <label className="text-xs font-bold text-slate-700">
-                  PIN Code *
+                  PIN Code (6 Digits) *
                   <input
                     type="text"
                     required
                     maxLength={6}
+                    placeholder="e.g. 201301"
                     value={pincode}
                     onChange={(e) => setPincode(e.target.value)}
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
@@ -1052,8 +1163,21 @@ export default function ProviderPortal() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!address || !city) {
-                      setError('Please enter address and city.');
+                    if (!address.trim() || address.trim().length < 5) {
+                      setError('Please enter your full street address or hostel road.');
+                      return;
+                    }
+                    if (!city.trim() || city.trim().length < 2) {
+                      setError('Please enter your city.');
+                      return;
+                    }
+                    if (!stateName.trim() || stateName.trim().length < 2) {
+                      setError('Please enter your state.');
+                      return;
+                    }
+                    const cleanPin = pincode.replace(/\D/g, '');
+                    if (cleanPin.length !== 6) {
+                      setError('Please enter a valid 6-digit postal PIN code.');
                       return;
                     }
                     setError('');
@@ -1122,45 +1246,103 @@ export default function ProviderPortal() {
             </div>
           )}
 
-          {/* STEP 4: MENU */}
+          {/* STEP 4: MENU - NO FAKE PRE-FILLS */}
           {activeStep === 4 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-bold text-slate-950">Step 4: Configure Daily Menu & Special Add-ons</h2>
-              <p className="text-xs text-slate-500">Customize what is included in standard thali and paid extras.</p>
-
-              <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto pr-1">
-                {dishes.map((d, i) => (
-                  <div key={i} className="flex justify-between items-center py-2.5 text-xs">
-                    <div>
-                      <p className="font-bold text-slate-900">{d.name}</p>
-                      <p className="text-slate-500">{d.isExtra ? `₹${d.price} Add-on` : 'Included in Thali'}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeDish(i)}
-                      className="text-red-600 font-bold hover:underline"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950">Step 4: Configure Daily Menu & Special Add-ons</h2>
+                  <p className="text-xs text-slate-500">You must add at least 1 real dish to your menu before proceeding.</p>
+                </div>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+                  {dishes.length} {dishes.length === 1 ? 'Dish' : 'Dishes'} Added
+                </span>
               </div>
 
-              <div className="pt-2 flex gap-2">
-                <input
-                  type="text"
-                  placeholder="New dish name"
-                  value={newDishName}
-                  onChange={(e) => setNewDishName(e.target.value)}
-                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={addDish}
-                  className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950"
-                >
-                  + Add to Menu
-                </button>
+              {dishes.length === 0 ? (
+                <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+                  <Utensils className="mx-auto text-amber-600 mb-2" size={32} />
+                  <p className="text-sm font-bold text-slate-800">Your Menu is Currently Empty</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                    No pre-filled fake dishes are added. Please use the form below to enter dishes that are included in your standard thali (e.g. Dal Tadka, Roti, Rice) or available as paid extras.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3">
+                  {dishes.map((d, i) => (
+                    <div key={i} className="flex justify-between items-center py-2.5 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${d.isExtra ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                        <div>
+                          <p className="font-bold text-slate-900">{d.name}</p>
+                          <p className="text-slate-500 text-[11px]">
+                            {d.isExtra ? `Special Paid Extra • ₹${d.price}` : 'Included Standard with Thali'} • Slot: {d.slot.toUpperCase()}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeDish(i)}
+                        className="text-red-600 font-bold hover:underline px-2 py-1"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Form to add real dish */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">+ Add New Dish</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <input
+                    type="text"
+                    placeholder="Dish Name (e.g. Paneer Butter Masala, Roti)"
+                    value={newDishName}
+                    onChange={(e) => setNewDishName(e.target.value)}
+                    className="sm:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:border-amber-600"
+                  />
+                  <select
+                    value={newDishSlot}
+                    onChange={(e) => setNewDishSlot(e.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none"
+                  >
+                    <option value="lunch">Lunch</option>
+                    <option value="dinner">Dinner</option>
+                    <option value="breakfast">Breakfast</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newDishIsExtra}
+                      onChange={(e) => setNewDishIsExtra(e.target.checked)}
+                      className="accent-amber-600"
+                    />
+                    Charge as Paid Extra / Special Add-on
+                  </label>
+                  {newDishIsExtra && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-600">Extra Price (₹):</span>
+                      <input
+                        type="number"
+                        placeholder="e.g. 40"
+                        value={newDishPrice}
+                        onChange={(e) => setNewDishPrice(e.target.value)}
+                        className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none focus:border-amber-600"
+                      />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={addDish}
+                    className="rounded-lg bg-amber-500 px-5 py-2 text-xs font-extrabold text-slate-950 hover:bg-amber-600 transition shadow-sm ml-auto"
+                  >
+                    + Add Dish to Menu
+                  </button>
+                </div>
               </div>
 
               <div className="pt-4 flex justify-between">
@@ -1173,7 +1355,14 @@ export default function ProviderPortal() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveStep(5)}
+                  onClick={() => {
+                    if (dishes.length === 0) {
+                      setError('Please add at least one real dish to your menu before proceeding.');
+                      return;
+                    }
+                    setError('');
+                    setActiveStep(5);
+                  }}
                   className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-600 transition"
                 >
                   Next: Plans & Pricing <ArrowRight size={15} />
@@ -1182,31 +1371,139 @@ export default function ProviderPortal() {
             </div>
           )}
 
-          {/* STEP 5: PLANS & PUBLISH */}
+          {/* STEP 5: PLANS & PUBLISH - NO FAKE PRE-FILLS */}
           {activeStep === 5 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-bold text-slate-950">Step 5: Custom Subscription Plans & Rates</h2>
-              <p className="text-xs text-slate-500">Define subscriber packages visible on the mobile customer app.</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950">Step 5: Custom Subscription Plans & Rates</h2>
+                  <p className="text-xs text-slate-500">Configure real pricing for student passes. At least 1 plan required.</p>
+                </div>
+                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-900">
+                  {plans.length} {plans.length === 1 ? 'Plan' : 'Plans'} Configured
+                </span>
+              </div>
 
-              <div className="grid gap-3 sm:grid-cols-3 pt-2">
-                {plans.map((p, idx) => (
-                  <div key={idx} className="rounded-xl border border-slate-200 p-4">
-                    <p className="font-extrabold text-sm text-slate-900">{p.name}</p>
-                    <label className="text-[11px] text-slate-500 mt-2 block">
-                      Price (₹)
+              {plans.length === 0 ? (
+                <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
+                  <p className="text-sm font-bold text-slate-800">No Subscription Plans Created Yet</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                    No fake plans or automatic rates have been added. Use the form below to configure your mess packages (e.g. 30 Days Monthly Unlimited, 15 Days Pass, or Flexi 60 Meals).
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {plans.map((p, idx) => (
+                    <div key={idx} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm relative">
+                      <div className="flex items-start justify-between">
+                        <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-900">
+                          {p.days} Days Pass
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeCustomPlan(idx)}
+                          className="text-red-500 hover:text-red-700 font-bold text-xs"
+                        >
+                          ✕ Remove
+                        </button>
+                      </div>
+                      <h4 className="font-extrabold text-sm text-slate-900 mt-2">{p.name}</h4>
+                      <p className="text-xs text-slate-500">
+                        {p.type === 'meal_credits' ? `${p.credits || 60} Meal Credits (with Tracker)` : 'Fixed Calendar Unlimited'}
+                      </p>
+                      <div className="mt-3 pt-2 border-t border-slate-100 flex items-baseline justify-between">
+                        <span className="text-lg font-black text-slate-950">₹{p.price}</span>
+                        {p.discount ? (
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                            {p.discount}% Discount
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Form to add custom plan */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">+ Configure New Custom Plan</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Plan Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 30 Days Full Unlimited Pass"
+                      value={newPlanName}
+                      onChange={(e) => setNewPlanName(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:border-amber-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Pass Duration (Days) *</label>
+                    <select
+                      value={newPlanDays}
+                      onChange={(e) => setNewPlanDays(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none"
+                    >
+                      <option value="15">15 Days (Short Pass)</option>
+                      <option value="30">30 Days (Full Monthly)</option>
+                      <option value="45">45 Days</option>
+                      <option value="60">60 Days (Two Months)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Your Price in ₹ *</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 2800"
+                      value={newPlanPrice}
+                      onChange={(e) => setNewPlanPrice(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none focus:border-amber-600 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Plan Model *</label>
+                    <select
+                      value={newPlanType}
+                      onChange={(e) => setNewPlanType(e.target.value as any)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none"
+                    >
+                      <option value="fixed_period">Fixed Calendar (Expires strictly in days)</option>
+                      <option value="meal_credits">Meal Credits Tracker (Counts actual scans)</option>
+                    </select>
+                  </div>
+                  {newPlanType === 'meal_credits' && (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-600 block mb-1">Total Meal Credits</label>
                       <input
                         type="number"
-                        value={p.price}
-                        onChange={(e) => {
-                          const updated = [...plans];
-                          updated[idx].price = Number(e.target.value) || 0;
-                          setPlans(updated);
-                        }}
-                        className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm font-bold"
+                        placeholder="e.g. 60"
+                        value={newPlanCredits}
+                        onChange={(e) => setNewPlanCredits(e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none"
                       />
-                    </label>
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Discount % (Optional)</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 10 (Optional)"
+                      value={newPlanDiscount}
+                      onChange={(e) => setNewPlanDiscount(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs outline-none"
+                    />
                   </div>
-                ))}
+                </div>
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={addCustomPlan}
+                    className="rounded-lg bg-slate-950 px-5 py-2 text-xs font-extrabold text-white hover:bg-slate-800 transition shadow-sm"
+                  >
+                    + Add Plan to Package
+                  </button>
+                </div>
               </div>
 
               <div className="pt-4 border-t border-slate-100">
@@ -1217,7 +1514,7 @@ export default function ProviderPortal() {
                     onChange={(e) => setAgreedTerms(e.target.checked)}
                     className="accent-amber-600"
                   />
-                  I confirm the accuracy of kitchen details, serving hours, and pricing rules.
+                  I confirm that all kitchen details, serving hours, and subscription rates entered above are accurate.
                 </label>
               </div>
 
