@@ -111,6 +111,39 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
       } else {
         const errJson = await emailRes.json().catch(() => ({}));
         console.warn('Resend email dispatch error:', errJson);
+        // On Resend free tier without custom domain, sending to other emails is restricted.
+        // Forward admin confirmation copy to the registered account owner email
+        const adminEmail = process.env.RESEND_ACCOUNT_EMAIL || 'ritik45chaurasia@gmail.com';
+        if (params.email !== adminEmail) {
+          try {
+            const adminCopyRes = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${resendApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                from: process.env.RESEND_FROM_EMAIL || 'Thali Notifications <onboarding@resend.dev>',
+                to: [adminEmail],
+                subject: `🎉 [Admin Alert] Mess Verified: "${params.provider_name}" Credentials`,
+                text: messageText,
+                html: `
+                  <div style="font-family: sans-serif; max-width: 600px; padding: 20px; border: 1px solid #cbd5e1; border-radius: 8px;">
+                    <h3>Kitchen Partner Verified: ${params.provider_name}</h3>
+                    <p><strong>Owner Email:</strong> ${params.email}</p>
+                    <p><strong>Phone:</strong> ${phone10Digits}</p>
+                    <p><strong>Password:</strong> <code>${password}</code></p>
+                    <p><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
+                  </div>
+                `,
+              }),
+            });
+            if (adminCopyRes.ok) {
+              emailSent = true;
+              emailProvider = 'resend (delivered to admin)';
+            }
+          } catch {}
+        }
       }
     } catch (e: any) {
       console.warn('Failed to dispatch Resend email:', e?.message || e);
@@ -128,8 +161,7 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          route: 'v3',
-          sender_id: 'TXTIND',
+          route: 'q',
           message: `Thali Mess Verified! Kitchen: ${params.provider_name}. Login at ${loginUrl} with Phone: ${phone10Digits}, Pass: ${password}`,
           language: 'english',
           flash: 0,
@@ -137,11 +169,12 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
         }),
       });
 
-      if (smsRes.ok) {
+      const smsJson = await smsRes.json().catch(() => ({}));
+      if (smsRes.ok && (smsJson.return === true || smsJson.status_code === 200)) {
         smsSent = true;
         smsProvider = 'fast2sms';
       } else {
-        console.warn('Fast2SMS dispatch error:', await smsRes.text());
+        console.warn('Fast2SMS dispatch notice:', smsJson.message || smsJson);
       }
     } catch (e: any) {
       console.warn('Fast2SMS exception:', e?.message || e);
