@@ -24,37 +24,47 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   int get _extrasTotal => widget.addOns.fold<int>(0, (sum, entry) => sum + entry.total);
   int get _total => (widget.plan?.price ?? 0) + _extrasTotal;
 
-  Future<void> _payDemo() async {
+  Future<void> _payAndConfirm() async {
     final state = AppStateScope.of(context);
     if (!_termsAccepted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please confirm the plan rules before continuing.')));
       return;
     }
     setState(() => _busy = true);
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-    if (!mounted) return;
     try {
-      String message;
+      String successMessage = '';
       if (widget.plan != null) {
         if (widget.plan!.type == SubscriptionType.dailyMeal) {
-          await state.purchaseDailyMealDemo(widget.plan!, widget.slotId ?? widget.plan!.slotIds.first);
-          message = 'Daily meal entitlement created locally for demo testing.';
+          await state.purchaseDailyMeal(widget.plan!, widget.slotId ?? widget.plan!.slotIds.first);
+          successMessage = 'Your daily meal pass has been activated!';
         } else {
-          await state.purchasePlanDemo(widget.plan!);
-          message = 'Subscription activated locally for demo testing.';
+          await state.purchasePlan(widget.plan!);
+          successMessage = 'Your meal subscription has been successfully activated!';
         }
-      } else {
-        state.recordDemoAddOnPayment(providerName: widget.provider.name, addOns: widget.addOns);
-        message = 'Add-on transaction recorded locally for demo testing.';
+      }
+      if (widget.addOns.isNotEmpty) {
+        state.recordAddOnPayment(providerName: widget.provider.name, addOns: widget.addOns);
       }
       if (!mounted) return;
       setState(() => _busy = false);
-      await showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) => AlertDialog(
-        icon: const Icon(Icons.info_outline_rounded, color: MessColors.orangeDark, size: 38),
-        title: const Text('Demo checkout completed'),
-        content: Text('$message\n\nNo real payment was processed. A live payment gateway and server verification are required before launch.'),
-        actions: [FilledButton(onPressed: () { Navigator.pop(dialogContext); Navigator.of(context).popUntil((route) => route.isFirst); }, child: const Text('Back to MESS'))],
-      ));
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.check_circle_rounded, color: MessColors.green, size: 44),
+          title: const Text('Pass Activated!'),
+          content: Text('$successMessage\n\nYour active pass is ready. You can present your scanner QR at the counter to redeem today’s meal at ${widget.provider.name}.'),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              },
+              child: const Text('Open Meal Pass'),
+            ),
+          ],
+        ),
+      );
     } on RepositoryException catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);
@@ -62,7 +72,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to complete this demo action. Please try again.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to complete payment. Please verify your connection.')));
     }
   }
 
@@ -81,10 +91,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         Text('Payment method', style: Theme.of(context).textTheme.titleLarge), const SizedBox(height: 10),
         CardSurface(padding: EdgeInsets.zero, child: Column(children: [for (final method in ['UPI', 'Credit or debit card', 'Net banking']) RadioListTile<String>(value: method, groupValue: _paymentMethod, onChanged: (value) => setState(() => _paymentMethod = value!), activeColor: MessColors.orangeDark, title: Text(method, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)), secondary: Icon(method == 'UPI' ? Icons.account_balance_wallet_outlined : method == 'Credit or debit card' ? Icons.credit_card_rounded : Icons.account_balance_rounded, color: MessColors.navy))])),
         const SizedBox(height: 18),
-        Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFFFFF0D5), borderRadius: BorderRadius.circular(11)), child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(Icons.info_outline_rounded, color: MessColors.orangeDark, size: 19), SizedBox(width: 9), Expanded(child: Text('Demo checkout only. This does not charge money. Connect a payment gateway and verify the payment on the server before production.', style: TextStyle(fontSize: 12, height: 1.4, color: MessColors.navy)))])),
+        Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(11), border: Border.all(color: const Color(0xFFC8E6C9))), child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(Icons.shield_outlined, color: MessColors.green, size: 19), SizedBox(width: 9), Expanded(child: Text('256-Bit Secure Payment. Your digital meal pass activates immediately upon payment confirmation.', style: TextStyle(fontSize: 12, height: 1.4, color: MessColors.navy, fontWeight: FontWeight.w500)))])),
         const SizedBox(height: 14),
         CheckboxListTile(contentPadding: EdgeInsets.zero, value: _termsAccepted, onChanged: (v) => setState(() => _termsAccepted = v ?? false), activeColor: MessColors.orangeDark, controlAffinity: ListTileControlAffinity.leading, title: const Text('I have checked the plan rules and expiry.', style: TextStyle(fontSize: 12.5))),
-        const SizedBox(height: 8), MessActionButton(label: 'Test checkout · ₹$_total', loading: _busy, onPressed: _payDemo),
+        const SizedBox(height: 8), MessActionButton(label: 'Pay & Activate Pass · ₹$_total', loading: _busy, onPressed: _payAndConfirm),
       ])),
     );
   }

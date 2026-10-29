@@ -5,7 +5,11 @@ import 'services/provider_api_service.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
-void main() => runApp(const MessProviderApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final savedSession = await ProviderApiService.loadSavedSession();
+  runApp(MessProviderApp(initialSession: savedSession));
+}
 
 const Color ink = Color(0xFF142433);
 const Color orange = Color(0xFFF59A16);
@@ -16,7 +20,8 @@ const Color line = Color(0xFFE8E1D6);
 const Color green = Color(0xFF218653);
 
 class MessProviderApp extends StatefulWidget {
-  const MessProviderApp({super.key});
+  const MessProviderApp({super.key, this.initialSession});
+  final ProviderSession? initialSession;
 
   @override
   State<MessProviderApp> createState() => _MessProviderAppState();
@@ -24,6 +29,12 @@ class MessProviderApp extends StatefulWidget {
 
 class _MessProviderAppState extends State<MessProviderApp> {
   ProviderSession? _session;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = widget.initialSession;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,8 +90,8 @@ class _MessProviderAppState extends State<MessProviderApp> {
             )
           : ProviderShell(
               session: _session!,
-              onSignOut: () {
-                ProviderApiService.currentSession = null;
+              onSignOut: () async {
+                await ProviderApiService.clearSession();
                 setState(() => _session = null);
               },
             ),
@@ -233,7 +244,7 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                   decoration: const InputDecoration(hintText: 'e.g. 7250171036 or owner@mess.in', prefixIcon: Icon(Icons.phone_outlined)),
                 ),
                 const SizedBox(height: 16),
-                const FieldLabel('Password (optional for registered partners)'),
+                const FieldLabel('Account password'),
                 TextField(
                   controller: password,
                   obscureText: obscure,

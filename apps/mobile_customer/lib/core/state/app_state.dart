@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mess_models.dart';
 import '../repositories/http_mess_repository.dart';
@@ -8,12 +10,13 @@ class AppState extends ChangeNotifier {
   AppState({MessRepository? repository}) : repository = repository ?? HttpMessRepository();
 
   final MessRepository repository;
+  static const String _sessionKey = 'thali_customer_saved_session';
+
   bool isSignedIn = false;
-  bool isDemoMode = false;
-  String customerId = 'cust-ritik-001';
+  String customerId = '';
   String customerName = 'Student';
-  String customerEmail = 'student@example.com';
-  String location = 'IIT Hostel, Sector 62';
+  String customerEmail = '';
+  String location = 'Sector 62, Noida';
   String selectedProviderId = '';
   ActiveSubscription? _activeSubscription;
   DailyMealEntitlement? _dailyMeal;
@@ -22,6 +25,42 @@ class AppState extends ChangeNotifier {
   final Map<String, int> _pendingAddOns = <String, int>{};
   int currentTab = 0;
   List<MessProvider> _cachedProviders = [];
+
+  Future<void> initSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final str = prefs.getString(_sessionKey);
+      if (str != null && str.isNotEmpty) {
+        final data = jsonDecode(str) as Map<String, dynamic>;
+        customerId = data['customerId']?.toString() ?? '';
+        customerName = data['customerName']?.toString() ?? 'Student';
+        customerEmail = data['customerEmail']?.toString() ?? '';
+        location = data['location']?.toString() ?? 'Sector 62, Noida';
+        isSignedIn = data['isSignedIn'] == true;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_sessionKey, jsonEncode({
+        'customerId': customerId,
+        'customerName': customerName,
+        'customerEmail': customerEmail,
+        'location': location,
+        'isSignedIn': isSignedIn,
+      }));
+    } catch (_) {}
+  }
+
+  Future<void> _clearPersistedSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_sessionKey);
+    } catch (_) {}
+  }
 
   ActiveSubscription? get activeSubscription => _activeSubscription;
   DailyMealEntitlement? get dailyMeal => _dailyMeal;
@@ -63,9 +102,8 @@ class AppState extends ChangeNotifier {
     }
     isSignedIn = true;
     notifyListeners();
+    _persistSession();
   }
-
-  void signInDemo({required String emailOrPhone, required String name}) => signIn(emailOrPhone: emailOrPhone, name: name);
 
   void signOut() {
     isSignedIn = false;
@@ -75,6 +113,7 @@ class AppState extends ChangeNotifier {
     _pendingAddOns.clear();
     currentTab = 0;
     notifyListeners();
+    _clearPersistedSession();
   }
 
   void updateLocation(String value) {

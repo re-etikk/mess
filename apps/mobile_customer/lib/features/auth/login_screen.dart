@@ -15,8 +15,8 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController(text: 'student@example.com');
-  final _passwordController = TextEditingController(text: 'Student@2026');
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _showPassword = false;
   bool _busy = false;
 
@@ -100,7 +100,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         autofillHints: const [AutofillHints.username, AutofillHints.email],
-                        decoration: const InputDecoration(labelText: 'Email or phone number', prefixIcon: Icon(Icons.person_outline_rounded)),
+                        decoration: const InputDecoration(
+                          labelText: 'Email or phone number',
+                          hintText: 'e.g. 7250171036 or name@gmail.com',
+                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        ),
                         validator: (value) => value == null || value.trim().length < 3 ? 'Enter your email or phone number.' : null,
                       ),
                       const SizedBox(height: 13),
@@ -110,6 +114,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         autofillHints: const [AutofillHints.password],
                         decoration: InputDecoration(
                           labelText: 'Password',
+                          hintText: 'Enter account password',
                           prefixIcon: const Icon(Icons.lock_outline_rounded),
                           suffixIcon: IconButton(
                             tooltip: _showPassword ? 'Hide password' : 'Show password',

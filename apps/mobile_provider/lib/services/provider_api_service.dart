@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ProviderSession {
   ProviderSession({
@@ -15,6 +16,22 @@ class ProviderSession {
   final String email;
   final String providerId;
   final String businessName;
+
+  Map<String, dynamic> toJson() => {
+    'token': token,
+    'userId': userId,
+    'email': email,
+    'providerId': providerId,
+    'businessName': businessName,
+  };
+
+  factory ProviderSession.fromJson(Map<String, dynamic> json) => ProviderSession(
+    token: json['token'] as String? ?? '',
+    userId: json['userId'] as String? ?? '',
+    email: json['email'] as String? ?? '',
+    providerId: json['providerId'] as String? ?? '',
+    businessName: json['businessName'] as String? ?? '',
+  );
 }
 
 class DashboardMetrics {
@@ -46,6 +63,37 @@ class ProviderApiService {
   );
 
   static ProviderSession? currentSession;
+  static const String _sessionKey = 'mess_provider_saved_session';
+
+  static Future<void> saveSession(ProviderSession session) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_sessionKey, jsonEncode(session.toJson()));
+      currentSession = session;
+    } catch (_) {}
+  }
+
+  static Future<ProviderSession?> loadSavedSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final str = prefs.getString(_sessionKey);
+      if (str != null && str.isNotEmpty) {
+        final json = jsonDecode(str) as Map<String, dynamic>;
+        final session = ProviderSession.fromJson(json);
+        currentSession = session;
+        return session;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> clearSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_sessionKey);
+      currentSession = null;
+    } catch (_) {}
+  }
 
   static Future<ProviderSession> login({
     required String email,
@@ -82,7 +130,7 @@ class ProviderApiService {
         providerId: providerId.toString(),
         businessName: businessName.toString(),
       );
-      currentSession = session;
+      await saveSession(session);
       return session;
     } else {
       throw Exception(data['error'] ?? data['message'] ?? 'Login failed. Please verify credentials.');
@@ -145,7 +193,7 @@ class ProviderApiService {
         providerId: providerId.toString(),
         businessName: name.toString(),
       );
-      currentSession = session;
+      await saveSession(session);
       return session;
     } else {
       throw Exception(data['error'] ?? data['message'] ?? 'Registration failed. Please check inputs.');
