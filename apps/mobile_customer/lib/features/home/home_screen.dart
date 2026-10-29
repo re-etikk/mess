@@ -659,14 +659,20 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.85,
+      ),
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
         top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        bottom: bottomInset + 16,
       ),
-      child: Column(
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -732,6 +738,7 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
             )),
           ],
         ],
+      ),
       ),
     );
   }

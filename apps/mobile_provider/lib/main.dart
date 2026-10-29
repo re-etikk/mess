@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/provider_api_service.dart';
@@ -1352,20 +1354,14 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         itemsExtra = (currentMenu['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
         itemsUnavailable = (currentMenu['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
       } else {
-        itemsIncluded = ['Dal Tadka', 'Steamed Rice', 'Phulka Roti (4 pcs)', 'Seasonal Sabzi', 'Salad'];
-        itemsExtra = [
-          {'name': 'Paneer Butter Masala', 'price': 40, 'is_available': true},
-          {'name': 'Gulab Jamun (2 pcs)', 'price': 25, 'is_available': true},
-          {'name': 'Extra Roti (Set of 2)', 'price': 15, 'is_available': true},
-        ];
+        itemsIncluded = [];
+        itemsExtra = [];
         itemsUnavailable = [];
       }
     } catch (_) {
-      itemsIncluded = ['Dal Tadka', 'Steamed Rice', 'Phulka Roti (4 pcs)', 'Seasonal Sabzi', 'Salad'];
-      itemsExtra = [
-        {'name': 'Paneer Butter Masala', 'price': 40, 'is_available': true},
-        {'name': 'Extra Roti (Set of 2)', 'price': 15, 'is_available': true},
-      ];
+      itemsIncluded = [];
+      itemsExtra = [];
+      itemsUnavailable = [];
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -1587,6 +1583,12 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         const SizedBox(height: 18),
         if (loading)
           const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: orange)))
+        else if (itemsIncluded.isEmpty && itemsExtra.isEmpty)
+          EmptyStateCard(
+            icon: Icons.restaurant_menu_outlined,
+            title: 'No dishes configured for ${slot.toUpperCase()}',
+            subtitle: 'Tap "+ Add Dish" above to add dishes included in your daily thali or special paid extras.',
+          )
         else ...[
           Text('Thali Included Dishes (${itemsIncluded.length})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink)),
           const SizedBox(height: 8),
@@ -2065,6 +2067,121 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   List<Map<String, dynamic>> plans = [];
   String subFilter = 'All';
 
+  // Bank & Payout state
+  Map<String, String>? _bankDetails;
+  
+  Future<void> _loadBankDetails() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('mess_bank_${widget.session.providerId}');
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            _bankDetails = decoded.map((k, v) => MapEntry(k, v.toString()));
+                      });
+          return;
+        }
+      }
+    } catch (_) {}
+      }
+
+  Future<void> _saveBankDetails(Map<String, String> data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mess_bank_${widget.session.providerId}', jsonEncode(data));
+      if (mounted) {
+        setState(() => _bankDetails = data);
+        showNotice(context, 'Bank details updated successfully!');
+      }
+    } catch (_) {}
+  }
+
+  void _openBankSheet() {
+    final holderCtrl = TextEditingController(text: _bankDetails?['holder'] ?? widget.session.businessName);
+    final bankCtrl = TextEditingController(text: _bankDetails?['bank'] ?? '');
+    final accCtrl = TextEditingController(text: _bankDetails?['acc'] ?? '');
+    final ifscCtrl = TextEditingController(text: _bankDetails?['ifsc'] ?? '');
+    final upiCtrl = TextEditingController(text: _bankDetails?['upi'] ?? '');
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Bank Account & UPI Details', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: ink)),
+                    IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const FieldLabel('Account Holder Name'),
+                TextField(controller: holderCtrl, decoration: const InputDecoration(hintText: 'e.g. Ramesh Kumar')),
+                const SizedBox(height: 12),
+                const FieldLabel('Bank Name'),
+                TextField(controller: bankCtrl, decoration: const InputDecoration(hintText: 'e.g. State Bank of India, HDFC Bank')),
+                const SizedBox(height: 12),
+                const FieldLabel('Account Number'),
+                TextField(controller: accCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'e.g. 50100234567890')),
+                const SizedBox(height: 12),
+                const FieldLabel('IFSC Code'),
+                TextField(controller: ifscCtrl, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(hintText: 'e.g. SBIN0004210')),
+                const SizedBox(height: 12),
+                const FieldLabel('UPI ID (Optional)'),
+                TextField(controller: upiCtrl, decoration: const InputDecoration(hintText: 'e.g. yourname@okhdfcbank')),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton(
+                    onPressed: () {
+                      final holder = holderCtrl.text.trim();
+                      final bank = bankCtrl.text.trim();
+                      final acc = accCtrl.text.trim();
+                      final ifsc = ifscCtrl.text.trim().toUpperCase();
+                      final upi = upiCtrl.text.trim();
+
+                      if (holder.isEmpty || bank.isEmpty || acc.length < 6 || ifsc.length < 4) {
+                        showNotice(context, 'Please enter valid Account Holder, Bank Name, Account Number and IFSC', isError: true);
+                        return;
+                      }
+
+                      _saveBankDetails({
+                        'holder': holder,
+                        'bank': bank,
+                        'acc': acc,
+                        'ifsc': ifsc,
+                        'upi': upi,
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                    child: const Text('Save Bank Details', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // Timings controllers
   final bfStart = TextEditingController(text: '07:30 AM');
   final bfEnd = TextEditingController(text: '10:00 AM');
@@ -2085,6 +2202,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
     _fetchDetail();
     _fetchPlans();
     if (widget.kind == 'Timings') _loadTimings();
+    if (widget.kind == 'Earnings') _loadBankDetails();
   }
 
   Future<void> _loadTimings() async {
@@ -3152,14 +3270,18 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
 
       case 'Earnings':
       default:
+        final hasBank = _bankDetails != null && (_bankDetails!['bank']?.isNotEmpty ?? false);
+        final accNum = _bankDetails?['acc'] ?? '';
+        final maskedAcc = accNum.length > 4 ? '•••• ${accNum.substring(accNum.length - 4)}' : accNum;
+
         return _detailScaffold(context, 'Settlements & Payouts', [
           Row(
             children: [
               Expanded(
                 child: MetricCard(
                   title: 'Available Payout',
-                  value: '₹14,850',
-                  note: 'Net student balance',
+                  value: '₹0',
+                  note: 'No pending balance',
                   icon: Icons.account_balance_wallet_outlined,
                   tint: const Color(0xFFDDF2E6),
                 ),
@@ -3168,7 +3290,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
               Expanded(
                 child: MetricCard(
                   title: 'Total Settled',
-                  value: '₹48,200',
+                  value: '₹0',
                   note: 'Paid to your bank',
                   icon: Icons.check_circle_outline,
                   tint: const Color(0xFFFFE8C5),
@@ -3177,112 +3299,125 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Connected Bank / UPI',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink),
+          if (!hasBank)
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: orange.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: green.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text('VERIFIED', style: TextStyle(color: green, fontWeight: FontWeight.w800, fontSize: 10)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Account Holder: ${widget.session.businessName}', style: const TextStyle(fontSize: 13, color: muted)),
-                  const SizedBox(height: 4),
-                  const Text('Bank: State Bank of India •••• 5849', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
-                  const SizedBox(height: 4),
-                  const Text('IFSC: SBIN0004210 • Branch: Main City', style: TextStyle(fontSize: 13, color: muted)),
-                  const SizedBox(height: 4),
-                  Text('UPI ID: mess.${widget.session.providerId.substring(0, 6)}@oksbi', style: const TextStyle(fontSize: 13, color: muted)),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        showNotice(context, 'Bank account update request submitted for admin review.');
-                      },
-                      icon: const Icon(Icons.edit_outlined, size: 16),
-                      label: const Text('Update Bank / UPI Details'),
+                      child: const Icon(Icons.account_balance_outlined, color: orange, size: 28),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 14),
+                    const Text(
+                      'No Bank Account or UPI Connected',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Connect your bank account or UPI ID to receive automatic weekly payouts for verified student meal claims.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: muted, height: 1.4),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: FilledButton.icon(
+                        onPressed: _openBankSheet,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('+ Connect Bank / UPI Account', style: TextStyle(fontWeight: FontWeight.w800)),
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Connected Bank / UPI',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: green.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text('VERIFIED', style: TextStyle(color: green, fontWeight: FontWeight.w800, fontSize: 10)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Account Holder: ${_bankDetails!['holder'] ?? widget.session.businessName}', style: const TextStyle(fontSize: 13, color: muted)),
+                    const SizedBox(height: 4),
+                    Text('Bank: ${_bankDetails!['bank']} $maskedAcc', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
+                    const SizedBox(height: 4),
+                    Text('IFSC: ${_bankDetails!['ifsc']}', style: const TextStyle(fontSize: 13, color: muted)),
+                    if ((_bankDetails!['upi'] ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text('UPI ID: ${_bankDetails!['upi']}', style: const TextStyle(fontSize: 13, color: muted)),
+                    ],
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _openBankSheet,
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        label: const Text('Update Bank / UPI Details'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
             height: 48,
             child: FilledButton.icon(
-              onPressed: () {
-                showDialog<void>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    title: const Text('Request Early Payout?'),
-                    content: const Text('Your current available balance of ₹14,850 will be credited to your registered bank account within 2-4 hours.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          showNotice(context, '✅ Early payout requested! ₹14,850 processing.');
-                        },
-                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
-                        child: const Text('Confirm Payout'),
-                      ),
-                    ],
-                  ),
-                );
-              },
+              onPressed: null,
               icon: const Icon(Icons.send_outlined, size: 18),
-              label: const Text('Request Early Payout (₹14,850)', style: TextStyle(fontWeight: FontWeight.w800)),
-              style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+              label: const Text('Request Early Payout (₹0)', style: TextStyle(fontWeight: FontWeight.w800)),
+              style: FilledButton.styleFrom(
+                disabledBackgroundColor: const Color(0xFFE2DDD5),
+                disabledForegroundColor: muted,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Center(
+            child: Text(
+              'Minimum balance of ₹500 required for early payout withdrawal.',
+              style: TextStyle(fontSize: 11, color: muted),
             ),
           ),
           const SizedBox(height: 20),
           const Text('Recent Payout Transfers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
           const SizedBox(height: 10),
-          ...[
-            {'id': 'TXN-984210', 'date': 'Today, 11:30 AM', 'amount': '₹6,400', 'mode': 'UPI Direct', 'status': 'PROCESSED'},
-            {'id': 'TXN-983190', 'date': '24 Oct 2026', 'amount': '₹18,500', 'mode': 'IMPS Transfer', 'status': 'SETTLED'},
-            {'id': 'TXN-981045', 'date': '17 Oct 2026', 'amount': '₹23,300', 'mode': 'NEFT Bank', 'status': 'SETTLED'},
-          ].map((txn) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: ListTile(
-                leading: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(color: const Color(0xFFDDF2E6), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.check_circle_outline, color: green, size: 22),
-                ),
-                title: Text('${txn['amount']} • ${txn['mode']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: ink)),
-                subtitle: Text('UTR: ${txn['id']} • ${txn['date']}', style: const TextStyle(fontSize: 12, color: muted)),
-                trailing: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(color: green.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
-                  child: Text(txn['status']!, style: const TextStyle(color: green, fontWeight: FontWeight.w800, fontSize: 10)),
-                ),
-              ),
-            ),
-          )),
+          const EmptyStateCard(
+            icon: Icons.receipt_long_outlined,
+            title: 'No payout transfers yet',
+            subtitle: 'Payout settlements for verified student meal claims will appear here after admin processing.',
+          ),
         ]);
     }
   }

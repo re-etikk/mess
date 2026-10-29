@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, updateProviderStatus } from '@/lib/platform-service';
+import { platformStore, updateProviderStatus, isProviderOpen } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'providerId is required' }, { status: 400 });
   }
 
+  const isOpen = isProviderOpen(providerId);
   const provider = platformStore.providers.get(providerId);
-  const isOpen = provider ? provider.is_open_today !== false : true;
 
   return NextResponse.json({
     provider_id: providerId,

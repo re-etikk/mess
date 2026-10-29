@@ -12,28 +12,6 @@ export async function GET(req: NextRequest) {
     (m) => m.provider_id === providerId
   );
 
-  if (menus.length === 0) {
-    // Seed default if provider has none
-    const lunchKey = `${providerId}_Daily_LUNCH`;
-    const defaultLunch: MenuData = {
-      id: `menu-${providerId}-lunch`,
-      provider_id: providerId,
-      day_of_week: 'Daily',
-      slot: 'LUNCH',
-      items_included: ['Dal Tadka', 'Steamed Basmati Rice', '4 Phulka Rotis', 'Seasonal Sabzi', 'Salad & Pickle'],
-      items_extra: [
-        { name: 'Paneer Butter Masala', price: 35, limit: 2, is_available: true },
-        { name: 'Extra Roti (Set of 2)', price: 15, limit: 4, is_available: true },
-        { name: 'Gulab Jamun (2 pcs)', price: 30, limit: 2, is_available: true },
-      ],
-      items_unavailable: [],
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    };
-    platformStore.menus.set(lunchKey, defaultLunch);
-    menus = [defaultLunch];
-  }
-
   if (slot) {
     menus = menus.filter((m) => m.slot === slot);
   }
@@ -61,7 +39,7 @@ export async function POST(req: NextRequest) {
         provider_id: providerId,
         day_of_week: dayOfWeek,
         slot,
-        items_included: ['Dal Tadka', 'Rice', '4 Rotis', 'Sabzi'],
+        items_included: [],
         items_extra: [],
         items_unavailable: [],
         is_active: true,
@@ -70,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'add_item') {
-      const itemName = body.name?.trim();
+      const itemName = (body.name || body.item_name)?.trim();
       const isExtra = body.is_extra === true || body.type === 'extra';
       const price = Number(body.price) || 0;
 
@@ -97,7 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'remove_item') {
-      const itemName = body.name?.trim();
+      const itemName = (body.name || body.item_name)?.trim();
       if (!itemName) {
         return NextResponse.json({ success: false, error: 'Item name is required.' }, { status: 400 });
       }
@@ -116,7 +94,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'toggle_availability') {
-      const itemName = body.name?.trim();
+      const itemName = (body.name || body.item_name)?.trim();
       if (!itemName) {
         return NextResponse.json({ success: false, error: 'Item name is required.' }, { status: 400 });
       }

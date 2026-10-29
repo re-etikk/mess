@@ -12,25 +12,27 @@ class MessApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final appState = AppStateScope.of(context);
-    return AnimatedBuilder(
-      animation: appState,
-      builder: (context, _) => MaterialApp(
-        title: 'MESS | Your Meals, Your Choice',
-        debugShowCheckedModeBanner: false,
-        theme: MessTheme.light(),
-        home: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
-          child: appState.isSignedIn ? const HomeShell(key: ValueKey('home-shell')) : const LoginScreen(key: ValueKey('login')),
-        ),
-        onGenerateRoute: (settings) {
-          if (settings.name == '/login') return messRoute(const LoginScreen());
-          return null;
-        },
-      ),
+    return MaterialApp(
+      title: 'MESS | Your Meals, Your Choice',
+      debugShowCheckedModeBanner: false,
+      theme: MessTheme.light(),
+      home: const _MessRootGate(),
+      onGenerateRoute: (settings) {
+        if (settings.name == '/login') return messRoute(const LoginScreen());
+        return null;
+      },
     );
+  }
+}
+
+class _MessRootGate extends StatelessWidget {
+  const _MessRootGate();
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = AppStateScope.of(context);
+    return appState.isSignedIn
+        ? const HomeShell(key: ValueKey('home-shell'))
+        : const LoginScreen(key: ValueKey('login'));
   }
 }

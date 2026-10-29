@@ -367,10 +367,12 @@ class ProviderApiService {
       final uri = Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
       final response = await http.get(uri).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final menuList = (data['menus'] as List<dynamic>? ?? data['menu'] as List<dynamic>? ?? []);
+        return {'menus': menuList, 'menu': menuList};
       }
     } catch (_) {}
-    return {'menu': []};
+    return {'menus': [], 'menu': []};
   }
 
   static Future<void> addMenuItem({
@@ -387,6 +389,7 @@ class ProviderApiService {
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'add_item',
+        'name': name,
         'item_name': name,
         'slot': slot.toLowerCase(),
         'price': price,
@@ -407,6 +410,7 @@ class ProviderApiService {
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'remove_item',
+        'name': name,
         'item_name': name,
         'slot': slot.toLowerCase(),
       }),
@@ -425,6 +429,7 @@ class ProviderApiService {
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'toggle_availability',
+        'name': name,
         'item_name': name,
         'is_available': isAvailable,
       }),
@@ -573,7 +578,7 @@ class ProviderApiService {
 
   static Future<bool> fetchKitchenStatus(String providerId) async {
     try {
-      final uri = Uri.parse('/api/provider/status?provider_id=');
+      final uri = Uri.parse('$baseUrl/api/provider/status?provider_id=$providerId');
       final response = await http.get(uri).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -588,7 +593,7 @@ class ProviderApiService {
     required bool isOpen,
   }) async {
     try {
-      final uri = Uri.parse('/api/provider/status');
+      final uri = Uri.parse('$baseUrl/api/provider/status');
       final response = await http
           .post(
             uri,

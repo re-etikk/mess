@@ -138,6 +138,7 @@ class PlatformStore {
   timings: Map<string, ProviderTimingsData> = new Map();
   invoices: Map<string, InvoiceData> = new Map();
   providerScanCounts: Map<string, { total: number; unbilled: number }> = new Map();
+  providerStatuses: Map<string, boolean> = new Map();
   reviews: Map<string, MessReview> = new Map();
   promos: Map<string, PromoCode> = new Map();
   announcements: Map<string, Announcement> = new Map();
@@ -506,13 +507,21 @@ export function generateProviderDailyQR(params: {
 }
 
 /** Atomic meal redemption logic */
+export function isProviderOpen(providerId: string): boolean {
+  if (platformStore.providerStatuses.has(providerId)) {
+    return platformStore.providerStatuses.get(providerId)!;
+  }
+  const provider = platformStore.providers.get(providerId);
+  return provider ? provider.is_open_today !== false : true;
+}
+
 export function updateProviderStatus(providerId: string, isOpen: boolean): boolean {
+  platformStore.providerStatuses.set(providerId, isOpen);
   const provider = platformStore.providers.get(providerId);
   if (provider) {
     provider.is_open_today = isOpen;
-    return true;
   }
-  return false;
+  return true;
 }
 
 export function processMealRedemption(params: {
@@ -539,10 +548,10 @@ export function processMealRedemption(params: {
 
   // Check if Mess is marked Closed / OFF Today
   const provider = platformStore.providers.get(providerId);
-  if (provider && provider.is_open_today === false) {
+  if (!isProviderOpen(providerId)) {
     return {
       success: false,
-      message: `❌ Mess Closed Today: "${provider.display_name}" is marked CLOSED / OFF today by the kitchen owner. No meals can be redeemed today.`,
+      message: `❌ Mess Closed Today: "${provider?.display_name || "Kitchen Partner"}" is marked CLOSED / OFF today by the kitchen owner. No meals can be redeemed today.`,
     };
   }
 
