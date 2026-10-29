@@ -34,11 +34,8 @@ export async function GET(
     slot,
     menu: menu || {
       slot,
-      items_included: ['Dal Tadka', 'Rice', '4 Rotis', 'Sabzi'],
-      items_extra: [
-        { name: 'Paneer Butter Masala', price: 40 },
-        { name: 'Extra Roti (2)', price: 15 },
-      ],
+      items_included: [],
+      items_extra: [],
     },
   });
 }

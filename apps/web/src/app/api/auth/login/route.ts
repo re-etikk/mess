@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSessionClient } from '@/lib/supabase/server';
 
@@ -176,7 +176,6 @@ export async function POST(req: NextRequest) {
                 created_at: dbP.created_at,
               };
               platformStore.providers.set(found.id, found);
-              seedProviderPlansAndMenu(found.id);
             }
           }
         } catch {}
@@ -188,7 +187,16 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = authenticatedUserId || `usr-${resolvedRole}-${Buffer.from(authenticatedEmail).toString('hex').slice(0, 8)}`;
-    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email: authenticatedEmail, role: resolvedRole })).toString('base64url')}`;
+    const providerIdVal = providerData?.id || (resolvedRole === 'provider' ? (authenticatedUserId || userId) : undefined);
+    const token = `jwt_session_${Buffer.from(
+      JSON.stringify({
+        userId,
+        email: authenticatedEmail,
+        role: resolvedRole,
+        providerId: providerIdVal,
+        provider_id: providerIdVal,
+      })
+    ).toString('base64url')}`;
 
     return NextResponse.json({
       success: true,

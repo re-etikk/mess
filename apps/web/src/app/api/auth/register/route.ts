@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
@@ -36,11 +36,12 @@ export async function POST(req: NextRequest) {
 
     const role = requestedRole === 'provider' ? 'provider' : 'customer';
     const userId = `usr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email, role })).toString('base64url')}`;
-
     let providerData = null;
+    let providerIdVal: string | undefined = undefined;
+
     if (role === 'provider') {
       const providerId = `prov-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`;
+      providerIdVal = providerId;
       const businessName = body.business_name || body.display_name || `${name} Mess`;
       const slug = businessName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       providerData = {
@@ -62,7 +63,6 @@ export async function POST(req: NextRequest) {
         created_at: new Date().toISOString(),
       };
       platformStore.providers.set(providerId, providerData);
-      seedProviderPlansAndMenu(providerId);
 
       // Persist to Supabase GoTrue Auth and Providers table if admin client available
       try {
@@ -110,6 +110,16 @@ export async function POST(req: NextRequest) {
         console.warn('Supabase customer registration note:', err);
       }
     }
+
+    const token = `jwt_session_${Buffer.from(
+      JSON.stringify({
+        userId,
+        email,
+        role,
+        providerId: providerIdVal,
+        provider_id: providerIdVal,
+      })
+    ).toString('base64url')}`;
 
     return NextResponse.json({
       success: true,

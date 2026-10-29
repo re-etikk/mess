@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'core/theme/mess_theme.dart';
 import 'core/theme/thali_theme.dart';
 import 'core/state/app_state.dart';
 import 'core/widgets/app_state_scope.dart';
@@ -14,19 +13,18 @@ class MessApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MESS | Your Meals, Your Choice',
-      debugShowCheckedModeBanner: false,
-      theme: ThaliTheme.light,
-      builder: (context, child) => AppStateScope(
-        notifier: appState,
-        child: child ?? const SizedBox.shrink(),
+    return AppStateScope(
+      notifier: appState,
+      child: MaterialApp(
+        title: 'MESS | Your Meals, Your Choice',
+        debugShowCheckedModeBanner: false,
+        theme: ThaliTheme.light,
+        home: const _MessRootGate(),
+        onGenerateRoute: (settings) {
+          if (settings.name == '/login') return messRoute(const LoginScreen());
+          return null;
+        },
       ),
-      home: const _MessRootGate(),
-      onGenerateRoute: (settings) {
-        if (settings.name == '/login') return messRoute(const LoginScreen());
-        return null;
-      },
     );
   }
 }

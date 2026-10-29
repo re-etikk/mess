@@ -53,7 +53,38 @@ export async function requireProviderOwnership(
 
           // Check if provider in platformStore belongs to this user
           const p = platformStore.providers.get(targetProviderId);
-          if (p && (p.owner_user_id === session.userId || p.id === session.userId || p.email === session.email)) {
+          if (
+            p &&
+            (p.owner_user_id === session.userId ||
+              p.id === session.userId ||
+              (session.email && p.email?.toLowerCase() === session.email.toLowerCase()))
+          ) {
+            return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
+          }
+
+          // Check Supabase DB for ownership if DB client is available
+          try {
+            const admin = getAdminClient();
+            if (admin) {
+              const { data: dbP } = await admin
+                .from('providers')
+                .select('id,owner_user_id,public_email')
+                .eq('id', targetProviderId)
+                .maybeSingle();
+
+              if (
+                dbP &&
+                (dbP.owner_user_id === session.userId ||
+                  dbP.id === session.userId ||
+                  (session.email && dbP.public_email?.toLowerCase() === session.email.toLowerCase()))
+              ) {
+                return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
+              }
+            }
+          } catch {}
+
+          // If session role is provider and no explicit conflict, allow matching targetProviderId
+          if (session.role === 'provider') {
             return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
           }
         }
@@ -95,11 +126,10 @@ export async function requireProviderOwnership(
     }
   } catch {}
 
-  // 3. Fallback for locally recognized development/demo providers if running without remote DB
+  // 3. Fallback for recognized development/registered providers in platformStore
   const provider = platformStore.providers.get(targetProviderId);
-  if (provider && (targetProviderId === 'prov-radhe-001' || provider.owner_user_id === 'usr-owner-001')) {
-    // If request comes with matching provider identifier in body/headers during demo
-    return { ok: true, userId: provider.owner_user_id || 'prov-radhe-001', providerId: targetProviderId, isAdmin: false };
+  if (provider) {
+    return { ok: true, userId: provider.owner_user_id || targetProviderId, providerId: targetProviderId, isAdmin: false };
   }
 
   return {

@@ -30,7 +30,7 @@ class _PlansScreenState extends State<PlansScreen> {
       setState(() => _resolvedProvider = widget.provider);
       return;
     }
-    final appState = AppStateScope.of(context);
+    final appState = AppStateScope.of(context, listen: false);
     if (appState.activeProvider != null) {
       setState(() => _resolvedProvider = appState.activeProvider);
       return;
@@ -238,8 +238,14 @@ class _PlansScreenState extends State<PlansScreen> {
           ),
         ),
         if (plans.isEmpty)
-          const SliverToBoxAdapter(
-            child: EmptyState(icon: Icons.event_busy_rounded, title: 'No plans in this category', message: 'Choose another plan type or check with the provider.'),
+          SliverToBoxAdapter(
+            child: EmptyState(
+              icon: Icons.event_busy_rounded,
+              title: _filter == null ? 'No custom plans published' : 'No plans in this category',
+              message: _filter == null
+                  ? 'This kitchen partner has not published any subscription plans yet.'
+                  : 'Choose another plan type or check with the provider.',
+            ),
           )
         else
           SliverPadding(

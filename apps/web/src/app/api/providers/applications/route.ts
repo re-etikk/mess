@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
-import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -189,8 +189,6 @@ export async function POST(request: NextRequest) {
       cuisines: ['North Indian', 'Homestyle'],
       dietary_types: ['veg'],
     });
-
-    seedProviderPlansAndMenu(savedProviderId);
 
     return NextResponse.json(
       {

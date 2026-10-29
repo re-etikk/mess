@@ -4,7 +4,6 @@ import crypto from 'crypto';
 import {
   platformStore,
   SubscriptionData,
-  seedProviderPlansAndMenu,
 } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
 
@@ -61,12 +60,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Ensure provider exists in memory & plans are seeded
+    // 1. Ensure provider exists in memory
     let provider = platformStore.providers.get(provider_id);
-    if (!provider) {
-      seedProviderPlansAndMenu(provider_id);
-      provider = platformStore.providers.get(provider_id);
-    }
 
     // 2. Select Plan
     let plan = plan_id ? platformStore.plans.get(plan_id) : null;
@@ -77,11 +72,14 @@ export async function POST(req: NextRequest) {
       );
       if (providerPlans.length > 0) {
         plan = providerPlans[0];
-      } else {
-        // Fallback default
-        seedProviderPlansAndMenu(provider_id);
-        plan = platformStore.plans.get(`plan-${provider_id}-monthly`) || Array.from(platformStore.plans.values())[0];
       }
+    }
+
+    if (!plan) {
+      return NextResponse.json(
+        { success: false, error: 'No active subscription plan found. Please publish a plan in Plans & Pricing first.' },
+        { status: 400 }
+      );
     }
 
     const planType = plan?.plan_type || 'fixed_period';

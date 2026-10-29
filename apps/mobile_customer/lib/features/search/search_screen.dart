@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
@@ -14,6 +15,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _query = TextEditingController();
+  Timer? _debounceTimer;
   String _mealFilter = 'All meals';
   String _typeFilter = 'All plans';
   bool _openOnly = false;
@@ -34,7 +36,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _hasError = false;
     });
     try {
-      final state = AppStateScope.of(context);
+      final state = AppStateScope.of(context, listen: false);
       final list = await state.getProviders();
       if (mounted) {
         setState(() {
@@ -52,8 +54,29 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  void _onQueryChanged(String query) {
+    setState(() {});
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      _executeSearch(query.trim());
+    });
+  }
+
+  Future<void> _executeSearch(String query) async {
+    try {
+      final state = AppStateScope.of(context, listen: false);
+      final list = await state.searchProviders(query);
+      if (mounted) {
+        setState(() {
+          _providers = list;
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _query.dispose();
     super.dispose();
   }
@@ -176,7 +199,8 @@ class _SearchScreenState extends State<SearchScreen> {
                   ),
                   child: TextField(
                     controller: _query,
-                    onChanged: (_) => setState(() {}),
+                    onChanged: _onQueryChanged,
+                    onSubmitted: (val) => _executeSearch(val.trim()),
                     textInputAction: TextInputAction.search,
                     style: const TextStyle(
                       color: MessColors.ink,
@@ -200,7 +224,7 @@ class _SearchScreenState extends State<SearchScreen> {
                           : IconButton(
                               onPressed: () {
                                 _query.clear();
-                                setState(() {});
+                                _onQueryChanged('');
                               },
                               icon: const Icon(Icons.close_rounded, size: 18, color: MessColors.muted),
                             ),

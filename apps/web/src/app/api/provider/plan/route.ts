@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { platformStore, PlanData } from '@/lib/platform-service';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,13 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const providerId = body.provider_id || 'prov-radhe-001';
+
+    // Enforce Tenant Authorization / IDOR Protection
+    const auth = await requireProviderOwnership(req, providerId);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const planIdParam = body.id || body.plan_id;
     const name = body.name?.trim();
     const planType = body.plan_type || 'fixed_period'; // 'fixed_period' | 'meal_credits' | 'daily'
@@ -92,9 +100,16 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const planId = searchParams.get('plan_id') || searchParams.get('id');
+  const providerId = searchParams.get('provider_id') || searchParams.get('providerId') || 'prov-radhe-001';
 
   if (!planId) {
     return NextResponse.json({ success: false, error: 'Plan ID is required.' }, { status: 400 });
+  }
+
+  // Enforce Tenant Authorization / IDOR Protection
+  const auth = await requireProviderOwnership(req, providerId);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
   }
 
   if (platformStore.plans.has(planId)) {

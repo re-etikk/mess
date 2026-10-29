@@ -123,6 +123,12 @@ class AppState extends ChangeNotifier {
     return providers;
   }
 
+  Future<List<MessProvider>> searchProviders(String query) async {
+    final providers = await repository.searchProviders(query: query);
+    _cachedProviders = providers;
+    return providers;
+  }
+
   Future<MessProvider?> getProvider(String id) async {
     final provider = await repository.getProvider(id);
     if (provider != null && !_cachedProviders.any((p) => p.id == provider.id)) {

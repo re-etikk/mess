@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -45,7 +45,6 @@ export async function GET(req: NextRequest) {
                   status: 'active',
                   created_at: app.created_at || u.created_at,
                 });
-                seedProviderPlansAndMenu(pId);
               }
             }
           }
@@ -81,7 +80,6 @@ export async function GET(req: NextRequest) {
                 status: 'active',
                 created_at: dbP.created_at,
               });
-              seedProviderPlansAndMenu(dbP.id);
             }
           }
         }

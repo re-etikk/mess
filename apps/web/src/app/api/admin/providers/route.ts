@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
-import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore } from '@/lib/platform-service';
 import { sendProviderApprovalNotice } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
@@ -261,9 +261,6 @@ export async function PATCH(request: NextRequest) {
     if (provider) {
       provider.status = newStatus;
       providerName = provider.display_name;
-    }
-    if (approved) {
-      seedProviderPlansAndMenu(cid);
     }
   }
 

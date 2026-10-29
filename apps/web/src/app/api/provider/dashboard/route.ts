@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, getCurrentMealSlot, generateProviderDailyQR, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore, getCurrentMealSlot, generateProviderDailyQR } from '@/lib/platform-service';
 import { getIndiaDateString } from '@/lib/crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
 
@@ -41,7 +41,6 @@ export async function GET(req: NextRequest) {
             created_at: dbP.created_at,
           };
           platformStore.providers.set(provider.id, provider);
-          seedProviderPlansAndMenu(provider.id);
         }
       }
     } catch (err) {

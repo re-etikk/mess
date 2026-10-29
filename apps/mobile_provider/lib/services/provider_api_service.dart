@@ -383,9 +383,12 @@ class ProviderApiService {
     bool isExtra = false,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    await http.post(
+    final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+      },
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'add_item',
@@ -396,6 +399,10 @@ class ProviderApiService {
         'is_extra': isExtra,
       }),
     ).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to add menu item');
+    }
   }
 
   static Future<void> removeMenuItem({
@@ -404,9 +411,12 @@ class ProviderApiService {
     required String slot,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    await http.post(
+    final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+      },
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'remove_item',
@@ -415,6 +425,10 @@ class ProviderApiService {
         'slot': slot.toLowerCase(),
       }),
     ).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to remove menu item');
+    }
   }
 
   static Future<void> toggleMenuAvailability({
@@ -423,9 +437,12 @@ class ProviderApiService {
     required bool isAvailable,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    await http.post(
+    final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+      },
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'toggle_availability',
@@ -434,6 +451,10 @@ class ProviderApiService {
         'is_available': isAvailable,
       }),
     ).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to toggle availability');
+    }
   }
 
   static Future<void> savePlan({
@@ -450,7 +471,10 @@ class ProviderApiService {
     final uri = Uri.parse('$baseUrl/api/provider/plan');
     final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+      },
       body: jsonEncode({
         'provider_id': providerId,
         if (planId != null) 'id': planId,
@@ -475,7 +499,16 @@ class ProviderApiService {
     required String planId,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/plan?provider_id=$providerId&plan_id=$planId');
-    await http.delete(uri).timeout(const Duration(seconds: 10));
+    final response = await http.delete(
+      uri,
+      headers: {
+        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+      },
+    ).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to delete plan');
+    }
   }
 
   static Future<List<Map<String, dynamic>>> fetchOrders(String providerId) async {

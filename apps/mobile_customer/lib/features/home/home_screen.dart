@@ -667,7 +667,7 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
         top: false,
         child: Container(
           constraints: BoxConstraints(
-            maxHeight: screenHeight * 0.80,
+            maxHeight: ((screenHeight - bottomInset) * 0.82).clamp(200.0, screenHeight * 0.85),
           ),
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
           child: Column(

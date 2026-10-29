@@ -35,6 +35,29 @@ class HttpMessRepository implements MessRepository {
   }
 
   @override
+  Future<List<MessProvider>> searchProviders({String query = ''}) async {
+    try {
+      final qParam = query.trim().isNotEmpty ? '?q=${Uri.encodeComponent(query.trim())}' : '';
+      final uri = Uri.parse('$baseUrl/api/mess/search$qParam');
+      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = jsonDecode(response.body);
+        final list = (data is Map && data['providers'] is List)
+            ? (data['providers'] as List)
+            : (data is List ? data : []);
+
+        final providers = list.map((json) => _parseProvider(json as Map<String, dynamic>)).toList();
+        if (query.trim().isEmpty) {
+          _cachedProviders = providers;
+        }
+        return providers;
+      }
+    } catch (_) {}
+    return _cachedProviders;
+  }
+
+  @override
   Future<MessProvider?> getProvider(String providerId) async {
     if (_cachedProviders.isEmpty) {
       await getProviders();
@@ -93,6 +116,8 @@ class HttpMessRepository implements MessRepository {
           message.toLowerCase().contains('pass found') ||
           message.toLowerCase().contains('renew')) {
         code = 'no_entitlement';
+      } else if (message.toLowerCase().contains('closed') || message.toLowerCase().contains('off today')) {
+        code = 'mess_closed';
       } else if (message.toLowerCase().contains('expired')) {
         code = 'expired_qr';
       }
@@ -195,92 +220,135 @@ class HttpMessRepository implements MessRepository {
     final description = json['description']?.toString() ?? 'Homely nutritious daily meals for students.';
     final isOpen = json['status']?.toString() == 'active' && json['is_open_today'] != false;
 
-    // Parse plans
+    // Parse plans: strictly reflect provider's plans. ZERO FAKE DATA.
     final rawPlans = (json['plans'] as List<dynamic>? ?? []);
     final List<MealPlan> plans = [];
-    if (rawPlans.isNotEmpty) {
-      for (final p in rawPlans) {
-        final planMap = p as Map<String, dynamic>;
-        final planTypeStr = planMap['plan_type']?.toString() ?? 'fixed_period';
-        final pType = planTypeStr == 'daily'
-            ? SubscriptionType.dailyMeal
-            : (planTypeStr == 'meal_credits' ? SubscriptionType.mealTracker : SubscriptionType.fixedPeriod);
-        final pricePaise = (planMap['price_paise'] as num?)?.toInt() ?? 150000;
-        final durDays = (planMap['duration_days'] as num?)?.toInt() ?? 30;
+    for (final p in rawPlans) {
+      final planMap = p as Map<String, dynamic>;
+      final planTypeStr = planMap['plan_type']?.toString() ?? 'fixed_period';
+      final pType = planTypeStr == 'daily'
+          ? SubscriptionType.dailyMeal
+          : (planTypeStr == 'meal_credits' ? SubscriptionType.mealTracker : SubscriptionType.fixedPeriod);
+      final pricePaise = (planMap['price_paise'] as num?)?.toInt() ?? 150000;
+      final durDays = (planMap['duration_days'] as num?)?.toInt() ?? 30;
 
-        plans.add(MealPlan(
-          id: planMap['id']?.toString() ?? 'plan-$durDays',
-          providerId: id,
-          name: planMap['name']?.toString() ?? 'Plan',
-          type: pType,
-          durationDays: durDays,
-          durationMonths: durDays >= 30 ? (durDays ~/ 30) : null,
-          price: (pricePaise / 100).round(),
-          slotIds: const ['lunch', 'dinner'],
-          includedMeals: (planMap['meal_credits'] as num?)?.toInt(),
-          description: planMap['description']?.toString() ?? '',
-        ));
-      }
-    } else {
-      // Default standard plans for provider
-      plans.addAll([
-        MealPlan(id: 'plan-$id-daily', providerId: id, name: 'Daily Meal Pass', type: SubscriptionType.dailyMeal, durationDays: 1, price: 95, slotIds: const ['lunch', 'dinner'], description: 'Single lunch or dinner pass.'),
-        MealPlan(id: 'plan-$id-fixed-15', providerId: id, name: '15-Day Unlimited Access', type: SubscriptionType.fixedPeriod, durationDays: 15, price: 1500, slotIds: const ['lunch', 'dinner'], description: 'Unlimited thali access for 15 days.'),
-        MealPlan(id: 'plan-$id-fixed-30', providerId: id, name: 'Monthly Unlimited Plan', type: SubscriptionType.fixedPeriod, durationDays: 30, durationMonths: 1, price: 2800, slotIds: const ['lunch', 'dinner'], description: 'Unlimited lunch & dinner for 30 days.'),
-        MealPlan(id: 'plan-$id-tracker-60', providerId: id, name: '60-Meal Flexi Tracker', type: SubscriptionType.mealTracker, durationDays: 60, price: 4800, slotIds: const ['lunch', 'dinner'], includedMeals: 60, description: '₹80 per meal. 1 credit deducted per valid redemption.'),
-      ]);
+      plans.add(MealPlan(
+        id: planMap['id']?.toString() ?? 'plan-$durDays',
+        providerId: id,
+        name: planMap['name']?.toString() ?? 'Plan',
+        type: pType,
+        durationDays: durDays,
+        durationMonths: durDays >= 30 ? (durDays ~/ 30) : null,
+        price: (pricePaise / 100).round(),
+        slotIds: const ['lunch', 'dinner'],
+        includedMeals: (planMap['meal_credits'] as num?)?.toInt(),
+        description: planMap['description']?.toString() ?? '',
+      ));
     }
 
-    // Default slots
-    final mealSlots = <MealSlot>[
-      const MealSlot(
-        id: 'breakfast',
-        name: 'Breakfast',
-        startHour: 7,
-        startMinute: 30,
-        endHour: 9,
-        endMinute: 30,
-        menuSummary: 'Poha, Upma, Tea',
-        items: [
-          MenuItem(id: 'poha', name: 'Poha / Upma', kind: FoodItemKind.included, price: 0, portion: '1 serving'),
-          MenuItem(id: 'tea', name: 'Special Masala Tea', kind: FoodItemKind.included, price: 0, portion: '1 cup'),
-        ],
-      ),
-      const MealSlot(
-        id: 'lunch',
-        name: 'Lunch',
-        startHour: 11,
-        startMinute: 30,
-        endHour: 15,
-        endMinute: 0,
-        menuSummary: 'Dal Tadka, Rice, 4 Rotis, Sabzi, Salad',
-        items: [
-          MenuItem(id: 'dal', name: 'Dal Tadka', kind: FoodItemKind.included, price: 0, portion: '1 bowl'),
-          MenuItem(id: 'rice', name: 'Steamed Rice', kind: FoodItemKind.included, price: 0, portion: '1 serving'),
-          MenuItem(id: 'roti4', name: 'Phulka Roti (4)', kind: FoodItemKind.included, price: 0, portion: '4 pieces'),
-          MenuItem(id: 'sabzi', name: 'Seasonal Sabzi', kind: FoodItemKind.included, price: 0, portion: '1 serving'),
-          MenuItem(id: 'salad', name: 'Green Salad & Pickle', kind: FoodItemKind.included, price: 0, portion: '1 plate'),
-          MenuItem(id: 'paneer', name: 'Paneer Butter Masala', kind: FoodItemKind.addOn, price: 35, portion: '1 serving'),
-          MenuItem(id: 'extra_roti', name: 'Extra Roti (Set of 2)', kind: FoodItemKind.addOn, price: 15, portion: '2 pieces'),
-        ],
-      ),
-      const MealSlot(
-        id: 'dinner',
-        name: 'Dinner',
-        startHour: 19,
-        startMinute: 0,
-        endHour: 22,
-        endMinute: 0,
-        menuSummary: 'Mixed Dal, Jeera Rice, 4 Rotis, Sabzi',
-        items: [
-          MenuItem(id: 'dal_d', name: 'Mixed Dal Fry', kind: FoodItemKind.included, price: 0, portion: '1 bowl'),
-          MenuItem(id: 'rice_d', name: 'Jeera Rice', kind: FoodItemKind.included, price: 0, portion: '1 serving'),
-          MenuItem(id: 'roti_d', name: 'Soft Rotis (4)', kind: FoodItemKind.included, price: 0, portion: '4 pieces'),
-          MenuItem(id: 'sabzi_d', name: 'Aloo Gobi Matar', kind: FoodItemKind.included, price: 0, portion: '1 serving'),
-          MenuItem(id: 'sweet', name: 'Gulab Jamun (2 pcs)', kind: FoodItemKind.addOn, price: 30, portion: '2 pieces'),
-        ],
-      ),
-    ];
+    // Parse real menus from provider. ZERO FAKE DATA.
+    final rawMenus = (json['menus'] as List<dynamic>? ?? []);
+    final List<MealSlot> mealSlots = [];
+    if (rawMenus.isNotEmpty) {
+      for (final m in rawMenus) {
+        final mMap = m as Map<String, dynamic>;
+        final slotStr = (mMap['slot']?.toString() ?? 'LUNCH').toUpperCase();
+        final slotId = slotStr.toLowerCase();
+        final slotName = slotStr.substring(0, 1) + slotStr.substring(1).toLowerCase();
+
+        final itemsIncluded = (mMap['items_included'] as List<dynamic>? ?? [])
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+
+        final itemsExtraRaw = (mMap['items_extra'] as List<dynamic>? ?? []);
+
+        final List<MenuItem> items = [];
+        for (final inc in itemsIncluded) {
+          items.add(MenuItem(
+            id: 'inc-${inc.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+            name: inc,
+            kind: FoodItemKind.included,
+            price: 0,
+            portion: 'Standard',
+          ));
+        }
+        for (final ext in itemsExtraRaw) {
+          if (ext is Map) {
+            final extName = ext['name']?.toString() ?? 'Add-on';
+            final extPrice = (ext['price'] as num?)?.round() ?? 0;
+            items.add(MenuItem(
+              id: 'ext-${extName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+              name: extName,
+              kind: FoodItemKind.addOn,
+              price: extPrice,
+              portion: 'Add-on',
+            ));
+          } else if (ext is String && ext.isNotEmpty) {
+            items.add(MenuItem(
+              id: 'ext-${ext.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+              name: ext,
+              kind: FoodItemKind.addOn,
+              price: 30,
+              portion: 'Add-on',
+            ));
+          }
+        }
+
+        int startHour = 11, startMinute = 30, endHour = 15, endMinute = 0;
+        if (slotStr == 'BREAKFAST') {
+          startHour = 7; startMinute = 30; endHour = 9; endMinute = 30;
+        } else if (slotStr == 'DINNER') {
+          startHour = 19; startMinute = 0; endHour = 22; endMinute = 0;
+        }
+
+        mealSlots.add(MealSlot(
+          id: slotId,
+          name: slotName,
+          startHour: startHour,
+          startMinute: startMinute,
+          endHour: endHour,
+          endMinute: endMinute,
+          menuSummary: itemsIncluded.isNotEmpty ? itemsIncluded.join(', ') : 'No items listed',
+          items: items,
+        ));
+      }
+    }
+
+    if (mealSlots.isEmpty) {
+      mealSlots.addAll([
+        const MealSlot(
+          id: 'breakfast',
+          name: 'Breakfast',
+          startHour: 7,
+          startMinute: 30,
+          endHour: 9,
+          endMinute: 30,
+          menuSummary: 'No menu items published',
+          items: [],
+        ),
+        const MealSlot(
+          id: 'lunch',
+          name: 'Lunch',
+          startHour: 11,
+          startMinute: 30,
+          endHour: 15,
+          endMinute: 0,
+          menuSummary: 'No menu items published',
+          items: [],
+        ),
+        const MealSlot(
+          id: 'dinner',
+          name: 'Dinner',
+          startHour: 19,
+          startMinute: 0,
+          endHour: 22,
+          endMinute: 0,
+          menuSummary: 'No menu items published',
+          items: [],
+        ),
+      ]);
+    }
 
     return MessProvider(
       id: id,

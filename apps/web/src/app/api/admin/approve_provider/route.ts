@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
-import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { platformStore } from '@/lib/platform-service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,9 +49,6 @@ export async function POST(req: NextRequest) {
     const provider = platformStore.providers.get(providerId);
     if (provider) {
       provider.status = newStatus as any;
-      if (decision === 'approve') {
-        seedProviderPlansAndMenu(provider.id);
-      }
       return NextResponse.json({
         success: true,
         provider,
@@ -59,10 +56,6 @@ export async function POST(req: NextRequest) {
         reason,
         message: `Provider ${provider.display_name} has been ${decision}d.`,
       });
-    }
-
-    if (decision === 'approve') {
-      seedProviderPlansAndMenu(providerId);
     }
 
     return NextResponse.json({
