@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { platformStore } from '@/lib/platform-service';
+import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
         created_at: new Date().toISOString(),
       };
       platformStore.providers.set(providerId, providerData);
+      seedProviderPlansAndMenu(providerId);
     }
 
     return NextResponse.json({

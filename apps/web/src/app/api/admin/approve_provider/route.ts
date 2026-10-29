@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
+import { getAdminClient } from '@/lib/supabase/admin';
+import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,28 +16,50 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const newStatus = decision === 'approve' ? 'active' : decision === 'reject' ? 'rejected' : 'suspended';
+
+    // 1. Update in Supabase
+    try {
+      const admin = getAdminClient();
+      if (admin) {
+        await admin
+          .from('providers')
+          .update({
+            status: newStatus,
+            approved_at: decision === 'approve' ? new Date().toISOString() : null,
+            resolution_note: reason,
+            resolved_at: new Date().toISOString(),
+          })
+          .eq('id', providerId);
+      }
+    } catch (err) {
+      console.warn('Failed to update Supabase in approve_provider:', err);
+    }
+
+    // 2. Update in platformStore
     const provider = platformStore.providers.get(providerId);
-    if (!provider) {
-      return NextResponse.json(
-        { success: false, error: 'Provider not found.' },
-        { status: 404 }
-      );
+    if (provider) {
+      provider.status = newStatus as any;
+      if (decision === 'approve') {
+        seedProviderPlansAndMenu(provider.id);
+      }
+      return NextResponse.json({
+        success: true,
+        provider,
+        decision,
+        reason,
+        message: `Provider ${provider.display_name} has been ${decision}d.`,
+      });
     }
 
     if (decision === 'approve') {
-      provider.status = 'active';
-    } else if (decision === 'reject') {
-      provider.status = 'rejected';
-    } else if (decision === 'suspend') {
-      provider.status = 'suspended';
+      seedProviderPlansAndMenu(providerId);
     }
 
     return NextResponse.json({
       success: true,
-      provider,
       decision,
-      reason,
-      message: `Provider ${provider.display_name} has been ${decision}d.`,
+      message: `Provider ${providerId} status updated to ${newStatus}.`,
     });
   } catch (err: any) {
     return NextResponse.json(

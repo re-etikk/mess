@@ -331,6 +331,86 @@ class PlatformStore {
 
 export const platformStore = new PlatformStore();
 
+/** Seed standard subscription plans & daily menus for a new or approved provider */
+export function seedProviderPlansAndMenu(providerId: string) {
+  const fixedPlanId = `plan-${providerId}-fixed`;
+  platformStore.plans.set(fixedPlanId, {
+    id: fixedPlanId,
+    provider_id: providerId,
+    name: 'Monthly Unlimited Fixed Plan',
+    description: 'Unlimited daily lunch & dinner thali for 30 days.',
+    plan_type: 'fixed_period',
+    duration_days: 30,
+    price_paise: 279900,
+    currency: 'INR',
+    meal_credits: null,
+    daily_meal_limit: 2,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  });
+
+  const flexiPlanId = `plan-${providerId}-flexi`;
+  platformStore.plans.set(flexiPlanId, {
+    id: flexiPlanId,
+    provider_id: providerId,
+    name: '30-Meal Flexi Tracker Pack',
+    description: 'Deducts 1 meal credit per redemption. Valid for 45 days.',
+    plan_type: 'meal_credits',
+    duration_days: 45,
+    price_paise: 240000,
+    currency: 'INR',
+    meal_credits: 30,
+    daily_meal_limit: 2,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  });
+
+  const dailyMealPlanId = `plan-${providerId}-daily`;
+  platformStore.plans.set(dailyMealPlanId, {
+    id: dailyMealPlanId,
+    provider_id: providerId,
+    name: 'Single Daily Thali Pass',
+    description: 'One-time meal token for today.',
+    plan_type: 'daily',
+    duration_days: 1,
+    price_paise: 9500,
+    currency: 'INR',
+    meal_credits: 1,
+    daily_meal_limit: 1,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  });
+
+  platformStore.menus.set(`${providerId}_Daily_LUNCH`, {
+    id: `menu-${providerId}-lunch`,
+    provider_id: providerId,
+    day_of_week: 'Daily',
+    slot: 'LUNCH',
+    items_included: ['Dal Tadka', 'Basmati Rice', '4 Rotis', 'Sabzi of the day', 'Salad', 'Pickle'],
+    items_extra: [
+      { name: 'Paneer Butter Masala', price: 40, limit: 2 },
+      { name: 'Extra Roti (Set of 2)', price: 15, limit: 4 },
+      { name: 'Gulab Jamun (2 pcs)', price: 30, limit: 2 },
+    ],
+    is_active: true,
+    updated_at: new Date().toISOString(),
+  });
+
+  platformStore.menus.set(`${providerId}_Daily_DINNER`, {
+    id: `menu-${providerId}-dinner`,
+    provider_id: providerId,
+    day_of_week: 'Daily',
+    slot: 'DINNER',
+    items_included: ['Dal Makhani', 'Jeera Rice', '4 Rotis', 'Mixed Veg', 'Papad'],
+    items_extra: [
+      { name: 'Shahi Paneer', price: 45, limit: 2 },
+      { name: 'Extra Roti (Set of 2)', price: 15, limit: 4 },
+    ],
+    is_active: true,
+    updated_at: new Date().toISOString(),
+  });
+}
+
 // ==============================================================================
 // BUSINESS LOGIC SERVICES
 // ==============================================================================
