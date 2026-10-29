@@ -28,23 +28,24 @@ export async function GET(req: NextRequest) {
         if (usersData?.users) {
           for (const u of usersData.users) {
             const meta = u.user_metadata || {};
-            if (meta.role === 'provider' && meta.application) {
-              const status = meta.application.status || 'pending_review';
-              const appId = meta.application.id || u.id;
+            if (meta.application || meta.role === 'provider' || meta.display_name) {
+              const appData = meta.application || {};
+              const status = appData.status || meta.status || 'pending_review';
+              const appId = appData.id || u.id;
               const app = {
                 id: appId,
                 auth_user_id: u.id,
-                display_name: meta.application.display_name || meta.display_name || 'Mess Partner',
-                public_phone: meta.application.public_phone || meta.phone || '',
-                email: meta.application.email || meta.email || u.email || '',
+                display_name: appData.display_name || meta.display_name || 'Mess Partner',
+                public_phone: appData.public_phone || meta.phone || u.phone || '',
+                email: appData.email || meta.email || u.email || '',
                 initial_password: meta.initial_password || meta.login_password || null,
-                description: meta.application.description || null,
-                address_line1: meta.application.address_line1 || 'Address on file',
-                locality: meta.application.locality || null,
-                city: meta.application.city || 'Campus Area',
-                state: meta.application.state || 'India',
-                pincode: meta.application.pincode || '000000',
-                created_at: meta.application.created_at || u.created_at,
+                description: appData.description || meta.description || null,
+                address_line1: appData.address_line1 || 'Address on file',
+                locality: appData.locality || null,
+                city: appData.city || 'Campus Area',
+                state: appData.state || 'India',
+                pincode: appData.pincode || '000000',
+                created_at: appData.created_at || u.created_at,
                 status,
                 rating: 5.0,
                 total_reviews: 0,
@@ -56,8 +57,8 @@ export async function GET(req: NextRequest) {
                 activeMap.set(appId, app);
                 pendingMap.delete(appId);
                 pendingMap.delete(u.id);
-                if (meta.application.id) pendingMap.delete(meta.application.id);
-                if (meta.application.provider_id) pendingMap.delete(meta.application.provider_id);
+                if (appData.id) pendingMap.delete(appData.id);
+                if (appData.provider_id) pendingMap.delete(appData.provider_id);
               }
             }
           }
@@ -202,6 +203,8 @@ export async function PATCH(request: NextRequest) {
           await admin.auth.admin.updateUserById(matchedAuthUser.id, {
             user_metadata: {
               ...meta,
+              role: 'provider',
+              status: newStatus,
               application: app,
             },
           });
