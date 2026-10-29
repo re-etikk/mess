@@ -32,6 +32,9 @@ export interface MenuData {
 export interface SubscriptionData {
   id: string;
   customer_id: string;
+  customer_name?: string;
+  customer_phone?: string;
+  customer_email?: string;
   provider_id: string;
   plan_id: string;
   plan_type: 'fixed_period' | 'meal_credits' | 'daily';
@@ -44,6 +47,7 @@ export interface SubscriptionData {
   price_paid_paise: number;
   razorpay_subscription_id?: string;
   razorpay_payment_id?: string;
+  payment_mode?: 'online' | 'cash' | 'counter_upi' | 'complimentary' | string;
   created_at: string;
 }
 

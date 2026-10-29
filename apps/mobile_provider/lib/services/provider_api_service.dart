@@ -213,4 +213,89 @@ class ProviderApiService {
     }
     return [];
   }
+
+  static Future<List<Map<String, dynamic>>> fetchProviderPlans(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/plans?provider_id=$providerId');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = (data is Map && data['plans'] is List)
+            ? (data['plans'] as List)
+            : [];
+        return list.map((item) => item as Map<String, dynamic>).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> createManualSubscriber({
+    required String providerId,
+    required String customerName,
+    required String customerPhone,
+    String? customerEmail,
+    String? planId,
+    String paymentMode = 'cash',
+    double? amountPaid,
+    int? customDays,
+    int? customCredits,
+    String? notes,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/subscribers/manual');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'provider_id': providerId,
+            'customer_name': customerName.trim(),
+            'customer_phone': customerPhone.trim(),
+            if (customerEmail != null && customerEmail.isNotEmpty) 'customer_email': customerEmail.trim(),
+            if (planId != null && planId.isNotEmpty) 'plan_id': planId,
+            'payment_mode': paymentMode,
+            if (amountPaid != null) 'amount_paid_inr': amountPaid,
+            if (customDays != null) 'custom_days': customDays,
+            if (customCredits != null) 'custom_credits': customCredits,
+            if (notes != null && notes.isNotEmpty) 'notes': notes,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    }
+    throw Exception(data['error'] ?? 'Failed to add manual member.');
+  }
+
+  static Future<Map<String, dynamic>> reactivateSubscription({
+    required String providerId,
+    required String subscriptionId,
+    String action = 'renew',
+    int days = 30,
+    int credits = 30,
+    String paymentMode = 'cash',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/subscribers/reactivate');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'provider_id': providerId,
+            'subscription_id': subscriptionId,
+            'action': action,
+            'days': days,
+            'credits': credits,
+            'payment_mode': paymentMode,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    }
+    throw Exception(data['error'] ?? 'Failed to renew subscription.');
+  }
 }

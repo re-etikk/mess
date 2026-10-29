@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/provider_api_service.dart';
 
@@ -862,6 +863,7 @@ class DailyQrScreen extends StatefulWidget {
 }
 
 class _DailyQrScreenState extends State<DailyQrScreen> {
+  int _tabIndex = 0; // 0 = Daily Attendance QR, 1 = Counter Standee QR
   String? qrToken;
   String currentSlot = 'LUNCH';
   bool loading = true;
@@ -900,6 +902,8 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
   Widget build(BuildContext context) {
     final date = DateTime.now();
     final dateText = '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+    final joinUrl = 'https://mess-beta.vercel.app/join/${widget.session.providerId}';
+    final standeeUrl = 'https://mess-beta.vercel.app/provider/standee?provider_id=${widget.session.providerId}';
 
     return RefreshIndicator(
       onRefresh: _fetchQr,
@@ -907,42 +911,159 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
         children: [
-          Text('Counter Daily QR', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 5),
-          const Text('Place this QR at your service counter. Customers must have an active subscription or daily meal pass to redeem.', style: TextStyle(color: muted)),
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(children: [
-                Row(children: [
-                  const Icon(Icons.storefront_outlined, color: orange, size: 26),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(widget.session.businessName, style: const TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 16)),
-                      Text('Service Date: $dateText · $currentSlot', style: const TextStyle(color: muted, fontSize: 12)),
-                    ]),
+          Text('Counter QR Codes', style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 12),
+          // Tab Switcher
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: line),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => setState(() => _tabIndex = 0),
+                    borderRadius: BorderRadius.circular(9),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _tabIndex == 0 ? orange : Colors.transparent,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        '🍽️ Daily Attendance',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: _tabIndex == 0 ? ink : muted,
+                        ),
+                      ),
+                    ),
                   ),
-                  StatusTag(text: currentSlot, color: green),
-                ]),
-                const SizedBox(height: 20),
-                if (loading)
-                  const SizedBox(height: 220, child: Center(child: CircularProgressIndicator(color: orange)))
-                else if (error != null)
-                  SizedBox(
-                    height: 220,
-                    child: Center(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.error_outline, color: Color(0xFFC0392B), size: 36),
-                        const SizedBox(height: 8),
-                        Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: muted)),
-                        const SizedBox(height: 10),
-                        FilledButton(onPressed: _fetchQr, child: const Text('Retry')),
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => setState(() => _tabIndex = 1),
+                    borderRadius: BorderRadius.circular(9),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _tabIndex == 1 ? orange : Colors.transparent,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        '📌 Standee (Join & Pay)',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: _tabIndex == 1 ? ink : muted,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_tabIndex == 0) ...[
+            const Text(
+              'Place this QR at your counter for daily meal redemption. Active subscribers scan this with their app during Lunch/Dinner.',
+              style: TextStyle(color: muted, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(children: [
+                  Row(children: [
+                    const Icon(Icons.storefront_outlined, color: orange, size: 26),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(widget.session.businessName, style: const TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 16)),
+                        Text('Service Date: $dateText · $currentSlot', style: const TextStyle(color: muted, fontSize: 12)),
                       ]),
                     ),
-                  )
-                else
+                    StatusTag(text: currentSlot, color: green),
+                  ]),
+                  const SizedBox(height: 20),
+                  if (loading)
+                    const SizedBox(height: 220, child: Center(child: CircularProgressIndicator(color: orange)))
+                  else if (error != null)
+                    SizedBox(
+                      height: 220,
+                      child: Center(
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.error_outline, color: Color(0xFFC0392B), size: 36),
+                          const SizedBox(height: 8),
+                          Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: muted)),
+                          const SizedBox(height: 10),
+                          FilledButton(onPressed: _fetchQr, child: const Text('Retry')),
+                        ]),
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: line),
+                      ),
+                      child: QrImageView(
+                        data: qrToken ?? '',
+                        version: QrVersions.auto,
+                        size: 220,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.verified, color: green, size: 18),
+                    SizedBox(width: 6),
+                    Text('Cryptographically Signed Counter Token', style: TextStyle(color: ink, fontWeight: FontWeight.w700, fontSize: 13)),
+                  ]),
+                  const SizedBox(height: 4),
+                  const Text('Valid only for today’s active meal slot at your mess.', style: TextStyle(color: muted, fontSize: 12)),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 10),
+                  PrimaryButton(
+                    label: 'Refresh Daily QR Token',
+                    icon: Icons.refresh,
+                    onPressed: _fetchQr,
+                  ),
+                ]),
+              ),
+            ),
+          ] else ...[
+            const Text(
+              'Permanent desk standee QR. Walk-in students scan this with ANY mobile camera, Google Lens, or Paytm/GPay to browse your menu and self-register.',
+              style: TextStyle(color: muted, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(children: [
+                  Row(children: [
+                    const Icon(Icons.qr_code_scanner, color: orange, size: 26),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(widget.session.businessName, style: const TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 16)),
+                        const Text('Permanent Student Onboarding QR', style: TextStyle(color: muted, fontSize: 12)),
+                      ]),
+                    ),
+                    const StatusTag(text: 'COUNTER STANDEE', color: Color(0xFF2980B9)),
+                  ]),
+                  const SizedBox(height: 20),
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -951,31 +1072,94 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
                       border: Border.all(color: line),
                     ),
                     child: QrImageView(
-                      data: qrToken ?? '',
+                      data: joinUrl,
                       version: QrVersions.auto,
                       size: 220,
                       backgroundColor: Colors.white,
                     ),
                   ),
-                const SizedBox(height: 14),
-                const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.verified, color: green, size: 18),
-                  SizedBox(width: 6),
-                  Text('Cryptographically Signed Counter Token', style: TextStyle(color: ink, fontWeight: FontWeight.w700, fontSize: 13)),
+                  const SizedBox(height: 14),
+                  const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.flash_on, color: orange, size: 18),
+                    SizedBox(width: 6),
+                    Text('Scan with Any Phone Camera', style: TextStyle(color: ink, fontWeight: FontWeight.w700, fontSize: 13)),
+                  ]),
+                  const SizedBox(height: 4),
+                  const Text('No app download required. Opens instant joining web portal.', style: TextStyle(color: muted, fontSize: 12)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: cream,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: line),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.link, size: 16, color: muted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            joinUrl,
+                            style: const TextStyle(fontSize: 12, color: ink, fontFamily: 'monospace'),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 18, color: orange),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: joinUrl));
+                            showNotice(context, 'Joining link copied to clipboard!');
+                          },
+                          tooltip: 'Copy Link',
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: joinUrl));
+                            showNotice(context, 'Joining link copied! Share it on WhatsApp with students.');
+                          },
+                          icon: const Icon(Icons.share, size: 18),
+                          label: const Text('Share Link'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: ink,
+                            side: const BorderSide(color: line),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: standeeUrl));
+                            showNotice(context, 'Printable Standee URL copied! Open in browser to print.');
+                          },
+                          icon: const Icon(Icons.print, size: 18),
+                          label: const Text('Print Standee'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: ink,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ]),
-                const SizedBox(height: 4),
-                const Text('Valid only for today’s active meal slot at your mess.', style: TextStyle(color: muted, fontSize: 12)),
-                const SizedBox(height: 16),
-                const Divider(),
-                const SizedBox(height: 10),
-                PrimaryButton(
-                  label: 'Refresh Daily QR Token',
-                  icon: Icons.refresh,
-                  onPressed: _fetchQr,
-                ),
-              ]),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -1175,11 +1359,19 @@ class MoreDetailScreen extends StatefulWidget {
 class _MoreDetailScreenState extends State<MoreDetailScreen> {
   bool loading = true;
   List<Map<String, dynamic>> items = [];
+  List<Map<String, dynamic>> plans = [];
 
   @override
   void initState() {
     super.initState();
     _fetchDetail();
+    _fetchPlans();
+  }
+
+  Future<void> _fetchPlans() async {
+    try {
+      plans = await ProviderApiService.fetchProviderPlans(widget.session.providerId);
+    } catch (_) {}
   }
 
   Future<void> _fetchDetail() async {
@@ -1194,6 +1386,380 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  void _openAddMemberSheet() {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    String? selectedPlanId = plans.isNotEmpty ? plans.first['id']?.toString() : null;
+    String paymentMode = 'cash';
+    bool submitting = false;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.person_add, color: orange, size: 24),
+                            SizedBox(width: 8),
+                            Text(
+                              'Add Offline Member',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ink),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Register walk-in students who pay at counter. Their digital meal pass will be active immediately.',
+                      style: TextStyle(color: muted, fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    const FieldLabel('Student Full Name *'),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(hintText: 'e.g. Rahul Sharma'),
+                    ),
+                    const SizedBox(height: 12),
+                    const FieldLabel('WhatsApp Phone Number (10 digits) *'),
+                    TextField(
+                      controller: phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(hintText: 'e.g. 9876543210', prefixText: '+91 '),
+                    ),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Email Address (Optional)'),
+                    TextField(
+                      controller: emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(hintText: 'rahul@gmail.com'),
+                    ),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Select Meal Plan'),
+                    if (plans.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: line),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            isExpanded: true,
+                            value: selectedPlanId ?? plans.first['id']?.toString(),
+                            items: plans.map((p) {
+                              final price = (p['price_paise'] as num? ?? 300000) / 100;
+                              return DropdownMenuItem<String>(
+                                value: p['id'].toString(),
+                                child: Text('${p['name']} (₹${price.toStringAsFixed(0)})'),
+                              );
+                            }).toList(),
+                            onChanged: (val) => setSheetState(() => selectedPlanId = val),
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: cream,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: line),
+                        ),
+                        child: const Text('Standard Monthly Plan (₹3,000 / 30 Days)', style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Payment Received Via'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('💵 Cash')),
+                            selected: paymentMode == 'cash',
+                            selectedColor: orange,
+                            onSelected: (val) => setSheetState(() => paymentMode = 'cash'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('📱 Counter UPI')),
+                            selected: paymentMode == 'counter_upi',
+                            selectedColor: orange,
+                            onSelected: (val) => setSheetState(() => paymentMode = 'counter_upi'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                final name = nameCtrl.text.trim();
+                                final phone = phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+                                if (name.length < 2) {
+                                  showNotice(context, 'Please enter a valid student name.', isError: true);
+                                  return;
+                                }
+                                if (phone.length < 10) {
+                                  showNotice(context, 'Please enter a valid 10-digit mobile number.', isError: true);
+                                  return;
+                                }
+
+                                setSheetState(() => submitting = true);
+                                try {
+                                  final res = await ProviderApiService.createManualSubscriber(
+                                    providerId: widget.session.providerId,
+                                    customerName: name,
+                                    customerPhone: phone,
+                                    customerEmail: emailCtrl.text.trim(),
+                                    planId: selectedPlanId,
+                                    paymentMode: paymentMode,
+                                  );
+
+                                  if (context.mounted) {
+                                    Navigator.pop(ctx);
+                                    _fetchDetail();
+                                    _showSubscriberSuccessDialog(res, name, phone);
+                                  }
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    setSheetState(() => submitting = false);
+                                    showNotice(context, e.toString().replaceAll('Exception: ', ''), isError: true);
+                                  }
+                                }
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: orange,
+                          foregroundColor: ink,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        ),
+                        child: submitting
+                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: ink, strokeWidth: 2))
+                            : const Text('Register & Activate Pass'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showSubscriberSuccessDialog(Map<String, dynamic> res, String name, String phone) {
+    final passUrl = res['pass_url']?.toString() ?? 'https://mess-beta.vercel.app/customer/dashboard?phone=$phone';
+    final whatsappUrl = res['whatsapp_url']?.toString() ?? '';
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle, color: green, size: 26),
+            SizedBox(width: 8),
+            Text('Member Added!', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('✅ $name has been registered and their meal pass is now active.', style: const TextStyle(color: ink, fontSize: 14)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: cream, borderRadius: BorderRadius.circular(10), border: Border.all(color: line)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Student Digital Meal Pass:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: muted)),
+                  const SizedBox(height: 4),
+                  Text(passUrl, style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: ink)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          OutlinedButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: passUrl));
+              showNotice(context, 'Meal Pass link copied to clipboard!');
+            },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copy Pass Link'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: whatsappUrl.isNotEmpty ? whatsappUrl : passUrl));
+              showNotice(context, 'WhatsApp notification text copied! Paste to send to student.');
+              Navigator.pop(ctx);
+            },
+            style: FilledButton.styleFrom(backgroundColor: green),
+            icon: const Icon(Icons.send, size: 16),
+            label: const Text('Share WhatsApp'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openReactivateDialog(Map<String, dynamic> sub) {
+    final subId = sub['id']?.toString() ?? '';
+    final studentName = sub['customer_name']?.toString() ?? 'Student';
+    final studentPhone = sub['customer_phone']?.toString() ?? '';
+    int days = 30;
+    String mode = 'cash';
+    bool renewing = false;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDlgState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              title: const Row(
+                children: [
+                  Icon(Icons.autorenew, color: orange, size: 24),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Renew Member Pass', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Member: $studentName ($studentPhone)', style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                  const SizedBox(height: 12),
+                  const Text('Select extension period:', style: TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('+30 Days'),
+                        selected: days == 30,
+                        selectedColor: orange,
+                        onSelected: (v) => setDlgState(() => days = 30),
+                      ),
+                      ChoiceChip(
+                        label: const Text('+15 Days'),
+                        selected: days == 15,
+                        selectedColor: orange,
+                        onSelected: (v) => setDlgState(() => days = 15),
+                      ),
+                      ChoiceChip(
+                        label: const Text('+60 Days'),
+                        selected: days == 60,
+                        selectedColor: orange,
+                        onSelected: (v) => setDlgState(() => days = 60),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Payment mode:', style: TextStyle(fontSize: 13, color: muted)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('💵 Cash'),
+                        selected: mode == 'cash',
+                        selectedColor: orange,
+                        onSelected: (v) => setDlgState(() => mode = 'cash'),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('📱 UPI'),
+                        selected: mode == 'counter_upi',
+                        selectedColor: orange,
+                        onSelected: (v) => setDlgState(() => mode = 'counter_upi'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: renewing
+                      ? null
+                      : () async {
+                          setDlgState(() => renewing = true);
+                          try {
+                            final res = await ProviderApiService.reactivateSubscription(
+                              providerId: widget.session.providerId,
+                              subscriptionId: subId,
+                              days: days,
+                              paymentMode: mode,
+                            );
+                            if (context.mounted) {
+                              Navigator.pop(ctx);
+                              showNotice(context, res['message'] ?? 'Subscription renewed successfully!');
+                              _fetchDetail();
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              setDlgState(() => renewing = false);
+                              showNotice(context, e.toString().replaceAll('Exception: ', ''), isError: true);
+                            }
+                          }
+                        },
+                  style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                  child: renewing
+                      ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(color: ink, strokeWidth: 2))
+                      : const Text('Confirm Renewal'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     switch (widget.kind) {
@@ -1202,23 +1768,161 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
           context,
           'Active Subscribers',
           [
+            Card(
+              color: const Color(0xFFFFF7ED),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: const BorderSide(color: Color(0xFFFFDBB5)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.person_add_alt_1, color: orange, size: 22),
+                        SizedBox(width: 8),
+                        Text('Offline Walk-in / Direct Join', style: TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 15)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Register a walk-in student who paid cash or counter UPI directly to give them an instant digital meal pass.',
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _openAddMemberSheet,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('+ Add Member Manually'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: orange,
+                          foregroundColor: ink,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             if (loading)
               const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: orange)))
             else if (items.isEmpty)
               const EmptyStateCard(
                 icon: Icons.groups_outlined,
                 title: 'No active subscribers yet',
-                subtitle: 'When customers purchase a subscription to your mess, their records will appear here.',
+                subtitle: 'Use "+ Add Member Manually" above or display your Counter Standee QR for walk-in students to register.',
               )
             else
               ...items.map(
                 (sub) => Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: const CircleAvatar(backgroundColor: Color(0xFFFFE8C5), child: Icon(Icons.person, color: ink)),
-                    title: Text(sub['plan_name']?.toString() ?? 'Plan', style: const TextStyle(color: ink, fontWeight: FontWeight.w700)),
-                    subtitle: Text('Status: ${sub['status']} · Credits: ${sub['remaining_meal_credits'] ?? "Unlimited"}'),
-                    trailing: const StatusTag(text: 'ACTIVE', color: green),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: const Color(0xFFFFE8C5),
+                              child: Text(
+                                (sub['customer_name']?.toString() ?? 'S').isNotEmpty
+                                    ? (sub['customer_name']?.toString() ?? 'S').substring(0, 1).toUpperCase()
+                                    : 'S',
+                                style: const TextStyle(fontWeight: FontWeight.w800, color: ink),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    sub['customer_name']?.toString() ?? 'Member',
+                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ink),
+                                  ),
+                                  Text(
+                                    '📱 ${sub['customer_phone'] ?? '—'} · ${sub['plan_name'] ?? 'Plan'}',
+                                    style: const TextStyle(fontSize: 12, color: muted),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            StatusTag(
+                              text: (sub['status']?.toString() ?? 'ACTIVE').toUpperCase(),
+                              color: (sub['status'] == 'active') ? green : Colors.grey,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: cream,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Expiry: ${sub['expires_at'] != null ? sub['expires_at'].toString().split('T').first : 'Active'}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink),
+                              ),
+                              Text(
+                                'Mode: ${(sub['payment_mode']?.toString() ?? 'CASH').toUpperCase()}',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: muted),
+                              ),
+                              Text(
+                                'Meals: ${sub['remaining_meal_credits'] ?? "Unlimited"}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: orange),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () {
+                                  final phone = sub['customer_phone']?.toString() ?? '';
+                                  final passUrl = 'https://mess-beta.vercel.app/customer/dashboard?phone=$phone';
+                                  Clipboard.setData(ClipboardData(text: passUrl));
+                                  showNotice(context, 'Meal Pass link copied to clipboard!');
+                                },
+                                icon: const Icon(Icons.qr_code, size: 16),
+                                label: const Text('Pass Link'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: ink,
+                                  side: const BorderSide(color: line),
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: () => _openReactivateDialog(sub),
+                                icon: const Icon(Icons.autorenew, size: 16),
+                                label: const Text('Renew / Extend'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: orange,
+                                  foregroundColor: ink,
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
