@@ -37,6 +37,29 @@ class AppState extends ChangeNotifier {
         customerEmail = data['customerEmail']?.toString() ?? '';
         location = data['location']?.toString() ?? 'Sector 62, Noida';
         isSignedIn = data['isSignedIn'] == true;
+        if (data['selectedProviderId'] != null) {
+          selectedProviderId = data['selectedProviderId'].toString();
+        }
+        if (data['activeSubscription'] != null) {
+          final s = data['activeSubscription'] as Map<String, dynamic>;
+          final typeStr = s['type']?.toString() ?? 'mealTracker';
+          final subType = SubscriptionType.values.firstWhere(
+            (t) => t.name == typeStr,
+            orElse: () => SubscriptionType.mealTracker,
+          );
+          _activeSubscription = ActiveSubscription(
+            id: s['id']?.toString() ?? '',
+            providerId: s['providerId']?.toString() ?? '',
+            providerName: s['providerName']?.toString() ?? '',
+            planName: s['planName']?.toString() ?? '',
+            type: subType,
+            startDate: DateTime.tryParse(s['startDate']?.toString() ?? '') ?? DateTime.now(),
+            endDate: DateTime.tryParse(s['endDate']?.toString() ?? '') ?? DateTime.now().add(const Duration(days: 30)),
+            slotIds: (s['slotIds'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? ['lunch', 'dinner'],
+            totalMeals: s['totalMeals'] as int?,
+            mealsUsed: (s['mealsUsed'] as int?) ?? 0,
+          );
+        }
         notifyListeners();
       }
     } catch (_) {}
@@ -45,12 +68,26 @@ class AppState extends ChangeNotifier {
   Future<void> _persistSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final sub = _activeSubscription;
       await prefs.setString(_sessionKey, jsonEncode({
         'customerId': customerId,
         'customerName': customerName,
         'customerEmail': customerEmail,
         'location': location,
         'isSignedIn': isSignedIn,
+        'selectedProviderId': selectedProviderId,
+        'activeSubscription': sub == null ? null : {
+          'id': sub.id,
+          'providerId': sub.providerId,
+          'providerName': sub.providerName,
+          'planName': sub.planName,
+          'type': sub.type.name,
+          'startDate': sub.startDate.toIso8601String(),
+          'endDate': sub.endDate.toIso8601String(),
+          'slotIds': sub.slotIds,
+          'totalMeals': sub.totalMeals,
+          'mealsUsed': sub.mealsUsed,
+        },
       }));
     } catch (_) {}
   }
@@ -156,6 +193,7 @@ class AppState extends ChangeNotifier {
     selectedProviderId = plan.providerId;
     clearAddOns();
     notifyListeners();
+    _persistSession();
     return subscription;
   }
 
@@ -217,6 +255,7 @@ class AppState extends ChangeNotifier {
     if (_dailyMeal != null) _dailyMeal = null;
 
     notifyListeners();
+    _persistSession();
     return redemption;
   }
 

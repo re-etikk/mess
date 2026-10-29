@@ -570,4 +570,40 @@ class ProviderApiService {
       throw Exception(data['error'] ?? 'Failed to submit support ticket');
     }
   }
+
+  static Future<bool> fetchKitchenStatus(String providerId) async {
+    try {
+      final uri = Uri.parse('/api/provider/status?provider_id=');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['is_open_today'] as bool?) ?? true;
+      }
+    } catch (_) {}
+    return true;
+  }
+
+  static Future<bool> toggleKitchenStatus({
+    required String providerId,
+    required bool isOpen,
+  }) async {
+    try {
+      final uri = Uri.parse('/api/provider/status');
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'provider_id': providerId,
+              'is_open': isOpen,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['success'] == true;
+      }
+    } catch (_) {}
+    return false;
+  }
 }

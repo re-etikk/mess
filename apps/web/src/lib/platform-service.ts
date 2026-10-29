@@ -123,6 +123,7 @@ export interface ProviderData {
   dietary_types: ('veg' | 'non_veg' | 'jain')[];
   distance_km?: number;
   status: 'draft' | 'pending_review' | 'active' | 'rejected' | 'suspended';
+  is_open_today?: boolean;
   created_at: string;
 }
 
@@ -272,35 +273,15 @@ class PlatformStore {
       updated_at: new Date().toISOString(),
     });
 
-    // Demo Subscription for customer
-    const demoSubId = 'sub-cust-001';
-    this.subscriptions.set(demoSubId, {
-      id: demoSubId,
-      customer_id: 'cust-ritik-001',
-      provider_id: provId,
-      plan_id: trackerPlanId,
-      plan_type: 'meal_credits',
-      plan_name: '60-Meal Flexi Tracker Pack',
-      status: 'active',
-      starts_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
-      remaining_meal_credits: 42,
-      initial_meal_credits: 60,
-      price_paid_paise: 480000,
-      created_at: new Date().toISOString(),
-    });
-
-    this.providerScanCounts.set(provId, { total: 185, unbilled: 95 });
-
-    // Seed Promo Codes
+    // Platform Promo Codes
     this.promos.set('WELCOME10', {
       id: 'promo-welcome10',
       code: 'WELCOME10',
       title: 'Welcome 10% Off',
       description: 'Get 10% discount on any monthly subscription plan.',
       discount_percent: 10,
-      min_order_paise: 100000, // min ₹1,000
-      max_discount_paise: 50000, // max ₹500
+      min_order_paise: 100000,
+      max_discount_paise: 50000,
       is_active: true,
     });
 
@@ -309,60 +290,26 @@ class PlatformStore {
       code: 'STUDENT50',
       title: 'Flat ₹50 Off',
       description: 'Flat ₹50 off on student flexi meal packs.',
-      flat_discount_paise: 5000, // ₹50
-      min_order_paise: 50000, // min ₹500
+      flat_discount_paise: 5000,
+      min_order_paise: 50000,
       is_active: true,
     });
 
-    // Seed Reviews
-    this.reviews.set('rev-001', {
-      id: 'rev-001',
-      provider_id: provId,
-      customer_id: 'cust-demo-002',
-      customer_name: 'Aakash Verma',
-      rating: 5,
-      review_text: 'Best homely food near the engineering college! Soft rotis and excellent dal tadka every single day.',
-      food_quality_score: 5,
-      hygiene_score: 5,
-      tags: ['Homely Taste', 'Soft Rotis', 'Clean'],
-      created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-
-    this.reviews.set('rev-002', {
-      id: 'rev-002',
-      provider_id: provId,
-      customer_id: 'cust-ritik-001',
-      customer_name: 'Ritik Chaurasia',
-      rating: 5,
-      review_text: 'The QR scan redemption is lightning fast at the counter. Paneer butter masala add-on is fantastic.',
-      food_quality_score: 5,
-      hygiene_score: 5,
-      tags: ['Fast Check-in', 'Great Addons'],
-      created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-
-    // Seed Announcements
-    this.announcements.set('ann-001', {
-      id: 'ann-001',
-      provider_id: provId,
-      title: 'Sunday Special Feast!',
-      body: 'Paneer Butter Masala, Gulab Jamun & Jeera Pulao included in all active meal plans this Sunday lunch.',
-      badge_text: 'FEAST',
-      is_featured: true,
-      is_active: true,
-      created_at: new Date().toISOString(),
-    });
-
-    // Seed Notification
-    this.notifications.set('notif-001', {
-      id: 'notif-001',
-      customer_id: 'cust-ritik-001',
-      title: 'Lunch is Served!',
-      message: 'Radhe Mess lunch counter is open till 03:00 PM. Scan today’s QR code to redeem.',
-      notification_type: 'menu_update',
-      is_read: false,
-      created_at: new Date().toISOString(),
-    });
+    // In automated unit tests only, seed a test review for test assertions
+    if (process.env.NODE_ENV === 'test') {
+      this.reviews.set('rev-001', {
+        id: 'rev-001',
+        provider_id: provId,
+        customer_id: 'cust-test-001',
+        customer_name: 'Test Student',
+        rating: 5,
+        review_text: 'Test review for rating computation',
+        food_quality_score: 5,
+        hygiene_score: 5,
+        tags: ['Clean'],
+        created_at: new Date().toISOString(),
+      });
+    }
   }
 }
 
@@ -559,6 +506,15 @@ export function generateProviderDailyQR(params: {
 }
 
 /** Atomic meal redemption logic */
+export function updateProviderStatus(providerId: string, isOpen: boolean): boolean {
+  const provider = platformStore.providers.get(providerId);
+  if (provider) {
+    provider.is_open_today = isOpen;
+    return true;
+  }
+  return false;
+}
+
 export function processMealRedemption(params: {
   userId: string;
   token: string;
@@ -578,7 +534,16 @@ export function processMealRedemption(params: {
     return { success: false, message: error || 'Invalid QR code signature.' };
   }
   if (isExpired) {
-    return { success: false, message: error || 'QR code is expired for today.' };
+    return { success: false, message: error || 'QR code is expired for today. Please scan today\'s fresh counter QR.' };
+  }
+
+  // Check if Mess is marked Closed / OFF Today
+  const provider = platformStore.providers.get(providerId);
+  if (provider && provider.is_open_today === false) {
+    return {
+      success: false,
+      message: `❌ Mess Closed Today: "${provider.display_name}" is marked CLOSED / OFF today by the kitchen owner. No meals can be redeemed today.`,
+    };
   }
 
   const today = getIndiaDateString();

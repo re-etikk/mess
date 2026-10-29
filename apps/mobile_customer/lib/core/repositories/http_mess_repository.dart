@@ -193,7 +193,7 @@ class HttpMessRepository implements MessRepository {
     final distKm = (json['distance_km'] as num?)?.toDouble() ?? 0.8;
     final distanceMeters = (distKm * 1000).toInt();
     final description = json['description']?.toString() ?? 'Homely nutritious daily meals for students.';
-    final isOpen = json['status']?.toString() == 'active';
+    final isOpen = json['status']?.toString() == 'active' && json['is_open_today'] != false;
 
     // Parse plans
     final rawPlans = (json['plans'] as List<dynamic>? ?? []);

@@ -517,7 +517,7 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
           ),
           const SizedBox(height: 16),
           const FieldLabel('Business / mess name'),
-          TextField(controller: businessName, decoration: const InputDecoration(hintText: 'e.g. Radhe Mess', prefixIcon: Icon(Icons.storefront_outlined))),
+          TextField(controller: businessName, decoration: const InputDecoration(hintText: 'e.g. Shyam Homely Mess', prefixIcon: Icon(Icons.storefront_outlined))),
           const SizedBox(height: 14),
           const FieldLabel('Owner name'),
           TextField(controller: ownerName, decoration: const InputDecoration(hintText: 'Full legal name', prefixIcon: Icon(Icons.person_outline))),
@@ -535,7 +535,7 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
           TextField(controller: city, decoration: const InputDecoration(prefixIcon: Icon(Icons.map_outlined))),
           const SizedBox(height: 14),
           const FieldLabel('Login email address'),
-          TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(hintText: 'owner@radhemess.in', prefixIcon: Icon(Icons.email_outlined))),
+          TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(hintText: 'e.g. owner@mess.in', prefixIcon: Icon(Icons.email_outlined))),
           const SizedBox(height: 14),
           const FieldLabel('Password'),
           TextField(controller: password, decoration: const InputDecoration(hintText: 'Secret password', prefixIcon: Icon(Icons.lock_outline))),
@@ -768,6 +768,42 @@ class _ProviderOverviewState extends State<ProviderOverview> {
   DashboardMetrics? _metrics;
   bool _loading = true;
   String? _error;
+  bool _isOpenToday = true;
+  bool _togglingStatus = false;
+
+  Future<void> _loadKitchenStatus() async {
+    try {
+      final isOpen = await ProviderApiService.fetchKitchenStatus(widget.session.providerId);
+      if (mounted) setState(() => _isOpenToday = isOpen);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleKitchenStatus(bool val) async {
+    setState(() => _togglingStatus = true);
+    try {
+      final ok = await ProviderApiService.toggleKitchenStatus(
+        providerId: widget.session.providerId,
+        isOpen: val,
+      );
+      if (mounted) {
+        if (ok) {
+          setState(() => _isOpenToday = val);
+          showNotice(
+            context,
+            val
+              ? '🟢 Kitchen marked OPEN & SERVING TODAY'
+              : '🔴 Kitchen marked CLOSED / OFF TODAY (Dark shade enabled)',
+          );
+        } else {
+          showNotice(context, 'Failed to update kitchen status.', isError: true);
+        }
+      }
+    } catch (_) {
+      if (mounted) showNotice(context, 'Network error updating status.', isError: true);
+    } finally {
+      if (mounted) setState(() => _togglingStatus = false);
+    }
+  }
 
   @override
   void initState() {
@@ -782,6 +818,7 @@ class _ProviderOverviewState extends State<ProviderOverview> {
     });
     try {
       final metrics = await ProviderApiService.fetchDashboard(widget.session.providerId);
+      await _loadKitchenStatus();
       if (mounted) setState(() => _metrics = metrics);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString().replaceAll('Exception: ', ''));
@@ -827,7 +864,61 @@ class _ProviderOverviewState extends State<ProviderOverview> {
             ),
             IconButton(icon: const Icon(Icons.refresh, color: orange), onPressed: _loadData),
           ]),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
+          // KITCHEN STATUS TOGGLE CARD
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: _isOpenToday ? const Color(0xFFF0FDF4) : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _isOpenToday ? const Color(0xFF86EFAC) : const Color(0xFF475569),
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _isOpenToday ? Icons.check_circle_rounded : Icons.lock_outline_rounded,
+                  color: _isOpenToday ? const Color(0xFF16A34A) : const Color(0xFFF87171),
+                  size: 26,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isOpenToday ? 'KITCHEN OPEN TODAY' : 'MESS CLOSED / OFF TODAY',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 13,
+                          color: _isOpenToday ? const Color(0xFF15803D) : Colors.white,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _isOpenToday
+                            ? 'Serving meals today • QR scans active'
+                            : 'Dark shade shown • Scans paused today',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: _isOpenToday ? const Color(0xFF166534) : const Color(0xFF94A3B8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _isOpenToday,
+                  activeColor: const Color(0xFF16A34A),
+                  onChanged: _togglingStatus ? null : _toggleKitchenStatus,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
           Row(children: [
             Expanded(child: MetricCard(title: 'Today’s meals', value: '${metrics?.todayScans ?? 0}', note: 'Redemptions today', icon: Icons.restaurant, tint: const Color(0xFFFFE8C5))),
             const SizedBox(width: 10),

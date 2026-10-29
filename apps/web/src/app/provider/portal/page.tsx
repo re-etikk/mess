@@ -21,6 +21,8 @@ import {
   Users,
   Utensils,
   UtensilsCrossed,
+  Power,
+  Lock,
 } from 'lucide-react';
 
 interface MenuDish {
@@ -190,6 +192,8 @@ export default function ProviderPortal() {
   const [counterOrders, setCounterOrders] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [selectedSubHistory, setSelectedSubHistory] = useState<any | null>(null);
+  const [isOpenToday, setIsOpenToday] = useState(true);
+  const [togglingStatus, setTogglingStatus] = useState(false);
 
   // New counter sale modal state
   const [orderCustomer, setOrderCustomer] = useState('Walk-in Student');
@@ -224,11 +228,18 @@ export default function ProviderPortal() {
   async function loadPortalData(providerId: string) {
     setLoadingData(true);
     try {
-      const [subsRes, redRes, ordRes] = await Promise.all([
+      const [subsRes, redRes, ordRes, statusRes] = await Promise.all([
         fetch(`/api/provider/subscriptions?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/redemptions?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/orders?provider_id=${providerId}`).catch(() => null),
+        fetch(`/api/provider/status?provider_id=${providerId}`).catch(() => null),
       ]);
+      if (statusRes?.ok) {
+        const sData = await statusRes.json().catch(() => ({}));
+        if (typeof sData.is_open_today === 'boolean') {
+          setIsOpenToday(sData.is_open_today);
+        }
+      }
       if (subsRes?.ok) {
         const d = await subsRes.json();
         setSubscribers(d.subscriptions || []);
@@ -243,6 +254,31 @@ export default function ProviderPortal() {
       }
     } catch {}
     setLoadingData(false);
+  }
+
+  async function handleToggleStatus() {
+    if (!session?.providerId) return;
+    setTogglingStatus(true);
+    try {
+      const nextStatus = !isOpenToday;
+      const res = await fetch('/api/provider/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: session.providerId,
+          is_open: nextStatus,
+        }),
+      });
+      if (res.ok) {
+        setIsOpenToday(nextStatus);
+        setSuccessNotice(
+          nextStatus
+            ? '🟢 Kitchen marked OPEN & SERVING TODAY. Students can scan and claim meals.'
+            : '🔴 Kitchen marked CLOSED / OFF TODAY. Dark shade applied and scans are paused.'
+        );
+      }
+    } catch {}
+    setTogglingStatus(false);
   }
 
   async function handleOnboardingSubmit(e: FormEvent) {

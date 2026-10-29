@@ -6,7 +6,16 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const providerId = searchParams.get('provider_id') || 'prov-radhe-001';
+  const providerId = searchParams.get('provider_id');
+
+  if (!providerId) {
+    return NextResponse.json({
+      success: true,
+      total_orders: 0,
+      total_revenue_inr: 0,
+      orders: [],
+    });
+  }
 
   let orders = Array.from(platformStore.counterOrders.values()).filter(
     (o) => o.provider_id === providerId
@@ -27,7 +36,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const providerId = body.provider_id || 'prov-radhe-001';
+    const providerId = body.provider_id || body.providerId;
+    if (!providerId) {
+      return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+    }
+
     const customerName = body.customer_name?.trim() || 'Walk-in Customer';
     const customerPhone = body.customer_phone?.trim() || '';
     const items = Array.isArray(body.items) ? body.items : [];

@@ -10,7 +10,7 @@ export async function GET() {
     if (admin) {
       const { data, error } = await admin
         .from('providers')
-        .select('id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,locality,city,state,pincode,supports_pickup')
+        .select('id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,locality,city,state,pincode,supports_pickup,is_open_today')
         .eq('status', 'active')
         .order('display_name', { ascending: true });
 

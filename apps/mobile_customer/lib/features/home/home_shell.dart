@@ -27,25 +27,34 @@ class HomeShell extends StatelessWidget {
           4 => const ProfileScreen(key: ValueKey('profile')),
           _ => const HomeScreen(key: ValueKey('home-fallback')),
         };
-        return Scaffold(
-          body: SafeArea(bottom: false, child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: SlideTransition(position: Tween<Offset>(begin: const Offset(0, .015), end: Offset.zero).animate(animation), child: child)),
-            child: KeyedSubtree(key: ValueKey(tab), child: page),
-          )),
-          bottomNavigationBar: _BottomNavigation(selectedIndex: tab, onSelected: (index) {
-            if (index == 2) {
-              if (state.canOpenScanner) {
-                Navigator.of(context).push(messRoute(const ScanScreen()));
-              } else {
-                _showScannerGate(context, state);
-              }
-            } else {
-              state.selectTab(index);
+        return PopScope(
+          canPop: tab == 0,
+          onPopInvokedWithResult: (didPop, result) {
+            if (didPop) return;
+            if (tab != 0) {
+              state.selectTab(0);
             }
-          }),
+          },
+          child: Scaffold(
+            body: SafeArea(bottom: false, child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: SlideTransition(position: Tween<Offset>(begin: const Offset(0, .015), end: Offset.zero).animate(animation), child: child)),
+              child: KeyedSubtree(key: ValueKey(tab), child: page),
+            )),
+            bottomNavigationBar: _BottomNavigation(selectedIndex: tab, onSelected: (index) {
+              if (index == 2) {
+                if (state.canOpenScanner) {
+                  Navigator.of(context).push(messRoute(const ScanScreen()));
+                } else {
+                  _showScannerGate(context, state);
+                }
+              } else {
+                state.selectTab(index);
+              }
+            }),
+          ),
         );
       },
     );

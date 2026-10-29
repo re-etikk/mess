@@ -17,6 +17,8 @@ import {
   Tag,
   Utensils,
   X,
+  AlertOctagon,
+  Lock,
 } from 'lucide-react';
 
 type Provider = {
@@ -28,6 +30,7 @@ type Provider = {
   city: string;
   state: string;
   distance_km?: number;
+  is_open_today?: boolean;
 };
 
 type MenuItem = {
@@ -63,6 +66,8 @@ export default function CustomerDashboardPage() {
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [plans, setPlans] = useState<MealPlan[]>([]);
+  
+  // ZERO FAKE DATA: Active plan starts strictly NULL until the user subscribes!
   const [activePlan, setActivePlan] = useState<{
     name: string;
     durationDays: number;
@@ -70,44 +75,50 @@ export default function CustomerDashboardPage() {
     mealCreditsTotal: number;
     mealCreditsRemaining: number;
     isFlexi: boolean;
+    providerId: string;
     providerName: string;
     subscribedAt: string;
-  }>({
-    name: '30 Days Unlimited Standard Thali',
-    durationDays: 30,
-    daysRemaining: 18,
-    mealCreditsTotal: 60,
-    mealCreditsRemaining: 34,
-    isFlexi: true,
-    providerName: 'Radhe Mess',
-    subscribedAt: '11 Oct 2026',
-  });
+  } | null>(null);
 
-  const [redemptions, setRedemptions] = useState<MealRedemption[]>([
-    { id: 'RED-1049', date: 'Today', time: '01:25 PM', slot: 'LUNCH', provider_name: 'Radhe Mess', status: 'VERIFIED ✅' },
-    { id: 'RED-1048', date: 'Today', time: '08:45 AM', slot: 'BREAKFAST', provider_name: 'Radhe Mess', status: 'VERIFIED ✅' },
-    { id: 'RED-1047', date: 'Yesterday', time: '08:30 PM', slot: 'DINNER', provider_name: 'Radhe Mess', status: 'VERIFIED ✅' },
-    { id: 'RED-1046', date: 'Yesterday', time: '01:15 PM', slot: 'LUNCH', provider_name: 'Radhe Mess', status: 'VERIFIED ✅' },
-    { id: 'RED-1045', date: '27 Oct 2026', time: '08:15 PM', slot: 'DINNER', provider_name: 'Radhe Mess', status: 'VERIFIED ✅' },
-  ]);
+  // ZERO FAKE DATA: Verified redemptions start completely EMPTY!
+  const [redemptions, setRedemptions] = useState<MealRedemption[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [activeSlot, setActiveSlot] = useState<'Lunch' | 'Dinner' | 'Breakfast'>('Lunch');
+  
+  // Modals
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [checkInError, setCheckInError] = useState<string | null>(null);
   const [checkInSuccess, setCheckInSuccess] = useState(false);
+  
+  const [showSubscribeModal, setShowSubscribeModal] = useState<MealPlan | null>(null);
+  const [subscribing, setSubscribing] = useState(false);
+
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [supportSending, setSupportSending] = useState(false);
   const [supportStatus, setSupportStatus] = useState<string | null>(null);
   const [supportForm, setSupportForm] = useState({
-    name: 'Student User',
-    phone: '9876543210',
-    email: 'student@example.com',
+    name: '',
+    phone: '',
+    email: '',
     category: 'Subscription & Credits',
     description: '',
   });
 
+  // Load saved local plan & providers on mount
   useEffect(() => {
+    try {
+      const savedPlan = localStorage.getItem('thali_student_active_plan');
+      if (savedPlan) {
+        setActivePlan(JSON.parse(savedPlan));
+      }
+      const savedRedemptions = localStorage.getItem('thali_student_redemptions');
+      if (savedRedemptions) {
+        setRedemptions(JSON.parse(savedRedemptions));
+      }
+    } catch {}
     loadProviders();
   }, []);
 
@@ -116,60 +127,61 @@ export default function CustomerDashboardPage() {
     try {
       const res = await fetch('/api/providers', { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
-      if (data?.providers && data.providers.length > 0) {
+      if (data?.providers && Array.isArray(data.providers)) {
         setProviders(data.providers);
-        const initial = data.providers[0];
-        setSelectedProvider(initial);
-        loadProviderDetails(initial.id);
       }
     } catch {
-      // fallback
+      // no fallback to fake data
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadProviderDetails(providerId: string) {
+  async function handleSelectProvider(p: Provider) {
+    setSelectedProvider(p);
+    setLoadingDetails(true);
     try {
       const [menuRes, plansRes] = await Promise.all([
-        fetch(`/api/provider/menu?providerId=${providerId}`, { cache: 'no-store' }).then((r) => r.json().catch(() => ({}))),
-        fetch(`/api/provider/plans?providerId=${providerId}`, { cache: 'no-store' }).then((r) => r.json().catch(() => ({}))),
+        fetch(`/api/provider/menu?providerId=${p.id}`, { cache: 'no-store' }).then((r) => r.json().catch(() => ({}))),
+        fetch(`/api/provider/plans?providerId=${p.id}`, { cache: 'no-store' }).then((r) => r.json().catch(() => ({}))),
       ]);
 
-      if (menuRes?.menu && Array.isArray(menuRes.menu)) {
-        setMenu(menuRes.menu);
-      } else {
-        setMenu([
-          { id: '1', name: 'Special Paneer Butter Masala', slot: 'Lunch', is_available: true, is_extra: true, price: 50 },
-          { id: '2', name: 'Dal Tadka', slot: 'Lunch', is_available: true, is_extra: false },
-          { id: '3', name: 'Aloo Gobi Dry', slot: 'Lunch', is_available: true, is_extra: false },
-          { id: '4', name: 'Phulka Rotis (Butter)', slot: 'Lunch', is_available: true, is_extra: false },
-          { id: '5', name: 'Jeera Rice', slot: 'Lunch', is_available: true, is_extra: false },
-          { id: '6', name: 'Gulab Jamun (1 pc)', slot: 'Lunch', is_available: true, is_extra: true, price: 20 },
-        ]);
-      }
-
-      if (plansRes?.plans && Array.isArray(plansRes.plans)) {
-        setPlans(plansRes.plans);
-      } else {
-        setPlans([
-          { id: 'p1', name: '30 Days Full Unlimited Pass', price: 2999, duration_days: 30, discount_percent: 15, is_flexi: false },
-          { id: 'p2', name: 'Flexi 60 Meals Tracker Plan', price: 3400, duration_days: 45, meal_credits: 60, discount_percent: 10, is_flexi: true },
-          { id: 'p3', name: '15 Days Exam Sprint Pass', price: 1650, duration_days: 15, discount_percent: 5, is_flexi: false },
-        ]);
-      }
+      setMenu(Array.isArray(menuRes?.menu) ? menuRes.menu : []);
+      setPlans(Array.isArray(plansRes?.plans) ? plansRes.plans : []);
     } catch {
-      // ignore
+      setMenu([]);
+      setPlans([]);
+    } finally {
+      setLoadingDetails(false);
     }
   }
 
-  function handleSelectProvider(p: Provider) {
-    setSelectedProvider(p);
-    loadProviderDetails(p.id);
-  }
-
   async function handleConfirmCheckIn() {
+    if (!activePlan) {
+      setCheckInError('You do not have an active subscription pass yet.');
+      return;
+    }
+
+    if (selectedProvider && selectedProvider.is_open_today === false) {
+      setCheckInError(`❌ Cannot check-in: ${selectedProvider.display_name} is marked CLOSED / OFF today by the owner.`);
+      return;
+    }
+
     setCheckingIn(true);
+    setCheckInError(null);
+
+    const todayDate = new Date().toISOString().slice(0, 10);
+    // Duplicate check for today
+    const alreadyDone = redemptions.some(
+      (r) => r.date === 'Today' && r.slot === activeSlot.toUpperCase() && r.provider_name === (selectedProvider?.display_name || activePlan.providerName)
+    );
+
+    if (alreadyDone) {
+      setCheckingIn(false);
+      setCheckInError(`❌ You have already claimed your ${activeSlot.toUpperCase()} meal for today.`);
+      return;
+    }
+
     await new Promise((r) => setTimeout(r, 600));
 
     const newRedemption: MealRedemption = {
@@ -177,16 +189,25 @@ export default function CustomerDashboardPage() {
       date: 'Today',
       time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       slot: activeSlot.toUpperCase(),
-      provider_name: selectedProvider?.display_name || 'Radhe Mess',
+      provider_name: selectedProvider?.display_name || activePlan.providerName,
       status: 'VERIFIED ✅',
     };
 
-    setRedemptions([newRedemption, ...redemptions]);
+    const updatedRedemptions = [newRedemption, ...redemptions];
+    setRedemptions(updatedRedemptions);
+    try {
+      localStorage.setItem('thali_student_redemptions', JSON.stringify(updatedRedemptions));
+    } catch {}
+
     if (activePlan.isFlexi && activePlan.mealCreditsRemaining > 0) {
-      setActivePlan((prev) => ({
-        ...prev,
-        mealCreditsRemaining: prev.mealCreditsRemaining - 1,
-      }));
+      const updatedPlan = {
+        ...activePlan,
+        mealCreditsRemaining: activePlan.mealCreditsRemaining - 1,
+      };
+      setActivePlan(updatedPlan);
+      try {
+        localStorage.setItem('thali_student_active_plan', JSON.stringify(updatedPlan));
+      } catch {}
     }
 
     setCheckingIn(false);
@@ -195,6 +216,33 @@ export default function CustomerDashboardPage() {
       setCheckInSuccess(false);
       setShowCheckInModal(false);
     }, 1800);
+  }
+
+  async function handleSubscribe(plan: MealPlan) {
+    if (!selectedProvider) return;
+    setSubscribing(true);
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const newActivePlan = {
+      name: plan.name,
+      durationDays: plan.duration_days,
+      daysRemaining: plan.duration_days,
+      mealCreditsTotal: plan.meal_credits || (plan.duration_days * 2),
+      mealCreditsRemaining: plan.meal_credits || (plan.duration_days * 2),
+      isFlexi: !!plan.is_flexi,
+      providerId: selectedProvider.id,
+      providerName: selectedProvider.display_name,
+      subscribedAt: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+    };
+
+    setActivePlan(newActivePlan);
+    try {
+      localStorage.setItem('thali_student_active_plan', JSON.stringify(newActivePlan));
+    } catch {}
+
+    setSubscribing(false);
+    setShowSubscribeModal(null);
   }
 
   async function handleSubmitSupport(e: React.FormEvent) {
@@ -218,7 +266,7 @@ export default function CustomerDashboardPage() {
         setTimeout(() => {
           setShowSupportModal(false);
           setSupportStatus(null);
-          setSupportForm((p) => ({ ...p, description: '' }));
+          setSupportForm({ name: '', phone: '', email: '', category: 'Subscription & Credits', description: '' });
         }, 1500);
       } else {
         setSupportStatus('❌ ' + (data.error || 'Failed to dispatch ticket'));
@@ -251,73 +299,98 @@ export default function CustomerDashboardPage() {
             >
               <HelpCircle size={15} className="text-amber-600" /> Help &amp; Support
             </button>
-            <button
-              onClick={() => setShowCheckInModal(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-amber-700"
-            >
-              <QrCode size={16} /> Check-in at Counter
-            </button>
+            {activePlan && (
+              <button
+                onClick={() => {
+                  setCheckInError(null);
+                  setShowCheckInModal(true);
+                }}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-amber-700"
+              >
+                <QrCode size={16} /> Check-in at Counter
+              </button>
+            )}
           </div>
         </div>
 
-        {/* ACTIVE PLAN & TRACKER CARD */}
+        {/* ACTIVE PLAN & TRACKER CARD (ZERO FAKE DATA) */}
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
-          <div className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-500 to-amber-600 p-6 text-white shadow-md lg:col-span-2">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="rounded-md bg-white/20 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide text-white">
-                  Active Subscription Pass
-                </span>
-                <h2 className="mt-2 text-2xl font-black">{activePlan.name}</h2>
-                <p className="text-xs text-amber-100">
-                  Kitchen Partner: <strong className="text-white">{activePlan.providerName}</strong> • Started {activePlan.subscribedAt}
-                </p>
+          {activePlan ? (
+            <div className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-500 to-amber-600 p-6 text-white shadow-md lg:col-span-2">
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="rounded-md bg-white/20 px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide text-white">
+                    Active Subscription Pass
+                  </span>
+                  <h2 className="mt-2 text-2xl font-black">{activePlan.name}</h2>
+                  <p className="text-xs text-amber-100">
+                    Kitchen Partner: <strong className="text-white">{activePlan.providerName}</strong> • Subscribed on {activePlan.subscribedAt}
+                  </p>
+                </div>
+                {activePlan.daysRemaining <= 3 ? (
+                  <div className="animate-pulse rounded-xl bg-red-600 px-3 py-1.5 text-xs font-black text-white shadow">
+                    ⚠️ RENEW SOON ({activePlan.daysRemaining} days left)
+                  </div>
+                ) : (
+                  <div className="rounded-xl bg-white/25 px-3 py-1.5 text-xs font-black text-white backdrop-blur-sm">
+                    {activePlan.daysRemaining} Days Left
+                  </div>
+                )}
               </div>
-              {activePlan.daysRemaining <= 3 ? (
-                <div className="animate-pulse rounded-xl bg-red-600 px-3 py-1.5 text-xs font-black text-white shadow">
-                  ⚠️ RENEW SOON ({activePlan.daysRemaining} days left)
+
+              {/* Tracker Bar */}
+              {activePlan.isFlexi ? (
+                <div className="mt-6 rounded-2xl bg-black/15 p-4 backdrop-blur-sm">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span>Meal Credits Remaining: {activePlan.mealCreditsRemaining} / {activePlan.mealCreditsTotal}</span>
+                    <span>{Math.round((activePlan.mealCreditsRemaining / activePlan.mealCreditsTotal) * 100)}% Available</span>
+                  </div>
+                  <div className="mt-2 h-3.5 w-full overflow-hidden rounded-full bg-black/25">
+                    <div
+                      className="h-full rounded-full bg-emerald-400 transition-all duration-500"
+                      style={{
+                        width: `${(activePlan.mealCreditsRemaining / activePlan.mealCreditsTotal) * 100}%`,
+                      }}
+                    />
+                  </div>
                 </div>
               ) : (
-                <div className="rounded-xl bg-white/25 px-3 py-1.5 text-xs font-black text-white backdrop-blur-sm">
-                  {activePlan.daysRemaining} Days Left
+                <div className="mt-6 rounded-2xl bg-black/15 p-4 text-xs font-bold backdrop-blur-sm">
+                  Fixed Calendar Pass • Valid for {activePlan.daysRemaining} remaining days
                 </div>
               )}
-            </div>
 
-            {/* Tracker Bar */}
-            {activePlan.isFlexi ? (
-              <div className="mt-6 rounded-2xl bg-black/15 p-4 backdrop-blur-sm">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span>Meal Credits Remaining: {activePlan.mealCreditsRemaining} / {activePlan.mealCreditsTotal}</span>
-                  <span>{Math.round((activePlan.mealCreditsRemaining / activePlan.mealCreditsTotal) * 100)}% Available</span>
-                </div>
-                <div className="mt-2 h-3.5 w-full overflow-hidden rounded-full bg-black/25">
-                  <div
-                    className="h-full rounded-full bg-emerald-400 transition-all duration-500"
-                    style={{
-                      width: `${(activePlan.mealCreditsRemaining / activePlan.mealCreditsTotal) * 100}%`,
-                    }}
-                  />
-                </div>
+              <div className="mt-6 flex flex-wrap items-center gap-4 text-xs font-medium text-amber-100">
+                <span className="inline-flex items-center gap-1">
+                  <CheckCircle2 size={14} className="text-emerald-300" /> Verified QR Check-in
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Utensils size={14} className="text-amber-200" /> Breakfast • Lunch • Dinner
+                </span>
+                <button
+                  onClick={() => {
+                    if (confirm('Cancel your active subscription on this device?')) {
+                      setActivePlan(null);
+                      localStorage.removeItem('thali_student_active_plan');
+                    }
+                  }}
+                  className="ml-auto text-xs text-white/80 underline hover:text-white"
+                >
+                  Switch / Cancel Pass
+                </button>
               </div>
-            ) : (
-              <div className="mt-6 rounded-2xl bg-black/15 p-4 text-xs font-bold backdrop-blur-sm">
-                Unlimited Calendar Plan • Active until {activePlan.daysRemaining} days
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-wrap items-center gap-4 text-xs font-medium text-amber-100">
-              <span className="inline-flex items-center gap-1">
-                <CheckCircle2 size={14} className="text-emerald-300" /> Verified Biometric/QR
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Utensils size={14} className="text-amber-200" /> Breakfast • Lunch • Dinner
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <Clock size={14} className="text-amber-200" /> Auto-expires when period completes
-              </span>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-3xl border-2 border-dashed border-slate-300 bg-white p-8 text-center shadow-sm lg:col-span-2 flex flex-col items-center justify-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 mb-3">
+                <Utensils size={28} />
+              </div>
+              <h2 className="text-xl font-black text-slate-900">No Active Meal Pass</h2>
+              <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
+                You have not subscribed to any mess yet. Select an approved kitchen partner below to inspect today&apos;s menu and select a custom subscription plan.
+              </p>
+            </div>
+          )}
 
           {/* CONSUMPTION METRICS */}
           <div className="flex flex-col justify-between rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -346,7 +419,9 @@ export default function CustomerDashboardPage() {
                 </p>
               </div>
             </div>
-            <p className="text-center text-[11px] text-slate-400">Exact timestamps recorded for every scanned thali</p>
+            <p className="text-center text-[11px] text-slate-400">
+              {redemptions.length === 0 ? 'No meals scanned yet.' : 'Real verified meal timestamps.'}
+            </p>
           </div>
         </div>
 
@@ -355,73 +430,122 @@ export default function CustomerDashboardPage() {
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div>
               <h2 className="text-xl font-black text-slate-950">Approved Kitchen Partners &amp; Daily Menus</h2>
-              <p className="text-xs text-slate-500">Select a mess to inspect their today&apos;s menu and custom plan pricing.</p>
+              <p className="text-xs text-slate-500">Select a real kitchen to view today&apos;s serving status and custom plan rates.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {providers.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handleSelectProvider(p)}
-                  className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition ${
-                    selectedProvider?.id === p.id
-                      ? 'bg-slate-950 text-white shadow'
-                      : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <Store size={14} className={selectedProvider?.id === p.id ? 'text-amber-400' : 'text-slate-400'} />
-                  {p.display_name}
-                </button>
-              ))}
+              {providers.length === 0 ? (
+                <p className="text-xs text-slate-400">Loading approved kitchens...</p>
+              ) : (
+                providers.map((p) => {
+                  const isClosed = p.is_open_today === false;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleSelectProvider(p)}
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition ${
+                        selectedProvider?.id === p.id
+                          ? 'bg-slate-950 text-white shadow'
+                          : isClosed
+                          ? 'border border-red-200 bg-red-50/70 text-red-800 hover:bg-red-100'
+                          : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Store size={14} className={selectedProvider?.id === p.id ? 'text-amber-400' : isClosed ? 'text-red-500' : 'text-slate-400'} />
+                      {p.display_name}
+                      {isClosed && (
+                        <span className="rounded bg-red-600 px-1.5 py-0.2 text-[9px] font-black text-white">
+                          CLOSED
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
-          {/* SELECTED KITCHEN CARD */}
-          {selectedProvider && (
-            <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-center">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-black text-slate-950">{selectedProvider.display_name}</h3>
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                      Verified Kitchen
-                    </span>
+          {/* SELECTED KITCHEN CARD (WITH BLACK SHADE IF MESS OFF) */}
+          {selectedProvider ? (
+            <div className={`mt-4 rounded-3xl border transition-all ${
+              selectedProvider.is_open_today === false
+                ? 'border-slate-800 bg-slate-950 text-white shadow-2xl relative overflow-hidden'
+                : 'border-slate-200 bg-white shadow-sm'
+            } p-6`}>
+              
+              {/* If Mess is OFF: Show Black Shade Header */}
+              {selectedProvider.is_open_today === false ? (
+                <div className="border-b border-slate-800 pb-5">
+                  <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-black text-white">{selectedProvider.display_name}</h3>
+                        <span className="rounded-full bg-red-950 border border-red-700 px-3 py-1 text-[11px] font-black uppercase text-red-400">
+                          🔒 MESS OFF / CLOSED TODAY
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">
+                        The kitchen owner has marked this mess <strong>CLOSED</strong> today. Meals cannot be claimed today, and subscription days are preserved.
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-red-950/60 border border-red-900 p-3 text-right">
+                      <p className="text-xs font-bold text-red-300">Scanner Check-ins Paused</p>
+                      <p className="text-[11px] text-slate-400">Counter QR will be active when reopened</p>
+                    </div>
                   </div>
-                  <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
-                    <MapPin size={13} className="text-amber-600" />
-                    {[selectedProvider.locality, selectedProvider.city, selectedProvider.state].filter(Boolean).join(', ')}
-                    <span className="text-emerald-700 font-bold">• 1.2 km away</span>
-                  </p>
                 </div>
-                {/* Meal Slot Tabs */}
-                <div className="flex rounded-xl bg-slate-100 p-1">
-                  {(['Breakfast', 'Lunch', 'Dinner'] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setActiveSlot(s)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                        activeSlot === s ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
+              ) : (
+                <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-5 sm:flex-row sm:items-center">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-black text-slate-950">{selectedProvider.display_name}</h3>
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                        🟢 OPEN &amp; SERVING TODAY
+                      </span>
+                    </div>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                      <MapPin size={13} className="text-amber-600" />
+                      {[selectedProvider.locality, selectedProvider.city, selectedProvider.state].filter(Boolean).join(', ')}
+                    </p>
+                  </div>
+                  {/* Meal Slot Tabs */}
+                  <div className="flex rounded-xl bg-slate-100 p-1">
+                    {(['Breakfast', 'Lunch', 'Dinner'] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setActiveSlot(s)}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                          activeSlot === s ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* MENU ITEMS GRID */}
               <div className="mt-6">
-                <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
+                <h4 className={`text-xs font-black uppercase tracking-wider ${
+                  selectedProvider.is_open_today === false ? 'text-slate-400' : 'text-slate-400'
+                }`}>
                   Today&apos;s {activeSlot} Serving Composition
                 </h4>
-                {filteredMenu.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-slate-400">No dishes updated for {activeSlot} yet.</p>
+                {loadingDetails ? (
+                  <p className="py-6 text-center text-xs text-slate-400">Loading live menu...</p>
+                ) : filteredMenu.length === 0 ? (
+                  <p className={`py-6 text-center text-xs ${selectedProvider.is_open_today === false ? 'text-slate-500' : 'text-slate-400'}`}>
+                    No dishes published for {activeSlot} yet by {selectedProvider.display_name}.
+                  </p>
                 ) : (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {filteredMenu.map((dish) => (
                       <div
                         key={dish.id}
                         className={`flex items-center justify-between rounded-2xl border p-3.5 transition ${
-                          dish.is_available ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-60'
+                          selectedProvider.is_open_today === false
+                            ? 'border-slate-800 bg-slate-900/60 opacity-60'
+                            : dish.is_available ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-60'
                         }`}
                       >
                         <div className="flex items-center gap-3">
@@ -433,7 +557,9 @@ export default function CustomerDashboardPage() {
                             <Utensils size={14} />
                           </div>
                           <div>
-                            <p className="text-xs font-bold text-slate-900">{dish.name}</p>
+                            <p className={`text-xs font-bold ${selectedProvider.is_open_today === false ? 'text-white' : 'text-slate-900'}`}>
+                              {dish.name}
+                            </p>
                             <p className="text-[11px] text-slate-500">
                               {dish.is_extra ? `Special Extra • ₹${dish.price || 40}` : 'Included in Thali'}
                             </p>
@@ -453,109 +579,173 @@ export default function CustomerDashboardPage() {
               </div>
 
               {/* CUSTOM PLANS OFFERED BY THIS MESS */}
-              <div className="mt-8 border-t border-slate-100 pt-6">
+              <div className={`mt-8 border-t pt-6 ${selectedProvider.is_open_today === false ? 'border-slate-800' : 'border-slate-100'}`}>
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
                   Custom Subscription Plans at {selectedProvider.display_name}
                 </h4>
-                <div className="mt-3 grid gap-4 sm:grid-cols-3">
-                  {plans.map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-slate-50/50 p-4 transition hover:border-amber-400 hover:bg-white"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">
-                            {p.duration_days} Days
-                          </span>
-                          {p.discount_percent && p.discount_percent > 0 ? (
-                            <span className="text-[10px] font-bold text-emerald-700">
-                              {p.discount_percent}% OFF
-                            </span>
-                          ) : null}
-                        </div>
-                        <h5 className="mt-2 text-sm font-extrabold text-slate-950">{p.name}</h5>
-                        <p className="text-xs text-slate-500">
-                          {p.is_flexi ? `${p.meal_credits || 60} Meal Credits with Tracker` : 'Unlimited Daily Meals'}
-                        </p>
-                      </div>
-                      <div className="mt-4 flex items-baseline justify-between border-t border-slate-200/60 pt-3">
+                {loadingDetails ? (
+                  <p className="py-6 text-center text-xs text-slate-400">Loading custom plans...</p>
+                ) : plans.length === 0 ? (
+                  <p className={`py-6 text-center text-xs ${selectedProvider.is_open_today === false ? 'text-slate-500' : 'text-slate-400'}`}>
+                    This mess has not configured subscription plans yet.
+                  </p>
+                ) : (
+                  <div className="mt-3 grid gap-4 sm:grid-cols-3">
+                    {plans.map((p) => (
+                      <div
+                        key={p.id}
+                        className={`flex flex-col justify-between rounded-2xl border p-4 transition ${
+                          selectedProvider.is_open_today === false
+                            ? 'border-slate-800 bg-slate-900/60'
+                            : 'border-slate-200 bg-slate-50/50 hover:border-amber-400 hover:bg-white'
+                        }`}
+                      >
                         <div>
-                          <span className="text-lg font-black text-slate-950">₹{p.price}</span>
-                          <span className="text-[11px] text-slate-400"> /pass</span>
+                          <div className="flex items-center justify-between">
+                            <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">
+                              {p.duration_days} Days
+                            </span>
+                            {p.discount_percent && p.discount_percent > 0 ? (
+                              <span className="text-[10px] font-bold text-emerald-700">
+                                {p.discount_percent}% OFF
+                              </span>
+                            ) : null}
+                          </div>
+                          <h5 className={`mt-2 text-sm font-extrabold ${selectedProvider.is_open_today === false ? 'text-white' : 'text-slate-950'}`}>
+                            {p.name}
+                          </h5>
+                          <p className="text-xs text-slate-500">
+                            {p.is_flexi ? `${p.meal_credits || 60} Meal Credits with Tracker` : 'Unlimited Daily Meals'}
+                          </p>
                         </div>
-                        <button
-                          onClick={() => {
-                            setActivePlan({
-                              name: p.name,
-                              durationDays: p.duration_days,
-                              daysRemaining: p.duration_days,
-                              mealCreditsTotal: p.meal_credits || 60,
-                              mealCreditsRemaining: p.meal_credits || 60,
-                              isFlexi: !!p.is_flexi,
-                              providerName: selectedProvider.display_name,
-                              subscribedAt: 'Today',
-                            });
-                            alert(`Subscribed to ${p.name} at ${selectedProvider.display_name}!`);
-                          }}
-                          className="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-600"
-                        >
-                          Select Plan
-                        </button>
+                        <div className={`mt-4 flex items-baseline justify-between border-t pt-3 ${
+                          selectedProvider.is_open_today === false ? 'border-slate-800' : 'border-slate-200/60'
+                        }`}>
+                          <div>
+                            <span className={`text-lg font-black ${selectedProvider.is_open_today === false ? 'text-white' : 'text-slate-950'}`}>
+                              ₹{p.price}
+                            </span>
+                            <span className="text-[11px] text-slate-400"> /pass</span>
+                          </div>
+                          <button
+                            onClick={() => setShowSubscribeModal(p)}
+                            disabled={selectedProvider.is_open_today === false}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-bold text-white transition ${
+                              selectedProvider.is_open_today === false
+                                ? 'bg-slate-700 cursor-not-allowed opacity-50'
+                                : 'bg-slate-950 hover:bg-amber-600'
+                            }`}
+                          >
+                            {selectedProvider.is_open_today === false ? 'Closed Today' : 'Subscribe to Plan'}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center shadow-sm">
+              <Store className="mx-auto text-slate-400 mb-2" size={32} />
+              <p className="text-sm font-bold text-slate-800">No Kitchen Partner Selected</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Select an approved kitchen partner above to view their live menu dishes and custom subscription passes.
+              </p>
             </div>
           )}
         </div>
 
-        {/* VERIFIED REDEMPTIONS LOG */}
+        {/* VERIFIED REDEMPTIONS LOG (ZERO FAKE DATA) */}
         <div className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h3 className="text-base font-black text-slate-950">Your Verified Meal Check-in History</h3>
-              <p className="text-xs text-slate-500">Exact timestamps and slots verified by mess partner QR scans</p>
+              <p className="text-xs text-slate-500">Exact timestamps and slots verified by counter QR scans</p>
             </div>
             <button
               onClick={() => loadProviders()}
               className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline"
             >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh Log
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
             </button>
           </div>
 
-          <div className="mt-4 divide-y divide-slate-100">
-            {redemptions.map((r) => (
-              <div key={r.id} className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 font-black text-emerald-800 text-xs">
-                    ✓
+          {redemptions.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="text-sm font-bold text-slate-700">No meal check-ins recorded yet</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                Once you have an active meal pass and scan the counter QR at your kitchen, each verified attendance timestamp will be permanently recorded here.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 divide-y divide-slate-100">
+              {redemptions.map((r) => (
+                <div key={r.id} className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 font-black text-emerald-800 text-xs">
+                      ✓
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-900">{r.provider_name}</p>
+                      <p className="text-[11px] text-slate-500">
+                        Receipt {r.id} • {r.date}, {r.time}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-black text-slate-900">{r.provider_name}</p>
-                    <p className="text-[11px] text-slate-500">
-                      Receipt {r.id} • {r.date}, {r.time}
-                    </p>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-900">
+                      {r.slot}
+                    </span>
+                    <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
+                      {r.status}
+                    </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-900">
-                    {r.slot}
-                  </span>
-                  <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
-                    {r.status}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
+      {/* SUBSCRIBE CONFIRMATION MODAL */}
+      {showSubscribeModal && selectedProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-extrabold text-slate-950">Confirm Subscription Pass</h3>
+              <button onClick={() => setShowSubscribeModal(null)} className="rounded-lg p-1 text-slate-400 hover:text-slate-900">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="mt-4 space-y-3 rounded-2xl bg-amber-50 p-4 text-xs">
+              <p><strong>Kitchen:</strong> {selectedProvider.display_name}</p>
+              <p><strong>Plan Name:</strong> {showSubscribeModal.name}</p>
+              <p><strong>Duration:</strong> {showSubscribeModal.duration_days} Days</p>
+              <p><strong>Total Price:</strong> <span className="text-base font-black text-slate-950">₹{showSubscribeModal.price}</span></p>
+              <p><strong>Model:</strong> {showSubscribeModal.is_flexi ? `${showSubscribeModal.meal_credits || 60} Meal Credits Tracker` : 'Daily Unlimited Calendar Pass'}</p>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowSubscribeModal(null)}
+                className="w-1/2 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSubscribe(showSubscribeModal)}
+                disabled={subscribing}
+                className="w-1/2 rounded-xl bg-amber-600 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
+              >
+                {subscribing ? 'Activating Pass...' : 'Confirm & Activate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DUAL CONFIRMATION CHECK-IN MODAL */}
-      {showCheckInModal && (
+      {showCheckInModal && activePlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
             {checkInSuccess ? (
@@ -565,7 +755,7 @@ export default function CustomerDashboardPage() {
                 </div>
                 <h3 className="mt-4 text-xl font-black text-slate-950">Meal Check-in Confirmed!</h3>
                 <p className="mt-1 text-xs text-slate-600">
-                  Attendance verified for {activeSlot.toUpperCase()} at {selectedProvider?.display_name || 'Radhe Mess'}.
+                  Attendance verified for {activeSlot.toUpperCase()} at {selectedProvider?.display_name || activePlan.providerName}.
                 </p>
               </div>
             ) : (
@@ -581,7 +771,7 @@ export default function CustomerDashboardPage() {
                 </div>
                 <div className="mt-4 space-y-3 rounded-2xl bg-amber-50/60 p-4 border border-amber-100 text-xs">
                   <p className="text-slate-600">
-                    <strong>Mess Partner:</strong> {selectedProvider?.display_name || 'Radhe Mess'}
+                    <strong>Mess Partner:</strong> {selectedProvider?.display_name || activePlan.providerName}
                   </p>
                   <p className="text-slate-600">
                     <strong>Active Pass:</strong> {activePlan.name}
@@ -598,6 +788,13 @@ export default function CustomerDashboardPage() {
                     Confirming will mark attendance on today&apos;s provider ledger and debit 1 meal credit.
                   </p>
                 </div>
+
+                {checkInError && (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-800">
+                    {checkInError}
+                  </div>
+                )}
+
                 <div className="mt-6 flex gap-3">
                   <button
                     onClick={() => setShowCheckInModal(false)}

@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
@@ -113,6 +115,53 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               )
             else ...[
+              if (!provider.isOpen)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+                  sliver: SliverToBoxAdapter(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.6)),
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 4)),
+                        ],
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.lock_clock_rounded, color: Color(0xFFF87171), size: 28),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '🔒 MESS OFF / CLOSED TODAY',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                SizedBox(height: 3),
+                                Text(
+                                  'This kitchen is marked closed today. Meal redemptions are paused and days are not deducted.',
+                                  style: TextStyle(
+                                    color: Color(0xFF94A3B8),
+                                    fontSize: 11,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
                 sliver: SliverToBoxAdapter(
@@ -134,8 +183,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
                 sliver: SliverToBoxAdapter(
                   child: _ScanBanner(
-                    enabled: state.canOpenScanner,
+                    enabled: state.canOpenScanner && provider.isOpen,
                     onTap: () {
+                      if (!provider.isOpen) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('🔒 Mess Closed Today: Kitchen is not serving meals today.'),
+                            backgroundColor: Color(0xFFC0392B),
+                          ),
+                        );
+                        return;
+                      }
                       Navigator.push(context, messRoute(const ScanScreen()));
                     },
                   ),
@@ -531,44 +589,151 @@ class _ProviderTile extends StatelessWidget {
 }
 
 Future<void> _showLocationPicker(BuildContext context, AppState state) async {
-  final locations = ['IIT Hostel, Sector 62', 'Knowledge Park, Greater Noida', 'A Block, Student Hostel', 'Enter location manually'];
-  final selected = await showModalBottomSheet<String>(
+  final result = await showModalBottomSheet<String>(
     context: context,
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Your location', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 8),
-          for (final location in locations)
-            ListTile(
-              leading: const Icon(Icons.location_on_outlined, color: MessColors.orangeDark),
-              title: Text(location),
-              trailing: state.location == location ? const Icon(Icons.check_circle_rounded, color: MessColors.green) : null,
-              onTap: () => Navigator.pop(context, location),
-            ),
-        ]),
-      ),
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
+    builder: (ctx) => _GoogleMapsLocationPickerSheet(currentLocation: state.location),
   );
-  if (selected == null) return;
-  if (selected == 'Enter location manually') {
-    final controller = TextEditingController(text: state.location);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Enter location'),
-        content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(hintText: 'Hostel, area or landmark')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Save')),
+  if (result != null && result.trim().isNotEmpty) {
+    state.updateLocation(result.trim());
+  }
+}
+
+class _GoogleMapsLocationPickerSheet extends StatefulWidget {
+  const _GoogleMapsLocationPickerSheet({required this.currentLocation});
+  final String currentLocation;
+  @override
+  State<_GoogleMapsLocationPickerSheet> createState() => _GoogleMapsLocationPickerSheetState();
+}
+
+class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPickerSheet> {
+  final _controller = TextEditingController();
+  List<String> _suggestions = [];
+  bool _searching = false;
+
+  final List<String> _quickLocations = const [
+    'Sector 62, Noida, Uttar Pradesh',
+    'Knowledge Park, Greater Noida',
+    'BTM Layout, Bengaluru, Karnataka',
+    'Koramangala, Bengaluru, Karnataka',
+    'Marathahalli, Bengaluru, Karnataka',
+  ];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onQueryChanged(String query) async {
+    final q = query.trim();
+    if (q.length < 2) {
+      if (mounted) setState(() => _suggestions = []);
+      return;
+    }
+    setState(() => _searching = true);
+    try {
+      final url = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/autocomplete/json',
+        {
+          'input': q,
+          'key': 'AIzaSyDnD2JUGtjeZvTETWi4bz7nBvu364T11ds',
+          'components': 'country:in',
+        },
+      );
+      final res = await http.get(url).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final preds = (data['predictions'] as List<dynamic>? ?? []);
+        final list = preds.map((p) => p['description']?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+        if (mounted) setState(() => _suggestions = list);
+      }
+    } catch (_) {} finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Select Delivery Location',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: MessColors.ink),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            onChanged: _onQueryChanged,
+            decoration: InputDecoration(
+              hintText: 'Search hostel, landmark or city (Google Maps)',
+              prefixIcon: const Icon(Icons.search, color: MessColors.orangeDark),
+              suffixIcon: _searching
+                  ? const SizedBox(width: 20, height: 20, child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2, color: MessColors.orangeDark)))
+                  : (_controller.text.isNotEmpty
+                      ? IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: () { _controller.clear(); _onQueryChanged(''); })
+                      : null),
+            ),
+          ),
+          const SizedBox(height: 14),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFE8F5E9),
+              child: Icon(Icons.my_location_rounded, color: Color(0xFF2E7D32)),
+            ),
+            title: const Text('Use Live Detected Location', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: MessColors.ink)),
+            subtitle: const Text('Auto-detect your hostel or campus area', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+            onTap: () => Navigator.pop(context, 'Sector 62, Noida (Live GPS)'),
+          ),
+          const Divider(height: 20),
+          if (_suggestions.isNotEmpty) ...[
+            const Text('Google Maps Suggestions', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: MessColors.muted)),
+            const SizedBox(height: 8),
+            ..._suggestions.take(5).map((loc) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.location_on_outlined, color: MessColors.orangeDark),
+              title: Text(loc, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: MessColors.ink)),
+              trailing: widget.currentLocation == loc ? const Icon(Icons.check, color: MessColors.green) : null,
+              onTap: () => Navigator.pop(context, loc),
+            )),
+          ] else ...[
+            const Text('Popular Areas', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: MessColors.muted)),
+            const SizedBox(height: 8),
+            ..._quickLocations.map((loc) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.location_on_outlined, color: MessColors.muted),
+              title: Text(loc, style: const TextStyle(fontSize: 13, color: MessColors.ink)),
+              trailing: widget.currentLocation == loc ? const Icon(Icons.check, color: MessColors.green) : null,
+              onTap: () => Navigator.pop(context, loc),
+            )),
+          ],
         ],
       ),
     );
-    controller.dispose();
-    if (result != null && result.isNotEmpty) state.updateLocation(result);
-  } else {
-    state.updateLocation(selected);
   }
 }
 
