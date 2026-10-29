@@ -47,6 +47,18 @@ export async function GET() {
     supabaseCheck.exception = err?.message || String(err);
   }
 
+  let keyRole = 'none';
+  try {
+    const k = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    if (k) {
+      const parts = k.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+        keyRole = payload.role || 'no-role';
+      }
+    }
+  } catch {}
+
   return NextResponse.json({
     success: true,
     platform: 'Thali (MESS)',
@@ -54,6 +66,7 @@ export async function GET() {
       backend_enabled: process.env.NEXT_PUBLIC_BACKEND_ENABLED || 'not_set',
       has_supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      detected_key_role: keyRole,
     },
     supabase_check: supabaseCheck,
     providers: {
