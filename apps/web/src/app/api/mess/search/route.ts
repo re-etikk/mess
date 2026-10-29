@@ -12,44 +12,83 @@ export async function GET(req: NextRequest) {
   const dietary = searchParams.get('dietary')?.toLowerCase();
   const sortBy = searchParams.get('sort') || 'rating'; // 'rating' | 'distance' | 'popular'
 
-  // 1. Fetch active providers from Supabase if configured
+  // 1. Fetch active providers across persistent storage
   try {
     const admin = getAdminClient();
     if (admin) {
-      const { data: dbProviders } = await admin
-        .from('providers')
-        .select('id,owner_user_id,display_name,slug,description,public_phone,public_email,address_line1,locality,city,state,pincode,status,created_at')
-        .eq('status', 'active');
-
-      if (dbProviders && dbProviders.length > 0) {
-        for (const dbP of dbProviders) {
-          if (!platformStore.providers.has(dbP.id)) {
-            platformStore.providers.set(dbP.id, {
-              id: dbP.id,
-              owner_user_id: dbP.owner_user_id,
-              display_name: dbP.display_name,
-              slug: dbP.slug,
-              description: dbP.description || 'Authentic homestyle daily meals.',
-              phone: dbP.public_phone,
-              email: dbP.public_email || `${dbP.slug}@thali.mess`,
-              address: `${dbP.address_line1}, ${dbP.locality ? dbP.locality + ', ' : ''}${dbP.city}`,
-              locality: dbP.locality || dbP.city,
-              city: dbP.city,
-              rating: 5.0,
-              total_reviews: 0,
-              cuisines: ['North Indian', 'Homestyle'],
-              dietary_types: ['veg'],
-              distance_km: 1.0,
-              status: 'active',
-              created_at: dbP.created_at,
-            });
-            seedProviderPlansAndMenu(dbP.id);
+      // From Auth metadata
+      try {
+        const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 100 });
+        if (usersData?.users) {
+          for (const u of usersData.users) {
+            const meta = u.user_metadata || {};
+            if (meta.role === 'provider' && meta.application && meta.application.status === 'active') {
+              const app = meta.application;
+              const pId = app.id || u.id;
+              if (!platformStore.providers.has(pId)) {
+                platformStore.providers.set(pId, {
+                  id: pId,
+                  owner_user_id: u.id,
+                  display_name: app.display_name || 'Mess Partner',
+                  slug: app.slug || `mess-${pId.slice(0, 6)}`,
+                  description: app.description || 'Authentic homestyle daily meals.',
+                  phone: app.public_phone || meta.phone || '',
+                  email: u.email || `${pId}@thali.mess`,
+                  address: `${app.address_line1}, ${app.locality ? app.locality + ', ' : ''}${app.city}`,
+                  locality: app.locality || app.city,
+                  city: app.city,
+                  rating: 5.0,
+                  total_reviews: 0,
+                  cuisines: ['North Indian', 'Homestyle'],
+                  dietary_types: ['veg'],
+                  distance_km: 1.0,
+                  status: 'active',
+                  created_at: app.created_at || u.created_at,
+                });
+                seedProviderPlansAndMenu(pId);
+              }
+            }
           }
         }
-      }
+      } catch {}
+
+      // From PostgreSQL providers table
+      try {
+        const { data: dbProviders } = await admin
+          .from('providers')
+          .select('id,owner_user_id,display_name,slug,description,public_phone,public_email,address_line1,locality,city,state,pincode,status,created_at')
+          .eq('status', 'active');
+
+        if (dbProviders && dbProviders.length > 0) {
+          for (const dbP of dbProviders) {
+            if (!platformStore.providers.has(dbP.id)) {
+              platformStore.providers.set(dbP.id, {
+                id: dbP.id,
+                owner_user_id: dbP.owner_user_id,
+                display_name: dbP.display_name,
+                slug: dbP.slug,
+                description: dbP.description || 'Authentic homestyle daily meals.',
+                phone: dbP.public_phone,
+                email: dbP.public_email || `${dbP.slug}@thali.mess`,
+                address: `${dbP.address_line1}, ${dbP.locality ? dbP.locality + ', ' : ''}${dbP.city}`,
+                locality: dbP.locality || dbP.city,
+                city: dbP.city,
+                rating: 5.0,
+                total_reviews: 0,
+                cuisines: ['North Indian', 'Homestyle'],
+                dietary_types: ['veg'],
+                distance_km: 1.0,
+                status: 'active',
+                created_at: dbP.created_at,
+              });
+              seedProviderPlansAndMenu(dbP.id);
+            }
+          }
+        }
+      } catch {}
     }
   } catch (err) {
-    console.warn('Failed to query active providers from Supabase for search:', err);
+    console.warn('Failed to query active providers for search:', err);
   }
 
   let results = Array.from(platformStore.providers.values()).filter(
@@ -79,7 +118,6 @@ export async function GET(req: NextRequest) {
       const matchDesc = p.description.toLowerCase().includes(q);
       const matchCuisine = p.cuisines.some((c) => c.toLowerCase().includes(q));
 
-      // check if any menu items match
       const menus = Array.from(platformStore.menus.values()).filter((m) => m.provider_id === p.id);
       const matchMenu = menus.some((m) =>
         m.items_included.some((item) => item.toLowerCase().includes(q)) ||
@@ -96,7 +134,6 @@ export async function GET(req: NextRequest) {
   } else if (sortBy === 'popular') {
     results.sort((a, b) => b.total_reviews - a.total_reviews);
   } else {
-    // Default: rating high to low
     results.sort((a, b) => b.rating - a.rating);
   }
 

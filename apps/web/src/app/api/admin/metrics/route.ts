@@ -42,6 +42,14 @@ export async function GET() {
       const { data: profs, error: profErr } = await admin.from('profiles').select('id,display_name').limit(5);
       supabaseCheck.profiles_error = profErr ? profErr.message : null;
       supabaseCheck.profiles_count = profs ? profs.length : 0;
+
+      try {
+        const { data: uData, error: uErr } = await admin.auth.admin.listUsers({ perPage: 2 });
+        supabaseCheck.auth_users_count = uData?.users ? uData.users.length : 0;
+        supabaseCheck.auth_users_error = uErr ? uErr.message : null;
+      } catch (e: any) {
+        supabaseCheck.auth_users_error = e?.message;
+      }
     }
   } catch (err: any) {
     supabaseCheck.exception = err?.message || String(err);

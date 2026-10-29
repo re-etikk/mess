@@ -28,23 +28,66 @@ export async function POST(req: NextRequest) {
       role = 'provider';
     }
 
-    const userId = `usr-${role}-${Buffer.from(email).toString('hex').slice(0, 8)}`;
-    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email, role })).toString('base64url')}`;
-
-    let providerData = null;
+    let providerData: any = null;
 
     if (role === 'provider') {
-      // 1. Search in platformStore
+      // 1. Check in platformStore
       let found = Array.from(platformStore.providers.values()).find(
         (p) =>
           p.email.toLowerCase() === email ||
-          p.owner_user_id === userId ||
           (cleanDigits.length >= 7 && p.phone.replace(/\D/g, '').includes(cleanDigits)) ||
           p.id === rawIdentifier ||
           p.slug === email
       );
 
-      // 2. Search in Supabase database
+      // 2. Check in Supabase Auth users metadata
+      if (!found) {
+        try {
+          const admin = getAdminClient();
+          if (admin) {
+            const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 100 });
+            if (usersData?.users) {
+              const matchedUser = usersData.users.find((u) => {
+                const meta = u.user_metadata || {};
+                const uPhoneDigits = (meta.phone || '').replace(/\D/g, '');
+                return (
+                  u.id === rawIdentifier ||
+                  u.email?.toLowerCase() === email ||
+                  (cleanDigits.length >= 7 && uPhoneDigits.includes(cleanDigits)) ||
+                  meta.application?.id === rawIdentifier
+                );
+              });
+
+              if (matchedUser) {
+                const meta = matchedUser.user_metadata || {};
+                const app = meta.application || {};
+                found = {
+                  id: app.id || matchedUser.id,
+                  owner_user_id: matchedUser.id,
+                  display_name: app.display_name || meta.display_name || 'My Mess',
+                  slug: app.slug || `mess-${matchedUser.id.slice(0, 6)}`,
+                  description: app.description || 'Homestyle daily meals.',
+                  phone: app.public_phone || meta.phone || rawIdentifier,
+                  email: matchedUser.email || `${app.id || matchedUser.id}@thali.mess`,
+                  address: app.address_line1 || 'Address on file',
+                  locality: app.locality || 'Campus Area',
+                  city: app.city || 'Campus Area',
+                  rating: 5.0,
+                  total_reviews: 0,
+                  cuisines: ['North Indian', 'Homestyle'],
+                  dietary_types: ['veg'],
+                  status: app.status || 'active',
+                  created_at: app.created_at || matchedUser.created_at,
+                };
+                platformStore.providers.set(found.id, found);
+                seedProviderPlansAndMenu(found.id);
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 3. Check in PostgreSQL table if available
       if (!found) {
         try {
           const admin = getAdminClient();
@@ -81,15 +124,16 @@ export async function POST(req: NextRequest) {
               seedProviderPlansAndMenu(found.id);
             }
           }
-        } catch (err) {
-          console.warn('Supabase provider login lookup error:', err);
-        }
+        } catch {}
       }
 
       if (found) {
         providerData = found;
       }
     }
+
+    const userId = providerData?.id || `usr-${role}-${Buffer.from(email).toString('hex').slice(0, 8)}`;
+    const token = `jwt_session_${Buffer.from(JSON.stringify({ userId, email, role })).toString('base64url')}`;
 
     return NextResponse.json({
       success: true,
