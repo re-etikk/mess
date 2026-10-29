@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <!-- icon-qr -->
+  <symbol id="icon-qr" viewBox="0 0 24 24">
+    <rect x="3" y="3" width="6" height="6" fill="currentColor"/>
+    <rect x="3" y="15" width="6" height="6" fill="currentColor"/>
+    <rect x="15" y="3" width="6" height="6" fill="currentColor"/>
+    <rect x="10" y="10" width="4" height="4" fill="currentColor"/>
+  </symbol>
+
+  <!-- icon-search -->
+  <symbol id="icon-search" viewBox="0 0 24 24">
+    <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" fill="none"/>
+    <line x1="14" y1="14" x2="20" y2="20" stroke="currentColor" stroke-width="2"/>
+  </symbol>
+
+  <!-- icon-home -->
+  <symbol id="icon-home" viewBox="0 0 24 24">
+    <path d="M3 11 L12 2 L21 11 V21 H3 Z" fill="currentColor"/>
+    <rect x="9" y="14" width="6" height="7" fill="currentColor"/>
+  </symbol>
+
+  <!-- icon-plans -->
+  <symbol id="icon-plans" viewBox="0 0 24 24">
+    <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2" fill="none"/>
+    <line x1="3" y1="9" x2="21" y2="9" stroke="currentColor" stroke-width="2"/>
+    <line x1="7" y1="4" x2="7" y2="2" stroke="currentColor" stroke-width="2"/>
+    <line x1="17" y1="4" x2="17" y2="2" stroke="currentColor" stroke-width="2"/>
+  </symbol>
+
+  <!-- icon-profile -->
+  <symbol id="icon-profile" viewBox="0 0 24 24">
+    <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2" fill="none"/>
+    <path d="M4 22c0-4 8-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="2" fill="none"/>
+  </symbol>
+</svg>

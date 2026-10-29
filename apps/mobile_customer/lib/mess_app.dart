@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/theme/mess_theme.dart';
+import 'core/theme/thali_theme.dart';
 import 'core/state/app_state.dart';
 import 'core/widgets/app_state_scope.dart';
 import 'core/widgets/mess_widgets.dart';
@@ -16,7 +17,7 @@ class MessApp extends StatelessWidget {
     return MaterialApp(
       title: 'MESS | Your Meals, Your Choice',
       debugShowCheckedModeBanner: false,
-      theme: MessTheme.light(),
+      theme: ThaliTheme.light,
       builder: (context, child) => AppStateScope(
         notifier: appState,
         child: child ?? const SizedBox.shrink(),

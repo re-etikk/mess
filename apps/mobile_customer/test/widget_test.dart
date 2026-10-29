@@ -5,7 +5,8 @@ import 'package:mess_customer_app/core/widgets/app_state_scope.dart';
 
 void main() {
   testWidgets('MESS Customer App smoke test', (tester) async {
-    await tester.pumpWidget(AppStateScope(notifier: AppState(), child: const MessApp()));
+    final appState = AppState();
+    await tester.pumpWidget(MessApp(appState: appState));
     expect(find.byType(MessApp), findsOneWidget);
   });
 }
