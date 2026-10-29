@@ -108,7 +108,9 @@ class PlatformStore {
   notifications: Map<string, CustomerNotification> = new Map();
 
   constructor() {
-    this.seedDemoData();
+    if (process.env.NODE_ENV === 'test') {
+      this.seedDemoData();
+    }
   }
 
   seedDemoData() {

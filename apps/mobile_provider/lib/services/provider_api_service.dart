@@ -68,8 +68,12 @@ class ProviderApiService {
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       final provider = data['provider'] as Map<String, dynamic>?;
-      final providerId = user['provider_id'] ?? provider?['id'] ?? 'prov-radhe-001';
-      final businessName = user['provider_name'] ?? provider?['display_name'] ?? 'Radhe Mess';
+      final providerId = user['provider_id'] ?? provider?['id'];
+      final businessName = user['provider_name'] ?? provider?['display_name'] ?? 'My Mess';
+
+      if (providerId == null || providerId.toString().isEmpty) {
+        throw Exception('No approved mess found for this login. Please register your mess and await admin approval.');
+      }
 
       final session = ProviderSession(
         token: data['token'] as String? ?? '',
@@ -83,6 +87,21 @@ class ProviderApiService {
     } else {
       throw Exception(data['error'] ?? data['message'] ?? 'Login failed. Please verify credentials.');
     }
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchApprovedProviders() async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/providers');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = (data is Map && data['providers'] is List)
+            ? (data['providers'] as List)
+            : (data is List ? data : []);
+        return list.map((item) => item as Map<String, dynamic>).toList();
+      }
+    } catch (_) {}
+    return [];
   }
 
   static Future<ProviderSession> register({

@@ -14,7 +14,7 @@ class AppState extends ChangeNotifier {
   String customerName = 'Student';
   String customerEmail = 'student@example.com';
   String location = 'IIT Hostel, Sector 62';
-  String selectedProviderId = 'prov-radhe-001';
+  String selectedProviderId = '';
   ActiveSubscription? _activeSubscription;
   DailyMealEntitlement? _dailyMeal;
   final Set<String> _redeemedSlots = <String>{};

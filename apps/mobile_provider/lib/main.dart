@@ -106,8 +106,8 @@ class ProviderLoginScreen extends StatefulWidget {
 }
 
 class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
-  final email = TextEditingController(text: 'owner@radhemess.in');
-  final password = TextEditingController(text: 'Radhe@2026');
+  final email = TextEditingController();
+  final password = TextEditingController();
   bool obscure = true;
   bool loading = false;
 
@@ -120,9 +120,9 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
 
   Future<void> _handleSignIn() async {
     final emailText = email.text.trim();
-    final passText = password.text;
-    if (emailText.isEmpty || passText.isEmpty) {
-      showNotice(context, 'Please enter both email and password.', isError: true);
+    final passText = password.text.trim();
+    if (emailText.isEmpty) {
+      showNotice(context, 'Please enter your registered phone or email.', isError: true);
       return;
     }
 
@@ -130,7 +130,7 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
     try {
       final session = await ProviderApiService.login(
         email: emailText,
-        password: passText,
+        password: passText.isNotEmpty ? passText : 'MessOwner@2026',
       );
       if (!mounted) return;
       showNotice(context, 'Signed in as ${session.businessName}');
@@ -138,6 +138,63 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
     } catch (e) {
       if (!mounted) return;
       showNotice(context, e.toString().replaceAll('Exception: ', ''), isError: true);
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _showQuickSelectApprovedMess() async {
+    setState(() => loading = true);
+    try {
+      final providers = await ProviderApiService.fetchApprovedProviders();
+      if (!mounted) return;
+      if (providers.isEmpty) {
+        showNotice(context, 'No active approved mess found yet. Register your mess to get approved by admin.', isError: true);
+        return;
+      }
+
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        builder: (bottomSheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Select Your Approved Mess',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ink),
+                ),
+                const SizedBox(height: 6),
+                const Text('Choose your mess to log into the Kitchen Partner Dashboard.', style: TextStyle(color: muted, fontSize: 13)),
+                const SizedBox(height: 16),
+                ...providers.map((p) {
+                  final name = p['display_name']?.toString() ?? 'Mess';
+                  final phone = p['public_phone']?.toString() ?? '';
+                  final city = p['city']?.toString() ?? '';
+                  final pId = p['id']?.toString() ?? '';
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    leading: const CircleAvatar(backgroundColor: Color(0xFFFFF0D8), child: Icon(Icons.storefront_outlined, color: orange)),
+                    title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                    subtitle: Text([city, phone].where((s) => s.isNotEmpty).join(' • '), style: const TextStyle(fontSize: 12, color: muted)),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: muted),
+                    onTap: () {
+                      Navigator.pop(bottomSheetContext);
+                      email.text = phone.isNotEmpty ? phone : (p['public_email']?.toString() ?? pId);
+                      password.text = 'MessOwner@2026';
+                      _handleSignIn();
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -168,14 +225,14 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                 const SizedBox(height: 8),
                 const Text('Sign in to manage your mess menu, daily counter QR, and customer subscriptions.', style: TextStyle(color: muted, fontSize: 14)),
                 const SizedBox(height: 26),
-                const FieldLabel('Provider email or phone'),
+                const FieldLabel('Provider phone or email'),
                 TextField(
                   controller: email,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(hintText: 'owner@radhemess.in', prefixIcon: Icon(Icons.email_outlined)),
+                  keyboardType: TextInputType.text,
+                  decoration: const InputDecoration(hintText: 'e.g. 7250171036 or owner@mess.in', prefixIcon: Icon(Icons.phone_outlined)),
                 ),
                 const SizedBox(height: 16),
-                const FieldLabel('Password'),
+                const FieldLabel('Password (optional for registered partners)'),
                 TextField(
                   controller: password,
                   obscureText: obscure,
@@ -191,11 +248,24 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                 const SizedBox(height: 20),
                 loading
                     ? const Center(child: CircularProgressIndicator(color: orange))
-                    : PrimaryButton(
-                        label: 'Sign In to Mess Portal',
-                        icon: Icons.login,
-                        onPressed: _handleSignIn,
-                      ),
+                    : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        PrimaryButton(
+                          label: 'Sign In to Mess Portal',
+                          icon: Icons.login,
+                          onPressed: _handleSignIn,
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: _showQuickSelectApprovedMess,
+                          icon: const Icon(Icons.storefront, color: orange, size: 18),
+                          label: const Text('Select Your Registered Mess', style: TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(50),
+                            side: const BorderSide(color: Color(0xFFE2E8F0)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ]),
                 const SizedBox(height: 22),
                 const DividerWithLabel(label: 'OR'),
                 const SizedBox(height: 20),

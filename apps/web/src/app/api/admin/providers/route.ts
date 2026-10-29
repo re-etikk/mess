@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
+import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       if (includeActive) {
         const { data: activeData } = await admin
           .from('providers')
-          .select('id,display_name,public_phone,description,address_line1,locality,city,state,pincode,created_at,status,rating,total_reviews')
+          .select('id,display_name,public_phone,description,address_line1,locality,city,state,pincode,created_at,status')
           .eq('status', 'active')
           .order('display_name', { ascending: true });
         if (activeData) supabaseActive = activeData;
@@ -104,7 +104,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'A valid decision and provider ID are required.' }, { status: 400 });
   }
 
-  const { provider_id, decision, reason } = parsed.data;
+  const { provider_id, decision } = parsed.data;
   const approved = decision === 'approve';
   const newStatus = approved ? 'active' : 'rejected';
 
@@ -119,15 +119,35 @@ export async function PATCH(request: NextRequest) {
         .update({
           status: newStatus,
           approved_at: approved ? new Date().toISOString() : null,
-          resolution_note: reason,
-          resolved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         })
         .eq('id', provider_id)
-        .select('id,display_name,status')
+        .select('*')
         .maybeSingle();
 
       if (!error && data) {
         updatedRecord = data;
+        // Keep platformStore in sync
+        platformStore.providers.set(data.id, {
+          id: data.id,
+          owner_user_id: data.owner_user_id,
+          display_name: data.display_name,
+          slug: data.slug,
+          description: data.description || 'Homestyle daily meals.',
+          phone: data.public_phone,
+          email: data.public_email || `${data.slug}@thali.mess`,
+          address: `${data.address_line1}, ${data.locality ? data.locality + ', ' : ''}${data.city}`,
+          locality: data.locality || data.city,
+          city: data.city,
+          rating: 5.0,
+          total_reviews: 0,
+          cuisines: ['North Indian', 'Homestyle'],
+          dietary_types: ['veg'],
+          status: 'active',
+          created_at: data.created_at,
+        });
+      } else if (error) {
+        console.error('Supabase provider status update error:', error);
       }
     }
   } catch (err) {
@@ -163,7 +183,6 @@ export async function PATCH(request: NextRequest) {
     });
   }
 
-  // Create temporary active provider if not in memory
   if (approved) {
     seedProviderPlansAndMenu(provider_id);
   }

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
+import { platformStore, seedProviderPlansAndMenu } from '@/lib/platform-service';
+import { getAdminClient } from '@/lib/supabase/admin';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -8,6 +11,46 @@ export async function GET(req: NextRequest) {
   const cuisine = searchParams.get('cuisine')?.toLowerCase();
   const dietary = searchParams.get('dietary')?.toLowerCase();
   const sortBy = searchParams.get('sort') || 'rating'; // 'rating' | 'distance' | 'popular'
+
+  // 1. Fetch active providers from Supabase if configured
+  try {
+    const admin = getAdminClient();
+    if (admin) {
+      const { data: dbProviders } = await admin
+        .from('providers')
+        .select('id,owner_user_id,display_name,slug,description,public_phone,public_email,address_line1,locality,city,state,pincode,status,created_at')
+        .eq('status', 'active');
+
+      if (dbProviders && dbProviders.length > 0) {
+        for (const dbP of dbProviders) {
+          if (!platformStore.providers.has(dbP.id)) {
+            platformStore.providers.set(dbP.id, {
+              id: dbP.id,
+              owner_user_id: dbP.owner_user_id,
+              display_name: dbP.display_name,
+              slug: dbP.slug,
+              description: dbP.description || 'Authentic homestyle daily meals.',
+              phone: dbP.public_phone,
+              email: dbP.public_email || `${dbP.slug}@thali.mess`,
+              address: `${dbP.address_line1}, ${dbP.locality ? dbP.locality + ', ' : ''}${dbP.city}`,
+              locality: dbP.locality || dbP.city,
+              city: dbP.city,
+              rating: 5.0,
+              total_reviews: 0,
+              cuisines: ['North Indian', 'Homestyle'],
+              dietary_types: ['veg'],
+              distance_km: 1.0,
+              status: 'active',
+              created_at: dbP.created_at,
+            });
+            seedProviderPlansAndMenu(dbP.id);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to query active providers from Supabase for search:', err);
+  }
 
   let results = Array.from(platformStore.providers.values()).filter(
     (p) => p.status === 'active'

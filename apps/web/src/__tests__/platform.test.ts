@@ -48,7 +48,9 @@ describe('Thali configuration and cryptographic primitives', () => {
       bookingDate: getIndiaDateString(),
     });
     expect(verifySignedQRToken(token.encodedString).isValid).toBe(true);
-    const altered = `${token.encodedString.slice(0, -1)}0`;
+    const altered = token.encodedString.endsWith('0')
+      ? `${token.encodedString.slice(0, -1)}1`
+      : `${token.encodedString.slice(0, -1)}0`;
     expect(verifySignedQRToken(altered).isValid).toBe(false);
   });
 

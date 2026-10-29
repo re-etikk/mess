@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { platformStore } from '@/lib/platform-service';
+import { getAdminClient } from '@/lib/supabase/admin';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const providers = Array.from(platformStore.providers.values());
@@ -26,6 +29,24 @@ export async function GET() {
     }
   }
 
+  let supabaseCheck: Record<string, any> = { attempted: false };
+  try {
+    const admin = getAdminClient();
+    if (admin) {
+      supabaseCheck.attempted = true;
+      const { data: provs, error: provErr } = await admin.from('providers').select('id,display_name,status').limit(10);
+      supabaseCheck.providers_error = provErr ? provErr.message : null;
+      supabaseCheck.providers_count = provs ? provs.length : 0;
+      supabaseCheck.providers_sample = provs;
+
+      const { data: profs, error: profErr } = await admin.from('profiles').select('id,display_name').limit(5);
+      supabaseCheck.profiles_error = profErr ? profErr.message : null;
+      supabaseCheck.profiles_count = profs ? profs.length : 0;
+    }
+  } catch (err: any) {
+    supabaseCheck.exception = err?.message || String(err);
+  }
+
   return NextResponse.json({
     success: true,
     platform: 'Thali (MESS)',
@@ -34,6 +55,7 @@ export async function GET() {
       has_supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     },
+    supabase_check: supabaseCheck,
     providers: {
       total: providers.length,
       active: providers.filter((p) => p.status === 'active').length,
