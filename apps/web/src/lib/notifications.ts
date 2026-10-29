@@ -228,3 +228,41 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
     },
   };
 }
+
+export async function sendEmailNotification(params: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (!resendApiKey) {
+    console.warn('RESEND_API_KEY is not configured');
+    return { success: false, error: 'RESEND_API_KEY missing' };
+  }
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: process.env.RESEND_FROM_EMAIL || 'Thali Support <onboarding@resend.dev>',
+        to: [params.to],
+        subject: params.subject,
+        html: params.html,
+        text: params.text || params.html.replace(/<[^>]+>/g, ''),
+      }),
+    });
+
+    if (res.ok) {
+      return { success: true };
+    }
+    const errData = await res.json().catch(() => ({}));
+    return { success: false, error: errData.message || 'Resend API returned error' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Unknown network error' };
+  }
+}

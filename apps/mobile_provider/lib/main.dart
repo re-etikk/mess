@@ -629,8 +629,8 @@ class _ProviderShellState extends State<ProviderShell> {
         }),
         onOpenDetail: (value) => setState(() => detail = value),
       ),
-      const MenuManagementScreen(),
-      const PlansManagementScreen(),
+      MenuManagementScreen(session: widget.session),
+      PlansManagementScreen(session: widget.session),
       DailyQrScreen(session: widget.session),
       MoreManagementScreen(
         session: widget.session,
@@ -647,59 +647,70 @@ class _ProviderShellState extends State<ProviderShell> {
           )
         : pages[selectedTab];
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: cream,
-        surfaceTintColor: cream,
-        title: Row(children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(color: const Color(0xFFFFE5B7), borderRadius: BorderRadius.circular(10)),
-            child: const Icon(Icons.restaurant, color: ink, size: 20),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.session.businessName, style: const TextStyle(color: ink, fontWeight: FontWeight.w800, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
-              const Text('KITCHEN PARTNER HUB', style: TextStyle(color: green, fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w800)),
-            ]),
-          ),
-        ]),
-        actions: [
-          IconButton(
-            tooltip: 'Live counter QR',
-            onPressed: () => setState(() {
-              selectedTab = 3;
-              detail = null;
-            }),
-            icon: const Icon(Icons.qr_code_2_rounded, color: ink),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: SafeArea(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          child: KeyedSubtree(key: ValueKey('${selectedTab}_${detail ?? 'root'}'), child: content),
+    return PopScope(
+      canPop: detail == null && selectedTab == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (detail != null) {
+          setState(() => detail = null);
+        } else if (selectedTab != 0) {
+          setState(() => selectedTab = 0);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: cream,
+          surfaceTintColor: cream,
+          title: Row(children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: const Color(0xFFFFE5B7), borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.restaurant, color: ink, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(widget.session.businessName, style: const TextStyle(color: ink, fontWeight: FontWeight.w800, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const Text('KITCHEN PARTNER HUB', style: TextStyle(color: green, fontSize: 9, letterSpacing: 1.1, fontWeight: FontWeight.w800)),
+              ]),
+            ),
+          ]),
+          actions: [
+            IconButton(
+              tooltip: 'Live counter QR',
+              onPressed: () => setState(() {
+                selectedTab = 3;
+                detail = null;
+              }),
+              icon: const Icon(Icons.qr_code_2_rounded, color: ink),
+            ),
+            const SizedBox(width: 4),
+          ],
         ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedTab,
-        onDestinationSelected: (index) => setState(() {
-          selectedTab = index;
-          detail = null;
-        }),
-        backgroundColor: card,
-        indicatorColor: const Color(0xFFFFE6B8),
-        elevation: 4,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.grid_view_outlined), selectedIcon: Icon(Icons.grid_view), label: 'Overview'),
-          NavigationDestination(icon: Icon(Icons.restaurant_menu_outlined), selectedIcon: Icon(Icons.restaurant_menu), label: 'Menu'),
-          NavigationDestination(icon: Icon(Icons.sell_outlined), selectedIcon: Icon(Icons.sell), label: 'Plans'),
-          NavigationDestination(icon: Icon(Icons.qr_code_2_outlined), selectedIcon: Icon(Icons.qr_code_2), label: 'Daily QR'),
-          NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
-        ],
+        body: SafeArea(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: KeyedSubtree(key: ValueKey('${selectedTab}_${detail ?? 'root'}'), child: content),
+          ),
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: selectedTab,
+          onDestinationSelected: (index) => setState(() {
+            selectedTab = index;
+            detail = null;
+          }),
+          backgroundColor: card,
+          indicatorColor: const Color(0xFFFFE6B8),
+          elevation: 4,
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.grid_view_outlined), selectedIcon: Icon(Icons.grid_view), label: 'Overview'),
+            NavigationDestination(icon: Icon(Icons.restaurant_menu_outlined), selectedIcon: Icon(Icons.restaurant_menu), label: 'Menu'),
+            NavigationDestination(icon: Icon(Icons.sell_outlined), selectedIcon: Icon(Icons.sell), label: 'Plans'),
+            NavigationDestination(icon: Icon(Icons.qr_code_2_outlined), selectedIcon: Icon(Icons.qr_code_2), label: 'Daily QR'),
+            NavigationDestination(icon: Icon(Icons.more_horiz), selectedIcon: Icon(Icons.more_horiz), label: 'More'),
+          ],
+        ),
       ),
     );
   }
@@ -1178,7 +1189,8 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
 }
 
 class MenuManagementScreen extends StatefulWidget {
-  const MenuManagementScreen({super.key});
+  const MenuManagementScreen({super.key, required this.session});
+  final ProviderSession session;
 
   @override
   State<MenuManagementScreen> createState() => _MenuManagementScreenState();
@@ -1186,138 +1198,687 @@ class MenuManagementScreen extends StatefulWidget {
 
 class _MenuManagementScreenState extends State<MenuManagementScreen> {
   String slot = 'Lunch';
-  final items = <MenuItemDraft>[
-    MenuItemDraft('Dal Tadka', 'Included', '1 serving', 0, true),
-    MenuItemDraft('Steamed Basmati Rice', 'Included', '1 serving', 0, true),
-    MenuItemDraft('Phulka Roti', 'Included', '4 pieces', 0, true),
-    MenuItemDraft('Seasonal Mixed Sabzi', 'Included', '1 serving', 0, true),
-    MenuItemDraft('Paneer Butter Masala', 'Paid extra', '1 serving', 35, true, paid: true),
-    MenuItemDraft('Extra Roti (Set of 2)', 'Paid extra', '2 pieces', 15, true, paid: true),
-  ];
+  bool loading = true;
+  List<String> itemsIncluded = [];
+  List<Map<String, dynamic>> itemsExtra = [];
+  List<String> itemsUnavailable = [];
 
   @override
-  Widget build(BuildContext context) {
-    return ListView(padding: const EdgeInsets.fromLTRB(18, 10, 18, 24), children: [
-      Text('Menu & portions', style: Theme.of(context).textTheme.headlineMedium),
-      const SizedBox(height: 5),
-      const Text('Configure what each plan includes and optional add-ons.', style: TextStyle(color: muted)),
-      const SizedBox(height: 16),
-      SegmentedButton<String>(
-        segments: const [
-          ButtonSegment(value: 'Breakfast', label: Text('Breakfast')),
-          ButtonSegment(value: 'Lunch', label: Text('Lunch')),
-          ButtonSegment(value: 'Dinner', label: Text('Dinner')),
-        ],
-        selected: {slot},
-        onSelectionChanged: (v) => setState(() => slot = v.first),
-        style: const ButtonStyle(visualDensity: VisualDensity.compact),
-      ),
-      const SizedBox(height: 18),
-      Text('$slot menu items', style: Theme.of(context).textTheme.titleLarge),
-      const SizedBox(height: 8),
-      ...items.where((item) => item.enabled).map(
-        (item) => Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-            child: Row(children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(color: const Color(0xFFFFEFD5), borderRadius: BorderRadius.circular(12)),
-                child: Icon(item.paid ? Icons.add_shopping_cart_outlined : Icons.restaurant, color: ink),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(item.name, style: const TextStyle(fontWeight: FontWeight.w800, color: ink)),
-                  Text('${item.rule} · ${item.portion}', style: const TextStyle(color: muted, fontSize: 12)),
-                ]),
-              ),
-              if (item.price > 0) Text('₹${item.price}', style: const TextStyle(color: ink, fontWeight: FontWeight.w800)),
-              IconButton(onPressed: () => _editItem(item), tooltip: 'Edit item', icon: const Icon(Icons.edit_outlined, size: 19)),
-            ]),
-          ),
-        ),
-      ),
-      const SizedBox(height: 10),
-      OutlinedButton.icon(
-        onPressed: _addItem,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Menu Item'),
-        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), side: const BorderSide(color: line)),
-      ),
-    ]);
+  void initState() {
+    super.initState();
+    _fetchMenu();
   }
 
-  void _addItem() => _itemDialog();
-  void _editItem(MenuItemDraft item) => _itemDialog(existing: item);
-
-  Future<void> _itemDialog({MenuItemDraft? existing}) async {
-    final name = TextEditingController(text: existing?.name ?? '');
-    final portion = TextEditingController(text: existing?.portion ?? '1 serving');
-    final price = TextEditingController(text: existing == null ? '0' : '${existing.price}');
-    bool paid = existing?.paid ?? false;
-    final result = await showDialog<MenuItemDraft>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(existing == null ? 'Add menu item' : 'Edit menu item'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: name, decoration: const InputDecoration(labelText: 'Item name')),
-              const SizedBox(height: 10),
-              TextField(controller: portion, decoration: const InputDecoration(labelText: 'Portion / unit')),
-              const SizedBox(height: 10),
-              SwitchListTile(contentPadding: EdgeInsets.zero, value: paid, onChanged: (value) => setDialogState(() => paid = value), title: const Text('Charge as add-on extra')),
-              if (paid) TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Price (₹)')),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () {
-                if (name.text.trim().isEmpty) return;
-                Navigator.pop(dialogContext, MenuItemDraft(name.text.trim(), paid ? 'Paid extra' : 'Included', portion.text.trim(), int.tryParse(price.text) ?? 0, true, paid: paid));
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-    final saved = result;
-    if (saved != null && mounted) {
-      setState(() {
-        if (existing != null) {
-          final i = items.indexOf(existing);
-          if (i >= 0) items[i] = saved;
-        } else {
-          items.add(saved);
-        }
-      });
+  Future<void> _fetchMenu() async {
+    setState(() => loading = true);
+    try {
+      final res = await ProviderApiService.fetchMenu(widget.session.providerId);
+      final menuList = res['menu'] as List<dynamic>? ?? [];
+      final currentMenu = menuList.firstWhere(
+        (m) => m['slot']?.toString().toLowerCase() == slot.toLowerCase(),
+        orElse: () => null,
+      );
+      if (currentMenu != null) {
+        itemsIncluded = (currentMenu['items_included'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+        itemsExtra = (currentMenu['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
+        itemsUnavailable = (currentMenu['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+      } else {
+        itemsIncluded = ['Dal Tadka', 'Steamed Rice', 'Phulka Roti (4 pcs)', 'Seasonal Sabzi', 'Salad'];
+        itemsExtra = [
+          {'name': 'Paneer Butter Masala', 'price': 40, 'is_available': true},
+          {'name': 'Gulab Jamun (2 pcs)', 'price': 25, 'is_available': true},
+          {'name': 'Extra Roti (Set of 2)', 'price': 15, 'is_available': true},
+        ];
+        itemsUnavailable = [];
+      }
+    } catch (_) {
+      itemsIncluded = ['Dal Tadka', 'Steamed Rice', 'Phulka Roti (4 pcs)', 'Seasonal Sabzi', 'Salad'];
+      itemsExtra = [
+        {'name': 'Paneer Butter Masala', 'price': 40, 'is_available': true},
+        {'name': 'Extra Roti (Set of 2)', 'price': 15, 'is_available': true},
+      ];
+    } finally {
+      if (mounted) setState(() => loading = false);
     }
   }
-}
 
-class PlansManagementScreen extends StatelessWidget {
-  const PlansManagementScreen({super.key});
+  Future<void> _toggleAvailability(String name, bool isAvailable) async {
+    setState(() {
+      if (!isAvailable) {
+        if (!itemsUnavailable.contains(name)) itemsUnavailable.add(name);
+      } else {
+        itemsUnavailable.remove(name);
+      }
+    });
+    try {
+      await ProviderApiService.toggleMenuAvailability(
+        providerId: widget.session.providerId,
+        name: name,
+        isAvailable: isAvailable,
+      );
+      if (mounted) {
+        showNotice(context, isAvailable ? '$name marked available today' : '$name marked out of stock today');
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _removeItem(String name, bool isExtra) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Remove from Menu?'),
+        content: Text('Are you sure you want to remove "$name" from $slot menu?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC0392B)),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() {
+      if (isExtra) {
+        itemsExtra.removeWhere((item) => item['name'] == name);
+      } else {
+        itemsIncluded.remove(name);
+      }
+    });
+
+    try {
+      await ProviderApiService.removeMenuItem(
+        providerId: widget.session.providerId,
+        name: name,
+        slot: slot,
+      );
+      if (mounted) showNotice(context, 'Removed $name from menu');
+    } catch (_) {
+      if (mounted) showNotice(context, 'Failed to update menu online', isError: true);
+    }
+  }
+
+  void _openAddDishSheet() {
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController(text: '30');
+    bool isExtra = false;
+    String targetSlot = slot;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.restaurant, color: orange, size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text('Add Dish to Menu', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: ink)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const FieldLabel('Dish Name'),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(hintText: 'e.g. Matar Paneer, Jeera Rice, Gulab Jamun', prefixIcon: Icon(Icons.food_bank_outlined)),
+                    ),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Meal Serving Slot'),
+                    Wrap(
+                      spacing: 8,
+                      children: ['Breakfast', 'Lunch', 'Dinner'].map((s) {
+                        return ChoiceChip(
+                          label: Text(s),
+                          selected: targetSlot == s,
+                          selectedColor: orange,
+                          onSelected: (val) => setSheetState(() => targetSlot = s),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: isExtra,
+                      onChanged: (v) => setSheetState(() => isExtra = v),
+                      title: const Text('Charge as Paid Add-On / Special Extra', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      subtitle: const Text('Included items come standard with subscriber thali.', style: TextStyle(fontSize: 12, color: muted)),
+                    ),
+                    if (isExtra) ...[
+                      const SizedBox(height: 8),
+                      const FieldLabel('Add-on Price (₹)'),
+                      TextField(
+                        controller: priceCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(hintText: 'e.g. 40', prefixIcon: Icon(Icons.currency_rupee)),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: () async {
+                          final name = nameCtrl.text.trim();
+                          if (name.isEmpty) {
+                            showNotice(context, 'Please enter a dish name', isError: true);
+                            return;
+                          }
+                          final price = isExtra ? (int.tryParse(priceCtrl.text) ?? 30) : 0;
+                          Navigator.pop(ctx);
+                          try {
+                            await ProviderApiService.addMenuItem(
+                              providerId: widget.session.providerId,
+                              name: name,
+                              slot: targetSlot,
+                              price: price,
+                              isExtra: isExtra,
+                            );
+                            _fetchMenu();
+                            if (mounted) showNotice(context, 'Added "$name" to $targetSlot menu');
+                          } catch (_) {
+                            _fetchMenu();
+                          }
+                        },
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: const Text('Save & Publish Dish', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
       children: [
-        Text('Plans & pricing', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 5),
-        const Text('Active subscription plans available for your mess.', style: TextStyle(color: muted)),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Daily Menu & Portions', style: Theme.of(context).textTheme.headlineMedium),
+                  const SizedBox(height: 3),
+                  const Text('Manage items, prices, and daily stock availability.', style: TextStyle(color: muted, fontSize: 13)),
+                ],
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: _openAddDishSheet,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add Dish'),
+              style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'Breakfast', label: Text('Breakfast')),
+            ButtonSegment(value: 'Lunch', label: Text('Lunch')),
+            ButtonSegment(value: 'Dinner', label: Text('Dinner')),
+          ],
+          selected: {slot},
+          onSelectionChanged: (v) {
+            setState(() => slot = v.first);
+            _fetchMenu();
+          },
+          style: const ButtonStyle(visualDensity: VisualDensity.compact),
+        ),
         const SizedBox(height: 18),
-        const PlanPriceCard(duration: '15 Days Unlimited', price: '₹1,500', perMeal: 'Fixed-period access with daily limits'),
-        const SizedBox(height: 9),
-        const PlanPriceCard(duration: '30-Day Monthly Fixed', price: '₹2,800', perMeal: 'Unlimited lunch & dinner access'),
-        const SizedBox(height: 9),
-        const PlanPriceCard(duration: '60-Meal Flexi Tracker', price: '₹4,800', perMeal: '₹80 / meal · Deducts credit per valid scan'),
-        const SizedBox(height: 9),
-        const PlanPriceCard(duration: 'Single Daily Meal Pass', price: '₹95', perMeal: 'One-time lunch or dinner redemption'),
+        if (loading)
+          const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: orange)))
+        else ...[
+          Text('Thali Included Dishes (${itemsIncluded.length})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink)),
+          const SizedBox(height: 8),
+          if (itemsIncluded.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No standard items added for this slot.', style: TextStyle(color: muted, fontSize: 13)))
+          else
+            ...itemsIncluded.map((name) {
+              final isUnavailable = itemsUnavailable.contains(name);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(color: const Color(0xFFFFEFD5), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.restaurant, color: ink, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: isUnavailable ? muted : ink,
+                                decoration: isUnavailable ? TextDecoration.lineThrough : null,
+                              ),
+                            ),
+                            Text(
+                              isUnavailable ? '⚠️ Marked Out of Stock Today' : 'Included in standard thali',
+                              style: TextStyle(color: isUnavailable ? const Color(0xFFC0392B) : green, fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: !isUnavailable,
+                        activeColor: green,
+                        onChanged: (val) => _toggleAvailability(name, val),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Color(0xFFC0392B), size: 20),
+                        tooltip: 'Remove Dish',
+                        onPressed: () => _removeItem(name, false),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          const SizedBox(height: 18),
+          Text('Special Add-ons & Extras (${itemsExtra.length})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink)),
+          const SizedBox(height: 8),
+          if (itemsExtra.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No paid add-ons configured.', style: TextStyle(color: muted, fontSize: 13)))
+          else
+            ...itemsExtra.map((extra) {
+              final name = extra['name']?.toString() ?? 'Extra Item';
+              final price = extra['price'] ?? 30;
+              final isUnavailable = itemsUnavailable.contains(name);
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.add_shopping_cart, color: orange, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: isUnavailable ? muted : ink,
+                                decoration: isUnavailable ? TextDecoration.lineThrough : null,
+                              ),
+                            ),
+                            Text(
+                              '₹$price add-on · ${isUnavailable ? "Sold Out" : "Available"}',
+                              style: TextStyle(color: isUnavailable ? const Color(0xFFC0392B) : muted, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text('₹$price', style: const TextStyle(fontWeight: FontWeight.w900, color: ink, fontSize: 14)),
+                      const SizedBox(width: 8),
+                      Switch(
+                        value: !isUnavailable,
+                        activeColor: green,
+                        onChanged: (val) => _toggleAvailability(name, val),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Color(0xFFC0392B), size: 20),
+                        tooltip: 'Remove Dish',
+                        onPressed: () => _removeItem(name, true),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ],
+    );
+  }
+}
+
+class PlansManagementScreen extends StatefulWidget {
+  const PlansManagementScreen({super.key, required this.session});
+  final ProviderSession session;
+
+  @override
+  State<PlansManagementScreen> createState() => _PlansManagementScreenState();
+}
+
+class _PlansManagementScreenState extends State<PlansManagementScreen> {
+  bool loading = true;
+  List<Map<String, dynamic>> plans = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchPlans();
+  }
+
+  Future<void> _fetchPlans() async {
+    setState(() => loading = true);
+    try {
+      plans = await ProviderApiService.fetchProviderPlans(widget.session.providerId);
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _deletePlan(String planId, String planName) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete Plan?'),
+        content: Text('Are you sure you want to remove "$planName"? Existing subscribers will remain active.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC0392B)),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await ProviderApiService.deletePlan(providerId: widget.session.providerId, planId: planId);
+      _fetchPlans();
+      if (mounted) showNotice(context, 'Plan removed successfully');
+    } catch (e) {
+      if (mounted) showNotice(context, 'Failed to delete plan', isError: true);
+    }
+  }
+
+  void _openCreatePlanSheet() {
+    final nameCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    final durationCtrl = TextEditingController(text: '30');
+    final priceCtrl = TextEditingController(text: '3000');
+    final creditsCtrl = TextEditingController(text: '60');
+    final discountCtrl = TextEditingController(text: '10');
+    String planType = 'fixed_period';
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.sell_outlined, color: orange, size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text('Create Custom Meal Plan', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: ink)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const FieldLabel('Plan Name'),
+                    TextField(controller: nameCtrl, decoration: const InputDecoration(hintText: 'e.g. Deluxe Monthly Unlimited')),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Plan Model'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('📅 Fixed Days')),
+                            selected: planType == 'fixed_period',
+                            selectedColor: orange,
+                            onSelected: (v) => setSheetState(() => planType = 'fixed_period'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('🔢 Flexi Credits')),
+                            selected: planType == 'meal_credits',
+                            selectedColor: orange,
+                            onSelected: (v) => setSheetState(() => planType = 'meal_credits'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const FieldLabel('Duration (Days)'),
+                              TextField(controller: durationCtrl, keyboardType: TextInputType.number),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const FieldLabel('Price (₹)'),
+                              TextField(controller: priceCtrl, keyboardType: TextInputType.number),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (planType == 'meal_credits') ...[
+                      const SizedBox(height: 12),
+                      const FieldLabel('Included Meal Credits'),
+                      TextField(controller: creditsCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'e.g. 60 meals')),
+                    ],
+                    const SizedBox(height: 12),
+                    const FieldLabel('Promotional Discount (%)'),
+                    TextField(controller: discountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'e.g. 10')),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Plan Description / Benefits'),
+                    TextField(controller: descCtrl, decoration: const InputDecoration(hintText: 'e.g. Unlimited lunch & dinner access with sweets')),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: () async {
+                          final name = nameCtrl.text.trim();
+                          if (name.isEmpty) {
+                            showNotice(context, 'Please enter plan name', isError: true);
+                            return;
+                          }
+                          final duration = int.tryParse(durationCtrl.text) ?? 30;
+                          final price = int.tryParse(priceCtrl.text) ?? 3000;
+                          final credits = planType == 'meal_credits' ? (int.tryParse(creditsCtrl.text) ?? 60) : null;
+                          final discount = int.tryParse(discountCtrl.text);
+
+                          Navigator.pop(ctx);
+                          try {
+                            await ProviderApiService.savePlan(
+                              providerId: widget.session.providerId,
+                              name: name,
+                              description: descCtrl.text.trim().isNotEmpty ? descCtrl.text.trim() : '$duration-day mess subscription',
+                              planType: planType,
+                              durationDays: duration,
+                              priceInr: price,
+                              mealCredits: credits,
+                              discountPercent: discount,
+                            );
+                            _fetchPlans();
+                            if (mounted) showNotice(context, 'Plan "$name" published successfully!');
+                          } catch (e) {
+                            if (mounted) showNotice(context, e.toString().replaceAll('Exception: ', ''), isError: true);
+                          }
+                        },
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: const Text('Save & Publish Plan', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Plans & Pricing', style: Theme.of(context).textTheme.headlineMedium),
+                  const SizedBox(height: 3),
+                  const Text('Customize subscription options visible to students.', style: TextStyle(color: muted, fontSize: 13)),
+                ],
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: _openCreatePlanSheet,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('New Plan'),
+              style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (loading)
+          const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: orange)))
+        else if (plans.isEmpty)
+          const EmptyStateCard(
+            icon: Icons.sell_outlined,
+            title: 'No custom plans published',
+            subtitle: 'Tap "+ New Plan" above to create custom monthly, 15-day, or flexi meal plans for your mess.',
+          )
+        else
+          ...plans.map((p) {
+            final name = p['name']?.toString() ?? 'Plan';
+            final price = (p['price_paise'] != null ? (p['price_paise'] as num) / 100 : (p['price'] ?? 0)).toInt();
+            final duration = p['duration_days'] ?? 30;
+            final type = p['plan_type']?.toString() ?? 'fixed_period';
+            final credits = p['meal_credits'];
+            final discount = p['discount_percent'];
+            final planId = p['id']?.toString() ?? '';
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(12)),
+                          child: const Icon(Icons.calendar_month_outlined, color: ink),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name, style: const TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 16)),
+                              Text(
+                                type == 'meal_credits' ? '$credits Meals · Flexi Tracker' : '$duration Days · Unlimited Access',
+                                style: const TextStyle(color: muted, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text('₹$price', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: ink)),
+                      ],
+                    ),
+                    if (p['description'] != null && p['description'].toString().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(p['description'].toString(), style: const TextStyle(color: muted, fontSize: 12)),
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        if (discount != null && discount > 0)
+                          StatusTag(text: '$discount% OFF SPECIAL', color: green)
+                        else
+                          StatusTag(text: type.toUpperCase(), color: orange),
+                        TextButton.icon(
+                          onPressed: () => _deletePlan(planId, name),
+                          icon: const Icon(Icons.delete_outline, size: 16, color: Color(0xFFC0392B)),
+                          label: const Text('Delete Plan', style: TextStyle(color: Color(0xFFC0392B), fontSize: 12, fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
       ],
     );
   }
@@ -1337,11 +1898,13 @@ class MoreManagementScreen extends StatelessWidget {
           const SizedBox(height: 5),
           const Text('Manage subscribers, reports, settlements and kitchen profile.', style: TextStyle(color: muted)),
           const SizedBox(height: 18),
-          MoreMenuTile(icon: Icons.groups_outlined, title: 'Subscribers & customers', subtitle: 'View verified student subscription plans', onTap: () => onSelect('Subscribers')),
-          MoreMenuTile(icon: Icons.fact_check_outlined, title: 'Meal redemptions log', subtitle: 'Real-time scan logs and attendance records', onTap: () => onSelect('Attendance')),
-          MoreMenuTile(icon: Icons.account_balance_wallet_outlined, title: 'Settlement & payouts', subtitle: 'Platform scan billing and payout summary', onTap: () => onSelect('Earnings')),
-          MoreMenuTile(icon: Icons.star_outline, title: 'Customer feedback', subtitle: 'Verified reviews from meal redemptions', onTap: () => onSelect('Feedback')),
-          MoreMenuTile(icon: Icons.store_mall_directory_outlined, title: 'Mess profile', subtitle: session.businessName, onTap: () => onSelect('Business profile')),
+          MoreMenuTile(icon: Icons.groups_outlined, title: 'Subscribers & Customers', subtitle: 'View verified student subscription plans & scan logs', onTap: () => onSelect('Subscribers')),
+          MoreMenuTile(icon: Icons.point_of_sale_outlined, title: 'Counter Sales & Extras', subtitle: 'Record walk-in thali, extra rotis and paneer orders', onTap: () => onSelect('CounterOrders')),
+          MoreMenuTile(icon: Icons.schedule_outlined, title: 'Operating Hours & Timings', subtitle: 'Manage breakfast, lunch and dinner serving slots', onTap: () => onSelect('Timings')),
+          MoreMenuTile(icon: Icons.fact_check_outlined, title: 'Meal Redemptions Log', subtitle: 'Real-time scan logs and attendance records', onTap: () => onSelect('Attendance')),
+          MoreMenuTile(icon: Icons.account_balance_wallet_outlined, title: 'Settlement & Payouts', subtitle: 'Platform scan billing and payout summary', onTap: () => onSelect('Earnings')),
+          MoreMenuTile(icon: Icons.support_agent_outlined, title: 'Help & Support Desk', subtitle: 'Submit issues and feedback directly to support', onTap: () => onSelect('Support')),
+          MoreMenuTile(icon: Icons.store_mall_directory_outlined, title: 'Mess Profile & Details', subtitle: session.businessName, onTap: () => onSelect('Business profile')),
           const SizedBox(height: 18),
           OutlinedButton.icon(
             onPressed: onSignOut,
@@ -1371,12 +1934,46 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   bool loading = true;
   List<Map<String, dynamic>> items = [];
   List<Map<String, dynamic>> plans = [];
+  String subFilter = 'All';
+
+  // Timings controllers
+  final bfStart = TextEditingController(text: '07:30 AM');
+  final bfEnd = TextEditingController(text: '10:00 AM');
+  final lunchStart = TextEditingController(text: '12:00 PM');
+  final lunchEnd = TextEditingController(text: '03:30 PM');
+  final dinnerStart = TextEditingController(text: '07:30 PM');
+  final dinnerEnd = TextEditingController(text: '10:30 PM');
+
+  // Support controllers
+  final supportSubject = TextEditingController();
+  final supportMessage = TextEditingController();
+  String supportCategory = 'general';
+  bool submittingTicket = false;
 
   @override
   void initState() {
     super.initState();
     _fetchDetail();
     _fetchPlans();
+    if (widget.kind == 'Timings') _loadTimings();
+  }
+
+  Future<void> _loadTimings() async {
+    try {
+      final t = await ProviderApiService.fetchTimings(widget.session.providerId);
+      if (t['breakfast'] is Map) {
+        bfStart.text = t['breakfast']['start'] ?? '07:30 AM';
+        bfEnd.text = t['breakfast']['end'] ?? '10:00 AM';
+      }
+      if (t['lunch'] is Map) {
+        lunchStart.text = t['lunch']['start'] ?? '12:00 PM';
+        lunchEnd.text = t['lunch']['end'] ?? '03:30 PM';
+      }
+      if (t['dinner'] is Map) {
+        dinnerStart.text = t['dinner']['start'] ?? '07:30 PM';
+        dinnerEnd.text = t['dinner']['end'] ?? '10:30 PM';
+      }
+    } catch (_) {}
   }
 
   Future<void> _fetchPlans() async {
@@ -1392,9 +1989,216 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
         items = await ProviderApiService.fetchSubscribers(widget.session.providerId);
       } else if (widget.kind == 'Attendance') {
         items = await ProviderApiService.fetchAttendance(widget.session.providerId);
+      } else if (widget.kind == 'CounterOrders') {
+        items = await ProviderApiService.fetchOrders(widget.session.providerId);
       }
     } catch (_) {}
     if (mounted) setState(() => loading = false);
+  }
+
+  void _openSubscriberHistory(Map<String, dynamic> sub) {
+    final subId = sub['id']?.toString() ?? '';
+    final name = sub['customer_name']?.toString() ?? 'Student';
+    final plan = sub['plan_name']?.toString() ?? 'Plan';
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) {
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: ProviderApiService.fetchSubscriberHistory(widget.session.providerId, subId),
+          builder: (context, snapshot) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.history_edu, color: orange, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('$name’s Scan History', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: ink)),
+                            Text('$plan · ID: #SUB-${subId.length >= 8 ? subId.substring(0, 8) : subId}', style: const TextStyle(fontSize: 12, color: muted)),
+                          ],
+                        ),
+                      ),
+                      IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: orange)))
+                  else if (!snapshot.hasData || snapshot.data!.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(color: cream, borderRadius: BorderRadius.circular(12), border: Border.all(color: line)),
+                      child: const Column(
+                        children: [
+                          Icon(Icons.event_busy, color: muted, size: 36),
+                          SizedBox(height: 8),
+                          Text('No meals scanned yet', style: TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                          SizedBox(height: 4),
+                          Text('Scans will record here with exact timestamps when student redeems counter QR.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: muted)),
+                        ],
+                      ),
+                    )
+                  else ...[
+                    Text('Total Verified Scans: ${snapshot.data!.length}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: green)),
+                    const SizedBox(height: 10),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.45),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: snapshot.data!.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1, color: line),
+                        itemBuilder: (context, i) {
+                          final h = snapshot.data![i];
+                          final timeFormatted = h['time_formatted'] ?? (h['redeemed_at']?.toString().contains('T') == true ? h['redeemed_at'].toString().split('T').last.substring(0, 5) : 'Meal Time');
+                          final slot = h['slot'] ?? 'LUNCH';
+                          final date = h['date'] ?? '';
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+                              child: const Icon(Icons.check, color: green, size: 20),
+                            ),
+                            title: Text('$slot Attendance Verified', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: ink)),
+                            subtitle: Text('$date at $timeFormatted', style: const TextStyle(fontSize: 12, color: muted)),
+                            trailing: const StatusTag(text: 'VERIFIED', color: green),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _openAddCounterOrderSheet() {
+    final nameCtrl = TextEditingController(text: 'Walk-in Customer');
+    final phoneCtrl = TextEditingController();
+    final itemsCtrl = TextEditingController(text: '1x Regular Thali');
+    final amountCtrl = TextEditingController(text: '80');
+    String paymentMode = 'cash';
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.point_of_sale, color: orange, size: 24),
+                        SizedBox(width: 10),
+                        Text('Record Walk-in / Extra Sale', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: ink)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const FieldLabel('Customer Name (Optional)'),
+                    TextField(controller: nameCtrl, decoration: const InputDecoration(hintText: 'e.g. Walk-in Student')),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Customer Phone (Optional)'),
+                    TextField(controller: phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(hintText: 'e.g. 9876543210')),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Items Summary / Order Details'),
+                    TextField(controller: itemsCtrl, decoration: const InputDecoration(hintText: 'e.g. 1x Thali, 1x Paneer, 2 Extra Roti')),
+                    const SizedBox(height: 12),
+                    const FieldLabel('Total Amount (₹)'),
+                    TextField(controller: amountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'e.g. 120')),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Payment Mode'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('💵 Cash')),
+                            selected: paymentMode == 'cash',
+                            selectedColor: orange,
+                            onSelected: (v) => setSheetState(() => paymentMode = 'cash'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('📱 Counter UPI')),
+                            selected: paymentMode == 'counter_upi',
+                            selectedColor: orange,
+                            onSelected: (v) => setSheetState(() => paymentMode = 'counter_upi'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: () async {
+                          final name = nameCtrl.text.trim().isNotEmpty ? nameCtrl.text.trim() : 'Walk-in Customer';
+                          final itemsDesc = itemsCtrl.text.trim().isNotEmpty ? itemsCtrl.text.trim() : 'Meal Extras';
+                          final amt = double.tryParse(amountCtrl.text) ?? 80;
+                          Navigator.pop(ctx);
+                          try {
+                            await ProviderApiService.createOrder(
+                              providerId: widget.session.providerId,
+                              customerName: name,
+                              customerPhone: phoneCtrl.text.trim(),
+                              itemsSummary: itemsDesc,
+                              totalAmount: amt,
+                              paymentMode: paymentMode,
+                            );
+                            _fetchDetail();
+                            if (mounted) showNotice(context, 'Counter order recorded: ₹$amt via ${paymentMode.toUpperCase()}');
+                          } catch (e) {
+                            if (mounted) showNotice(context, 'Failed to record order', isError: true);
+                          }
+                        },
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: const Text('Save Counter Order', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _openAddMemberSheet() {
@@ -1408,9 +2212,9 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: card,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) {
         return StatefulBuilder(
@@ -1428,83 +2232,58 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.person_add, color: orange, size: 24),
-                            SizedBox(width: 8),
-                            Text(
-                              'Add Offline Member',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ink),
-                            ),
-                          ],
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.person_add_alt_1, color: orange, size: 22),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.pop(ctx),
-                        ),
+                        const SizedBox(width: 10),
+                        const Text('Register Member Manually', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: ink)),
                       ],
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Register walk-in students who pay at counter. Their digital meal pass will be active immediately.',
-                      style: TextStyle(color: muted, fontSize: 13),
                     ),
                     const SizedBox(height: 16),
                     const FieldLabel('Student Full Name *'),
                     TextField(
                       controller: nameCtrl,
-                      decoration: const InputDecoration(hintText: 'e.g. Rahul Sharma'),
+                      decoration: const InputDecoration(hintText: 'e.g. Rahul Sharma', prefixIcon: Icon(Icons.person_outline)),
                     ),
                     const SizedBox(height: 12),
-                    const FieldLabel('WhatsApp Phone Number (10 digits) *'),
+                    const FieldLabel('Mobile Number (10 digits) *'),
                     TextField(
                       controller: phoneCtrl,
                       keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(hintText: 'e.g. 9876543210', prefixText: '+91 '),
+                      decoration: const InputDecoration(hintText: 'e.g. 9876543210', prefixIcon: Icon(Icons.phone_outlined)),
                     ),
                     const SizedBox(height: 12),
                     const FieldLabel('Email Address (Optional)'),
                     TextField(
                       controller: emailCtrl,
                       keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(hintText: 'rahul@gmail.com'),
+                      decoration: const InputDecoration(hintText: 'e.g. rahul@gmail.com', prefixIcon: Icon(Icons.email_outlined)),
                     ),
                     const SizedBox(height: 12),
-                    const FieldLabel('Select Meal Plan'),
+                    const FieldLabel('Select Subscription Plan'),
                     if (plans.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: line),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            isExpanded: true,
-                            value: selectedPlanId ?? plans.first['id']?.toString(),
-                            items: plans.map((p) {
-                              final price = (p['price_paise'] as num? ?? 300000) / 100;
-                              return DropdownMenuItem<String>(
-                                value: p['id'].toString(),
-                                child: Text('${p['name']} (₹${price.toStringAsFixed(0)})'),
-                              );
-                            }).toList(),
-                            onChanged: (val) => setSheetState(() => selectedPlanId = val),
-                          ),
-                        ),
+                      DropdownButtonFormField<String>(
+                        value: selectedPlanId,
+                        decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10)),
+                        items: plans.map((p) {
+                          final pName = p['name'] ?? 'Plan';
+                          final pPrice = (p['price_paise'] != null ? (p['price_paise'] as num) / 100 : (p['price'] ?? 0)).toInt();
+                          final pDays = p['duration_days'] ?? 30;
+                          return DropdownMenuItem<String>(
+                            value: p['id']?.toString(),
+                            child: Text('$pName (₹$pPrice / $pDays d)'),
+                          );
+                        }).toList(),
+                        onChanged: (val) => setSheetState(() => selectedPlanId = val),
                       )
                     else
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: cream,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: line),
-                        ),
+                        decoration: BoxDecoration(color: cream, borderRadius: BorderRadius.circular(12), border: Border.all(color: line)),
                         child: const Text('Standard Monthly Plan (₹3,000 / 30 Days)', style: TextStyle(fontWeight: FontWeight.w700)),
                       ),
                     const SizedBox(height: 14),
@@ -1671,9 +2450,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                 children: [
                   Icon(Icons.autorenew, color: orange, size: 24),
                   SizedBox(width: 8),
-                  Expanded(
-                    child: Text('Renew Member Pass', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-                  ),
+                  Expanded(child: Text('Renew Member Pass', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800))),
                 ],
               ),
               content: Column(
@@ -1730,10 +2507,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                 ],
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel'),
-                ),
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
                 FilledButton(
                   onPressed: renewing
                       ? null
@@ -1775,9 +2549,16 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   Widget build(BuildContext context) {
     switch (widget.kind) {
       case 'Subscribers':
+        final filtered = items.where((sub) {
+          if (subFilter == 'Monthly') return (sub['plan_name']?.toString().toLowerCase().contains('monthly') == true) || (sub['plan_name']?.toString().contains('30') == true);
+          if (subFilter == '15 Days') return sub['plan_name']?.toString().contains('15') == true;
+          if (subFilter == 'Flexi') return (sub['plan_type'] == 'meal_credits') || (sub['plan_name']?.toString().toLowerCase().contains('flexi') == true);
+          return true;
+        }).toList();
+
         return _detailScaffold(
           context,
-          'Active Subscribers',
+          'Verified Subscribers',
           [
             Card(
               color: const Color(0xFFFFF7ED),
@@ -1799,7 +2580,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Register a walk-in student who paid cash or counter UPI directly to give them an instant digital meal pass.',
+                      'Register a walk-in student who paid cash or counter UPI directly to issue an instant digital meal pass.',
                       style: TextStyle(color: muted, fontSize: 12),
                     ),
                     const SizedBox(height: 12),
@@ -1821,122 +2602,369 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 14),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['All', 'Monthly', '15 Days', 'Flexi'].map((chip) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(chip),
+                      selected: subFilter == chip,
+                      selectedColor: orange,
+                      onSelected: (v) => setState(() => subFilter = chip),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            if (loading)
+              const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: orange)))
+            else if (filtered.isEmpty)
+              const EmptyStateCard(
+                icon: Icons.groups_outlined,
+                title: 'No subscribers found',
+                subtitle: 'Use "+ Add Member Manually" above or display your Counter Standee QR for walk-in students to register.',
+              )
+            else
+              ...filtered.map(
+                (sub) {
+                  final subId = sub['id']?.toString() ?? '';
+                  final shortId = subId.length >= 8 ? subId.substring(0, 8) : subId;
+                  final name = sub['customer_name']?.toString() ?? 'Member';
+                  final phone = sub['customer_phone']?.toString() ?? '—';
+                  final email = sub['customer_email']?.toString() ?? '';
+                  final planName = sub['plan_name']?.toString() ?? 'Plan';
+                  final status = (sub['status']?.toString() ?? 'active').toUpperCase();
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: InkWell(
+                      onTap: () => _openSubscriberHistory(sub),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: const Color(0xFFFFE8C5),
+                                  child: Text(
+                                    name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'S',
+                                    style: const TextStyle(fontWeight: FontWeight.w800, color: ink),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ink)),
+                                      Text('ID: #SUB-$shortId · 📱 $phone', style: const TextStyle(fontSize: 12, color: muted)),
+                                      if (email.isNotEmpty) Text('✉️ $email', style: const TextStyle(fontSize: 11, color: muted)),
+                                    ],
+                                  ),
+                                ),
+                                StatusTag(
+                                  text: status,
+                                  color: status == 'ACTIVE' ? green : Colors.grey,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(color: cream, borderRadius: BorderRadius.circular(8)),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Plan: $planName',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ink),
+                                  ),
+                                  Text(
+                                    'Expiry: ${sub['expires_at'] != null ? sub['expires_at'].toString().split('T').first : 'Active'}',
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: muted),
+                                  ),
+                                  Text(
+                                    'Meals: ${sub['remaining_meal_credits'] ?? "Unlimited"}',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: orange),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () => _openSubscriberHistory(sub),
+                                    icon: const Icon(Icons.history, size: 16),
+                                    label: const Text('Scan Logs'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: ink,
+                                      side: const BorderSide(color: line),
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    onPressed: () => _openReactivateDialog(sub),
+                                    icon: const Icon(Icons.autorenew, size: 16),
+                                    label: const Text('Renew Pass'),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: orange,
+                                      foregroundColor: ink,
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+          ],
+        );
+
+      case 'CounterOrders':
+        return _detailScaffold(
+          context,
+          'Counter Sales & Extras',
+          [
+            Card(
+              color: const Color(0xFFF0FDF4),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: Color(0xFFBBF7D0))),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.point_of_sale, color: green, size: 22),
+                        SizedBox(width: 8),
+                        Text('Walk-in Food Sales Ledger', style: TextStyle(fontWeight: FontWeight.w800, color: ink, fontSize: 15)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text('Keep track of direct cash/UPI single meals, extra sabzi, rotis or paneer sold at counter.', style: TextStyle(color: muted, fontSize: 12)),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _openAddCounterOrderSheet,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('+ Record Counter Sale'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: green,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             if (loading)
               const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator(color: orange)))
             else if (items.isEmpty)
               const EmptyStateCard(
-                icon: Icons.groups_outlined,
-                title: 'No active subscribers yet',
-                subtitle: 'Use "+ Add Member Manually" above or display your Counter Standee QR for walk-in students to register.',
+                icon: Icons.receipt_long_outlined,
+                title: 'No counter orders yet',
+                subtitle: 'Record single thalis, extra portions and beverages sold at your mess desk.',
               )
             else
               ...items.map(
-                (sub) => Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                (ord) => Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.shopping_bag_outlined, color: green, size: 22),
+                    ),
+                    title: Text(ord['customer_name'] ?? 'Walk-in Customer', style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                    subtitle: Text('${ord['items_summary']} · ${ord['created_at']?.toString().split('T').first ?? ""}'),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              backgroundColor: const Color(0xFFFFE8C5),
-                              child: Text(
-                                (sub['customer_name']?.toString() ?? 'S').isNotEmpty
-                                    ? (sub['customer_name']?.toString() ?? 'S').substring(0, 1).toUpperCase()
-                                    : 'S',
-                                style: const TextStyle(fontWeight: FontWeight.w800, color: ink),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    sub['customer_name']?.toString() ?? 'Member',
-                                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ink),
-                                  ),
-                                  Text(
-                                    '📱 ${sub['customer_phone'] ?? '—'} · ${sub['plan_name'] ?? 'Plan'}',
-                                    style: const TextStyle(fontSize: 12, color: muted),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            StatusTag(
-                              text: (sub['status']?.toString() ?? 'ACTIVE').toUpperCase(),
-                              color: (sub['status'] == 'active') ? green : Colors.grey,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: cream,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Expiry: ${sub['expires_at'] != null ? sub['expires_at'].toString().split('T').first : 'Active'}',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink),
-                              ),
-                              Text(
-                                'Mode: ${(sub['payment_mode']?.toString() ?? 'CASH').toUpperCase()}',
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: muted),
-                              ),
-                              Text(
-                                'Meals: ${sub['remaining_meal_credits'] ?? "Unlimited"}',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: orange),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () {
-                                  final phone = sub['customer_phone']?.toString() ?? '';
-                                  final passUrl = 'https://mess-beta.vercel.app/customer/dashboard?phone=$phone';
-                                  Clipboard.setData(ClipboardData(text: passUrl));
-                                  showNotice(context, 'Meal Pass link copied to clipboard!');
-                                },
-                                icon: const Icon(Icons.qr_code, size: 16),
-                                label: const Text('Pass Link'),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: ink,
-                                  side: const BorderSide(color: line),
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: () => _openReactivateDialog(sub),
-                                icon: const Icon(Icons.autorenew, size: 16),
-                                label: const Text('Renew / Extend'),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: orange,
-                                  foregroundColor: ink,
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        Text('₹${ord['total_amount_inr']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink)),
+                        StatusTag(text: (ord['payment_mode'] ?? 'CASH').toString().toUpperCase(), color: green),
                       ],
                     ),
                   ),
                 ),
               ),
+          ],
+        );
+
+      case 'Timings':
+        return _detailScaffold(
+          context,
+          'Kitchen Serving Timings',
+          [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Operating Slots', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
+                    const SizedBox(height: 4),
+                    const Text('Set serving hours for students so they know when to redeem meals.', style: TextStyle(color: muted, fontSize: 12)),
+                    const SizedBox(height: 16),
+                    const FieldLabel('Breakfast Hours'),
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: bfStart, decoration: const InputDecoration(labelText: 'Opens'))),
+                        const SizedBox(width: 10),
+                        Expanded(child: TextField(controller: bfEnd, decoration: const InputDecoration(labelText: 'Closes'))),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Lunch Hours'),
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: lunchStart, decoration: const InputDecoration(labelText: 'Opens'))),
+                        const SizedBox(width: 10),
+                        Expanded(child: TextField(controller: lunchEnd, decoration: const InputDecoration(labelText: 'Closes'))),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Dinner Hours'),
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: dinnerStart, decoration: const InputDecoration(labelText: 'Opens'))),
+                        const SizedBox(width: 10),
+                        Expanded(child: TextField(controller: dinnerEnd, decoration: const InputDecoration(labelText: 'Closes'))),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: () async {
+                          try {
+                            await ProviderApiService.updateTimings(
+                              providerId: widget.session.providerId,
+                              timings: {
+                                'breakfast': {'enabled': true, 'start': bfStart.text.trim(), 'end': bfEnd.text.trim()},
+                                'lunch': {'enabled': true, 'start': lunchStart.text.trim(), 'end': lunchEnd.text.trim()},
+                                'dinner': {'enabled': true, 'start': dinnerStart.text.trim(), 'end': dinnerEnd.text.trim()},
+                              },
+                            );
+                            if (mounted) showNotice(context, 'Serving hours updated successfully!');
+                          } catch (e) {
+                            if (mounted) showNotice(context, 'Failed to update timings', isError: true);
+                          }
+                        },
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: const Text('Save Timings Schedule', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+
+      case 'Support':
+        return _detailScaffold(
+          context,
+          'Help & Support Desk',
+          [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Contact Platform Team', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
+                    const SizedBox(height: 4),
+                    const Text('Send support requests directly to ritik45chaurasia@gmail.com.', style: TextStyle(color: muted, fontSize: 12)),
+                    const SizedBox(height: 16),
+                    const FieldLabel('Category'),
+                    Wrap(
+                      spacing: 8,
+                      children: ['billing', 'menu', 'scanner', 'general'].map((c) {
+                        return ChoiceChip(
+                          label: Text(c.toUpperCase()),
+                          selected: supportCategory == c,
+                          selectedColor: orange,
+                          onSelected: (v) => setState(() => supportCategory = c),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Subject'),
+                    TextField(controller: supportSubject, decoration: const InputDecoration(hintText: 'Brief summary of the issue')),
+                    const SizedBox(height: 14),
+                    const FieldLabel('Detailed Message / Description'),
+                    TextField(controller: supportMessage, maxLines: 4, decoration: const InputDecoration(hintText: 'Describe what happened or request changes...')),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: submittingTicket
+                            ? null
+                            : () async {
+                                final sub = supportSubject.text.trim();
+                                final msg = supportMessage.text.trim();
+                                if (sub.isEmpty || msg.isEmpty) {
+                                  showNotice(context, 'Please enter subject and message', isError: true);
+                                  return;
+                                }
+                                setState(() => submittingTicket = true);
+                                try {
+                                  await ProviderApiService.submitSupportTicket(
+                                    name: widget.session.businessName,
+                                    email: widget.session.email,
+                                    phone: '',
+                                    role: 'provider',
+                                    subject: sub,
+                                    message: msg,
+                                    category: supportCategory,
+                                  );
+                                  if (mounted) {
+                                    showNotice(context, 'Support ticket sent! We will reply to ${widget.session.email}');
+                                    supportSubject.clear();
+                                    supportMessage.clear();
+                                  }
+                                } catch (e) {
+                                  if (mounted) showNotice(context, 'Failed to send ticket: ${e.toString().replaceAll("Exception: ", "")}', isError: true);
+                                } finally {
+                                  if (mounted) setState(() => submittingTicket = false);
+                                }
+                              },
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: submittingTicket
+                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: ink, strokeWidth: 2))
+                            : const Text('Send Support Request', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         );
 
@@ -1955,15 +2983,23 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
               )
             else
               ...items.map(
-                (red) => Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: const Icon(Icons.check_circle_outline, color: green),
-                    title: Text('${red['slot']} Redemption', style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
-                    subtitle: Text('${red['date']} · ${red['redeemed_at']?.toString().split('T').last.substring(0, 5) ?? ""}'),
-                    trailing: const StatusTag(text: 'VERIFIED', color: green),
-                  ),
-                ),
+                (red) {
+                  final customerName = red['customer_name'] ?? 'Verified Student';
+                  final planName = red['plan_name'] ?? 'Meal Pass';
+                  final slot = red['slot'] ?? 'LUNCH';
+                  final date = red['date'] ?? '';
+                  final time = red['time_formatted'] ?? (red['redeemed_at']?.toString().contains('T') == true ? red['redeemed_at'].toString().split('T').last.substring(0, 5) : '');
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: const Icon(Icons.check_circle_outline, color: green),
+                      title: Text('$customerName · $slot', style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                      subtitle: Text('$planName · $date $time'),
+                      trailing: const StatusTag(text: 'VERIFIED', color: green),
+                    ),
+                  );
+                },
               ),
           ],
         );

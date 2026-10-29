@@ -346,4 +346,228 @@ class ProviderApiService {
     }
     throw Exception(data['error'] ?? 'Failed to renew subscription.');
   }
+
+  static Future<List<Map<String, dynamic>>> fetchSubscriberHistory(String providerId, String subscriberId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/subscribers/$subscriberId/history?provider_id=$providerId');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final list = (data['history'] as List<dynamic>? ?? [])
+            .map((e) => e as Map<String, dynamic>)
+            .toList();
+        return list;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> fetchMenu(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {'menu': []};
+  }
+
+  static Future<void> addMenuItem({
+    required String providerId,
+    required String name,
+    required String slot,
+    int price = 0,
+    bool isExtra = false,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/menu');
+    await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider_id': providerId,
+        'action': 'add_item',
+        'item_name': name,
+        'slot': slot.toLowerCase(),
+        'price': price,
+        'is_extra': isExtra,
+      }),
+    ).timeout(const Duration(seconds: 10));
+  }
+
+  static Future<void> removeMenuItem({
+    required String providerId,
+    required String name,
+    required String slot,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/menu');
+    await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider_id': providerId,
+        'action': 'remove_item',
+        'item_name': name,
+        'slot': slot.toLowerCase(),
+      }),
+    ).timeout(const Duration(seconds: 10));
+  }
+
+  static Future<void> toggleMenuAvailability({
+    required String providerId,
+    required String name,
+    required bool isAvailable,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/menu');
+    await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider_id': providerId,
+        'action': 'toggle_availability',
+        'item_name': name,
+        'is_available': isAvailable,
+      }),
+    ).timeout(const Duration(seconds: 10));
+  }
+
+  static Future<void> savePlan({
+    required String providerId,
+    String? planId,
+    required String name,
+    required String description,
+    required String planType,
+    required int durationDays,
+    required int priceInr,
+    int? mealCredits,
+    int? discountPercent,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/plan');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider_id': providerId,
+        if (planId != null) 'id': planId,
+        'name': name,
+        'description': description,
+        'plan_type': planType,
+        'duration_days': durationDays,
+        'price_inr': priceInr,
+        if (mealCredits != null) 'meal_credits': mealCredits,
+        if (discountPercent != null) 'discount_percent': discountPercent,
+      }),
+    ).timeout(const Duration(seconds: 10));
+
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to save plan');
+    }
+  }
+
+  static Future<void> deletePlan({
+    required String providerId,
+    required String planId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/plan?provider_id=$providerId&plan_id=$planId');
+    await http.delete(uri).timeout(const Duration(seconds: 10));
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchOrders(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/orders?provider_id=$providerId');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final list = (data['orders'] as List<dynamic>? ?? [])
+            .map((e) => e as Map<String, dynamic>)
+            .toList();
+        return list;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<void> createOrder({
+    required String providerId,
+    required String customerName,
+    String? customerPhone,
+    required String itemsSummary,
+    required double totalAmount,
+    String paymentMode = 'cash',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/orders');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider_id': providerId,
+        'customer_name': customerName,
+        'customer_phone': customerPhone ?? '',
+        'items_summary': itemsSummary,
+        'total_amount_inr': totalAmount,
+        'payment_mode': paymentMode,
+      }),
+    ).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to record order');
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchTimings(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/timings?provider_id=$providerId');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['timings'] as Map<String, dynamic>? ?? {};
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static Future<void> updateTimings({
+    required String providerId,
+    required Map<String, dynamic> timings,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/timings');
+    await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'provider_id': providerId,
+        ...timings,
+      }),
+    ).timeout(const Duration(seconds: 10));
+  }
+
+  static Future<void> submitSupportTicket({
+    required String name,
+    required String email,
+    required String phone,
+    required String role,
+    required String subject,
+    required String message,
+    String category = 'general',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/support/ticket');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'email': email,
+        'phone': phone,
+        'role': role,
+        'subject': subject,
+        'message': message,
+        'category': category,
+      }),
+    ).timeout(const Duration(seconds: 12));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to submit support ticket');
+    }
+  }
 }

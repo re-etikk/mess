@@ -41,6 +41,61 @@ class _PlansScreenState extends State<PlansScreen> {
     }
   }
 
+  Future<void> _showMessPicker(BuildContext context, AppState appState) async {
+    final list = await appState.getProviders();
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Select Kitchen Partner', style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 4),
+              const Text('Browse plans and pricing for any approved mess.', style: TextStyle(color: MessColors.muted, fontSize: 13)),
+              const SizedBox(height: 16),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.45),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: list.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, color: MessColors.border),
+                  itemBuilder: (context, i) {
+                    final p = list[i];
+                    final isSelected = (_resolvedProvider?.id ?? appState.activeProvider?.id) == p.id;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.restaurant, color: MessColors.ink, size: 20),
+                      ),
+                      title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700, color: MessColors.ink)),
+                      subtitle: Text('${p.area} · ${p.distanceLabel}', style: const TextStyle(color: MessColors.muted, fontSize: 12)),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle, color: MessColors.green)
+                          : const Icon(Icons.chevron_right, color: MessColors.muted),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        setState(() => _resolvedProvider = p);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = AppStateScope.of(context);
@@ -87,6 +142,57 @@ class _PlansScreenState extends State<PlansScreen> {
                 icon: const Icon(Icons.storefront_outlined),
               ),
             ]),
+          ),
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+          sliver: SliverToBoxAdapter(
+            child: InkWell(
+              onTap: () => _showMessPicker(context, appState),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: MessColors.border),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x0A000000), blurRadius: 4, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.storefront, color: MessColors.orange, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('CURRENT KITCHEN PARTNER', style: TextStyle(fontSize: 9.5, letterSpacing: 1.1, color: MessColors.muted, fontWeight: FontWeight.w800)),
+                          Text(provider.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: MessColors.ink)),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: const Color(0xFFFFF0D4), borderRadius: BorderRadius.circular(6)),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Switch Mess', style: TextStyle(color: MessColors.orangeDark, fontWeight: FontWeight.w800, fontSize: 11)),
+                          SizedBox(width: 2),
+                          Icon(Icons.keyboard_arrow_down, color: MessColors.orangeDark, size: 16),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
         if (current != null && current.isValidToday)

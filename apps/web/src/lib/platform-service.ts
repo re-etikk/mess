@@ -14,6 +14,7 @@ export interface PlanData {
   currency: string;
   meal_credits?: number | null;
   daily_meal_limit: number;
+  discount_percent?: number;
   is_active: boolean;
   created_at: string;
 }
@@ -24,7 +25,8 @@ export interface MenuData {
   day_of_week: string;
   slot: string;
   items_included: string[];
-  items_extra: { name: string; price: number; limit?: number }[];
+  items_extra: { name: string; price: number; limit?: number; is_available?: boolean }[];
+  items_unavailable?: string[];
   is_active: boolean;
   updated_at: string;
 }
@@ -54,6 +56,11 @@ export interface SubscriptionData {
 export interface RedemptionData {
   id: string;
   user_id: string;
+  customer_name?: string;
+  customer_phone?: string;
+  plan_name?: string;
+  remaining_credits?: number | null;
+  time_formatted?: string;
   provider_id: string;
   subscription_id?: string;
   date: string;
@@ -62,6 +69,28 @@ export interface RedemptionData {
   extra_items: { name: string; price: number; quantity?: number }[];
   remarks?: string;
   redeemed_at: string;
+}
+
+export interface CounterOrderData {
+  id: string;
+  provider_id: string;
+  customer_name: string;
+  customer_phone?: string;
+  items_summary: string;
+  items: { name: string; price: number; quantity: number }[];
+  total_amount_inr: number;
+  payment_mode: 'cash' | 'counter_upi' | 'online';
+  status: 'paid' | 'pending';
+  created_at: string;
+}
+
+export interface ProviderTimingsData {
+  provider_id: string;
+  breakfast: { enabled: boolean; start: string; end: string };
+  lunch: { enabled: boolean; start: string; end: string };
+  dinner: { enabled: boolean; start: string; end: string };
+  weekly_off?: string;
+  updated_at: string;
 }
 
 export interface InvoiceData {
@@ -104,6 +133,8 @@ class PlatformStore {
   menus: Map<string, MenuData> = new Map();
   subscriptions: Map<string, SubscriptionData> = new Map();
   redemptions: Map<string, RedemptionData> = new Map();
+  counterOrders: Map<string, CounterOrderData> = new Map();
+  timings: Map<string, ProviderTimingsData> = new Map();
   invoices: Map<string, InvoiceData> = new Map();
   providerScanCounts: Map<string, { total: number; unbilled: number }> = new Map();
   reviews: Map<string, MessReview> = new Map();
@@ -607,16 +638,24 @@ export function processMealRedemption(params: {
 
   // 5. Record Redemption
   const redemptionId = `red-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const now = new Date();
+  const timeFormatted = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
   platformStore.redemptions.set(redemptionId, {
     id: redemptionId,
     user_id: params.userId,
+    customer_name: activeSub.customer_name || 'Student',
+    customer_phone: activeSub.customer_phone || '',
+    plan_name: activeSub.plan_name,
+    remaining_credits: newCredits,
+    time_formatted: timeFormatted,
     provider_id: providerId,
     subscription_id: activeSub.id,
     date: today,
     slot: activeSlot,
     amount_extra_paise: extraPaise,
     extra_items: extrasList,
-    redeemed_at: new Date().toISOString(),
+    redeemed_at: now.toISOString(),
   });
 
   // 6. Update Provider scan count for usage-based billing

@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
@@ -173,14 +175,158 @@ class ProfileScreen extends StatelessWidget {
     if (result != null && result.isNotEmpty) state.updateLocation(result);
   }
 
-  void _showHelp(BuildContext context) => showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Help & Support'),
-          content: const Text('For meal redemption issues, refund queries, or payment disputes, contact our 24/7 student support desk at support@thali.mess.'),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
-        ),
-      );
+  void _showHelp(BuildContext context) {
+    final state = AppStateScope.of(context);
+    final subjectCtrl = TextEditingController();
+    final messageCtrl = TextEditingController();
+    String category = 'general';
+    bool submitting = false;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                          child: const Icon(Icons.support_agent, color: MessColors.orange, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Student Support Desk', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.ink)),
+                              Text('Sends directly to ritik45chaurasia@gmail.com', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+                            ],
+                          ),
+                        ),
+                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Category', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: MessColors.ink)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: ['general', 'meal_quality', 'scanner', 'refund'].map((c) {
+                        return ChoiceChip(
+                          label: Text(c.toUpperCase()),
+                          selected: category == c,
+                          selectedColor: MessColors.orange,
+                          onSelected: (v) => setSheetState(() => category = c),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text('Subject', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: MessColors.ink)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: subjectCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Scanner error during lunch or payment query',
+                        filled: true,
+                        fillColor: MessColors.cream,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: MessColors.border)),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text('Message / Details', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: MessColors.ink)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: messageCtrl,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        hintText: 'Describe what happened, mess name, meal slot...',
+                        filled: true,
+                        fillColor: MessColors.cream,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: MessColors.border)),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: submitting
+                            ? null
+                            : () async {
+                                final sub = subjectCtrl.text.trim();
+                                final msg = messageCtrl.text.trim();
+                                if (sub.isEmpty || msg.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill in both subject and message.')));
+                                  return;
+                                }
+                                setSheetState(() => submitting = true);
+                                try {
+                                  final uri = Uri.parse('https://mess-beta.vercel.app/api/support/ticket');
+                                  await http.post(
+                                    uri,
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: jsonEncode({
+                                      'name': state.customerName,
+                                      'email': state.customerEmail.isNotEmpty ? state.customerEmail : 'student@gmail.com',
+                                      'phone': state.customerId,
+                                      'role': 'customer',
+                                      'subject': sub,
+                                      'message': msg,
+                                      'category': category,
+                                    }),
+                                  ).timeout(const Duration(seconds: 12));
+
+                                  if (context.mounted) {
+                                    Navigator.pop(ctx);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('✅ Support ticket sent! Support team will respond via email.')),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    setSheetState(() => submitting = false);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Failed to submit ticket: $e')),
+                                    );
+                                  }
+                                }
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: MessColors.orange,
+                          foregroundColor: MessColors.ink,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                        ),
+                        child: submitting
+                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: MessColors.ink, strokeWidth: 2))
+                            : const Text('Send Support Request'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   void _showSettings(BuildContext context) => showModalBottomSheet<void>(
         context: context,

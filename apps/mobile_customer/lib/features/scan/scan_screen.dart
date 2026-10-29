@@ -56,6 +56,111 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     final state = AppStateScope.of(context);
     final provider = state.activeProvider;
+    final providerName = provider?.name ?? 'Selected Mess';
+    final subscription = state.activeSubscription;
+
+    // Show dual confirmation prompt before finalizing meal check-in
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: const Color(0xFFFFE8C5), borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.qr_code_scanner, color: MessColors.orange, size: 24),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Confirm Meal Check-in', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.ink)),
+                      Text('Verify meal attendance redemption at counter', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: MessColors.cream,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: MessColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(providerName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: MessColors.ink)),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: MessColors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
+                        child: const Text('VERIFIED COUNTER', style: TextStyle(color: MessColors.green, fontWeight: FontWeight.w800, fontSize: 10)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    subscription != null
+                        ? 'Plan: ${subscription.planName} · ${subscription.mealsRemaining != null ? "${subscription.mealsRemaining} meals remaining" : "Unlimited Access"}'
+                        : 'Single meal check-in / daily meal pass',
+                    style: const TextStyle(fontSize: 12, color: MessColors.muted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: const BorderSide(color: MessColors.border),
+                    ),
+                    child: const Text('Cancel', style: TextStyle(color: MessColors.ink, fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    icon: const Icon(Icons.check_circle_outline, size: 18),
+                    label: const Text('Confirm & Check-in'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: MessColors.orange,
+                      foregroundColor: MessColors.ink,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      textStyle: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) {
+      setState(() => _processing = false);
+      _controller.start();
+      return;
+    }
 
     try {
       final redemption = await state.redeemMealQr(payload);
