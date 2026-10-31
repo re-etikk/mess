@@ -43,7 +43,7 @@ export async function requireAdmin(req?: NextRequest): Promise<AdminAccess> {
         try {
           const raw = Buffer.from(token.replace(/^jwt_(session|mock)_/, ''), 'base64url').toString('utf8');
           const parsed = JSON.parse(raw);
-          if (parsed && (parsed.role === 'admin' || parsed.email === 'ritik45chaurasia@gmail.com')) {
+          if (parsed && (parsed.role === 'admin' || parsed.email === 'admin@thali.store')) {
             if (adminClient) {
               return { ok: true, userId: parsed.userId || 'admin', admin: adminClient };
             }
@@ -59,7 +59,7 @@ export async function requireAdmin(req?: NextRequest): Promise<AdminAccess> {
     const { data: { user }, error: authError } = await session.auth.getUser();
     if (!authError && user) {
       // Check hardcoded root admin email or user_metadata
-      if (user.email === 'ritik45chaurasia@gmail.com' || user.user_metadata?.role === 'admin') {
+      if (user.email === 'admin@thali.store' || user.user_metadata?.role === 'admin') {
         if (adminClient) {
           return { ok: true, userId: user.id, admin: adminClient };
         }

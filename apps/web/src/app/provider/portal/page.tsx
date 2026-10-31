@@ -422,7 +422,7 @@ export default function ProviderPortal() {
           category: ticketCategory,
         }),
       });
-      setTicketSuccess('Support ticket dispatched to ritik45chaurasia@gmail.com! Support will reply via email.');
+      setTicketSuccess('Support ticket dispatched to support@thali.store! Support will reply via email.');
       setTicketSubject('');
       setTicketMessage('');
     } catch {}
@@ -893,7 +893,7 @@ export default function ProviderPortal() {
           {activeTab === 'support' && (
             <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm max-w-xl">
               <h2 className="text-lg font-bold text-slate-950">Partner Help & Support Desk</h2>
-              <p className="text-xs text-slate-500">Submit requests directly to ritik45chaurasia@gmail.com.</p>
+              <p className="text-xs text-slate-500">Submit requests directly to support@thali.store.</p>
 
               {ticketSuccess && (
                 <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-900">

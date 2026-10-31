@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     {
       id: 'cust-ritik-001',
       name: 'Ritik Chaurasia',
-      email: 'ritik45chaurasia@gmail.com',
+      email: 'admin@thali.store',
       role: 'admin',
       created_at: '2026-10-24T00:00:00Z',
     },

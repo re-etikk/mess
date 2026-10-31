@@ -215,7 +215,7 @@ class ProfileScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('Student Support Desk', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.ink)),
-                              Text('Sends directly to ritik45chaurasia@gmail.com', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+                              Text('Sends directly to support@thali.store', style: TextStyle(fontSize: 12, color: MessColors.muted)),
                             ],
                           ),
                         ),

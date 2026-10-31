@@ -113,7 +113,7 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
         console.warn('Resend email dispatch error:', errJson);
         // On Resend free tier without custom domain, sending to other emails is restricted.
         // Forward admin confirmation copy to the registered account owner email
-        const adminEmail = process.env.RESEND_ACCOUNT_EMAIL || 'ritik45chaurasia@gmail.com';
+        const adminEmail = process.env.ADMIN_EMAIL || process.env.RESEND_ACCOUNT_EMAIL || 'admin@thali.store';
         if (params.email !== adminEmail) {
           try {
             const adminCopyRes = await fetch('https://api.resend.com/emails', {
@@ -249,7 +249,7 @@ export async function sendEmailNotification(params: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL || 'Thali Support <onboarding@resend.dev>',
+        from: process.env.RESEND_FROM_EMAIL || 'Thali Support <support@thali.store>',
         to: [params.to],
         subject: params.subject,
         html: params.html,

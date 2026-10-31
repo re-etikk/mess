@@ -856,7 +856,7 @@ export default function CustomerDashboardPage() {
                 />
               </div>
               <p className="text-[11px] text-slate-500">
-                This inquiry will be emailed directly to <strong>ritik45chaurasia@gmail.com</strong>.
+                This inquiry will be emailed directly to <strong>support@thali.store</strong>.
               </p>
               {supportStatus && (
                 <p className="text-xs font-bold text-center py-1">{supportStatus}</p>

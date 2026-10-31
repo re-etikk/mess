@@ -3148,7 +3148,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                   children: [
                     const Text('Contact Platform Team', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
                     const SizedBox(height: 4),
-                    const Text('Send support requests directly to ritik45chaurasia@gmail.com.', style: TextStyle(color: muted, fontSize: 12)),
+                    const Text('Send support requests directly to support@thali.store.', style: TextStyle(color: muted, fontSize: 12)),
                     const SizedBox(height: 16),
                     const FieldLabel('Category'),
                     Wrap(

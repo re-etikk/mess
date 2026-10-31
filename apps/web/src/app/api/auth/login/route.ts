@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
           .is('revoked_at', null)
           .maybeSingle();
 
-        if (roleRow?.role === 'admin' || authenticatedEmail === 'ritik45chaurasia@gmail.com') {
+        if (roleRow?.role === 'admin' || authenticatedEmail === 'admin@thali.store') {
           resolvedRole = 'admin';
         } else if (authData.user.user_metadata?.role === 'provider' || requestedRole === 'provider') {
           resolvedRole = 'provider';
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
                 supabaseAuthSucceeded = true;
                 authenticatedUserId = matchedUser.id;
                 authenticatedEmail = matchedUser.email || email;
-                resolvedRole = (meta.role === 'admin' || authenticatedEmail === 'ritik45chaurasia@gmail.com')
+                resolvedRole = (meta.role === 'admin' || authenticatedEmail === 'admin@thali.store')
                   ? 'admin'
                   : (meta.role === 'provider' || requestedRole === 'provider' ? 'provider' : 'customer');
               }
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     // 3. Fallback verification for demo / offline platformStore accounts
     if (!supabaseAuthSucceeded) {
       // Only recognize hardcoded platform accounts if password matches
-      if (email === 'ritik45chaurasia@gmail.com' && (password === 'admin123' || password === 'admin@123' || password === 'Ritik@2026')) {
+      if (email === 'admin@thali.store' && (password === 'admin123' || password === 'admin@123' || password === 'Ritik@2026')) {
         authenticatedUserId = 'usr-admin-ritik';
         resolvedRole = 'admin';
         supabaseAuthSucceeded = true;

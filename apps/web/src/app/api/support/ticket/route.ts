@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const adminEmail = 'ritik45chaurasia@gmail.com';
+    const supportEmail = process.env.SUPPORT_EMAIL || 'support@thali.store';
     const subject = `[THALI SUPPORT TICKET] ${category} - from ${name} (${role.toUpperCase()})`;
     const html = `
       <div style="font-family: sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     `;
 
     const emailResult = await sendEmailNotification({
-      to: adminEmail,
+      to: supportEmail,
       subject,
       html,
     });

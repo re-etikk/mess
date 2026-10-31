@@ -38,7 +38,7 @@ export async function requireProviderOwnership(
         const raw = Buffer.from(token.replace(/^jwt_(session|mock)_/, ''), 'base64url').toString('utf8');
         const session = JSON.parse(raw);
         if (session) {
-          if (session.role === 'admin' || session.email === 'ritik45chaurasia@gmail.com') {
+          if (session.role === 'admin' || session.email === 'admin@thali.store') {
             return { ok: true, userId: session.userId || 'admin', providerId: targetProviderId, isAdmin: true };
           }
 
@@ -99,7 +99,7 @@ export async function requireProviderOwnership(
 
     if (user) {
       // Check admin
-      if (user.email === 'ritik45chaurasia@gmail.com' || user.user_metadata?.role === 'admin') {
+      if (user.email === 'admin@thali.store' || user.user_metadata?.role === 'admin') {
         return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
       }
 
