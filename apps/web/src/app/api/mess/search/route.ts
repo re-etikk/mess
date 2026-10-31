@@ -139,11 +139,13 @@ export async function GET(req: NextRequest) {
     const plans = Array.from(platformStore.plans.values()).filter((plan) => plan.provider_id === provider.id && plan.is_active);
     const menus = Array.from(platformStore.menus.values()).filter((menu) => menu.provider_id === provider.id);
     const reviews = Array.from(platformStore.reviews.values()).filter((r) => r.provider_id === provider.id);
+    const timings = platformStore.timings.get(provider.id) || null;
     return {
       ...provider,
       plans,
       menus,
       reviews_preview: reviews.slice(0, 3),
+      timings,
     };
   });
 

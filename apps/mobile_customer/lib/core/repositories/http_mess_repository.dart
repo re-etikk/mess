@@ -210,6 +210,28 @@ class HttpMessRepository implements MessRepository {
     return 'Mess Counter';
   }
 
+  static (int, int) _parseTimeString(String raw) {
+    // Handles "HH:MM" (24h) and "HH:MM AM/PM" (12h) formats
+    if (raw.isEmpty) return (0, 0);
+    final upper = raw.trim().toUpperCase();
+    final isPm = upper.contains('PM');
+    final isAm = upper.contains('AM');
+    final cleaned = upper.replaceAll('AM', '').replaceAll('PM', '').trim();
+    final parts = cleaned.split(':');
+    if (parts.length < 2) return (0, 0);
+    int hour = int.tryParse(parts[0].trim()) ?? 0;
+    final minute = int.tryParse(parts[1].trim()) ?? 0;
+    if (isPm && hour != 12) hour += 12;
+    if (isAm && hour == 12) hour = 0;
+    return (hour.clamp(0, 23), minute.clamp(0, 59));
+  }
+
+  static (int, int, int, int) _defaultTiming(String slotStr) {
+    if (slotStr == 'BREAKFAST') return (7, 30, 9, 30);
+    if (slotStr == 'DINNER') return (19, 0, 22, 0);
+    return (11, 30, 15, 0); // LUNCH
+  }
+
   MessProvider _parseProvider(Map<String, dynamic> json) {
     final id = json['id']?.toString() ?? '';
     final name = json['display_name']?.toString() ?? json['name']?.toString() ?? 'Mess';
@@ -248,6 +270,8 @@ class HttpMessRepository implements MessRepository {
 
     // Parse real menus from provider. ZERO FAKE DATA.
     final rawMenus = (json['menus'] as List<dynamic>? ?? []);
+    // Read provider timings from search response
+    final rawTimings = json['timings'] as Map<String, dynamic>?;
     final List<MealSlot> mealSlots = [];
     if (rawMenus.isNotEmpty) {
       for (final m in rawMenus) {
@@ -295,11 +319,27 @@ class HttpMessRepository implements MessRepository {
           }
         }
 
-        int startHour = 11, startMinute = 30, endHour = 15, endMinute = 0;
-        if (slotStr == 'BREAKFAST') {
-          startHour = 7; startMinute = 30; endHour = 9; endMinute = 30;
-        } else if (slotStr == 'DINNER') {
-          startHour = 19; startMinute = 0; endHour = 22; endMinute = 0;
+        // Parse actual timing from provider's saved timings (fallback to slot defaults)
+        int startHour, startMinute, endHour, endMinute;
+        bool slotEnabled = true;
+
+        if (rawTimings != null) {
+          final key = slotStr == 'BREAKFAST' ? 'breakfast' : (slotStr == 'DINNER' ? 'dinner' : 'lunch');
+          final slotTiming = rawTimings[key] as Map<String, dynamic>?;
+          if (slotTiming != null) {
+            slotEnabled = slotTiming['enabled'] as bool? ?? true;
+            final startParsed = _parseTimeString(slotTiming['start']?.toString() ?? '');
+            final endParsed = _parseTimeString(slotTiming['end']?.toString() ?? '');
+            startHour = startParsed.$1;
+            startMinute = startParsed.$2;
+            endHour = endParsed.$1;
+            endMinute = endParsed.$2;
+          } else {
+            // Timing key not in response — use slot defaults
+            (startHour, startMinute, endHour, endMinute) = _defaultTiming(slotStr);
+          }
+        } else {
+          (startHour, startMinute, endHour, endMinute) = _defaultTiming(slotStr);
         }
 
         mealSlots.add(MealSlot(
@@ -311,41 +351,95 @@ class HttpMessRepository implements MessRepository {
           endMinute: endMinute,
           menuSummary: itemsIncluded.isNotEmpty ? itemsIncluded.join(', ') : 'No items listed',
           items: items,
+          enabled: slotEnabled,
         ));
       }
     }
 
     if (mealSlots.isEmpty) {
+      int bfSH = 7, bfSM = 30, bfEH = 9, bfEM = 30;
+      int lSH = 11, lSM = 30, lEH = 15, lEM = 0;
+      int dSH = 19, dSM = 0, dEH = 22, dEM = 0;
+      bool bfEn = true, lEn = true, dEn = true;
+
+      if (rawTimings != null) {
+        if (rawTimings['breakfast'] is Map) {
+          final b = rawTimings['breakfast'] as Map<String, dynamic>;
+          bfEn = b['enabled'] as bool? ?? true;
+          final s = _parseTimeString(b['start']?.toString() ?? '');
+          final e = _parseTimeString(b['end']?.toString() ?? '');
+          if (s.$1 != 0 || s.$2 != 0) {
+            bfSH = s.$1;
+            bfSM = s.$2;
+          }
+          if (e.$1 != 0 || e.$2 != 0) {
+            bfEH = e.$1;
+            bfEM = e.$2;
+          }
+        }
+        if (rawTimings['lunch'] is Map) {
+          final l = rawTimings['lunch'] as Map<String, dynamic>;
+          lEn = l['enabled'] as bool? ?? true;
+          final s = _parseTimeString(l['start']?.toString() ?? '');
+          final e = _parseTimeString(l['end']?.toString() ?? '');
+          if (s.$1 != 0 || s.$2 != 0) {
+            lSH = s.$1;
+            lSM = s.$2;
+          }
+          if (e.$1 != 0 || e.$2 != 0) {
+            lEH = e.$1;
+            lEM = e.$2;
+          }
+        }
+        if (rawTimings['dinner'] is Map) {
+          final d = rawTimings['dinner'] as Map<String, dynamic>;
+          dEn = d['enabled'] as bool? ?? true;
+          final s = _parseTimeString(d['start']?.toString() ?? '');
+          final e = _parseTimeString(d['end']?.toString() ?? '');
+          if (s.$1 != 0 || s.$2 != 0) {
+            dSH = s.$1;
+            dSM = s.$2;
+          }
+          if (e.$1 != 0 || e.$2 != 0) {
+            dEH = e.$1;
+            dEM = e.$2;
+          }
+        }
+      }
+
       mealSlots.addAll([
-        const MealSlot(
+        MealSlot(
           id: 'breakfast',
           name: 'Breakfast',
-          startHour: 7,
-          startMinute: 30,
-          endHour: 9,
-          endMinute: 30,
+          startHour: bfSH,
+          startMinute: bfSM,
+          endHour: bfEH,
+          endMinute: bfEM,
           menuSummary: 'No menu items published',
-          items: [],
+          items: const [],
+          enabled: bfEn,
         ),
-        const MealSlot(
+        MealSlot(
           id: 'lunch',
           name: 'Lunch',
-          startHour: 11,
-          startMinute: 30,
-          endHour: 15,
-          endMinute: 0,
+          startHour: lSH,
+          startMinute: lSM,
+          endHour: lEH,
+          endMinute: lEM,
           menuSummary: 'No menu items published',
-          items: [],
+          items: const [],
+          enabled: lEn,
         ),
-        const MealSlot(
+        MealSlot(
           id: 'dinner',
           name: 'Dinner',
-          startHour: 19,
-          startMinute: 0,
-          endHour: 22,
-          endMinute: 0,
+          startHour: dSH,
+          startMinute: dSM,
+          endHour: dEH,
+          endMinute: dEM,
           menuSummary: 'No menu items published',
-          items: [],
+          items: const [],
+          enabled: dEn,
         ),
       ]);
     }

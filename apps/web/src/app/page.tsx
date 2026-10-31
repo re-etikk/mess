@@ -1,5 +1,17 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { APP_CONFIG } from '@/lib/config';
+
+export const metadata: Metadata = {
+  title: 'Find Your Everyday Thali',
+  description: 'Thali is building a local meal marketplace for students and professionals. Find verified mess and tiffin providers near you for breakfast, lunch and dinner.',
+  alternates: { canonical: 'https://www.thali.store' },
+  openGraph: {
+    title: 'Thali — Find Your Everyday Thali',
+    description: 'Discover local mess and tiffin providers for affordable daily meals.',
+    url: 'https://www.thali.store',
+  },
+};
 
 export default function HomePage() {
   return <main className="mx-auto max-w-5xl px-6 py-20">
