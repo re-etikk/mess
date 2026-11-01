@@ -14,3 +14,9 @@ grant select on table
   public.support_tickets,
   public.user_roles
 to service_role;
+
+-- Provider review writes are limited to approval fields only. Public and
+-- authenticated roles must not receive UPDATE access through this grant.
+grant update (status, approved_at, approved_by)
+on table public.providers
+to service_role;
