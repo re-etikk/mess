@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
-import { platformStore } from '@/lib/platform-service';
+import { requireAdmin } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,109 +9,85 @@ const SettingsSchema = z.object({
   fee_per_90_successful_redemptions_inr: z.number().int().min(0).max(100000),
   usage_billing_enabled: z.boolean(),
 });
-
-const defaultSettings = {
-  free_trial_days: 14,
-  fee_per_90_successful_redemptions_inr: 25,
-  usage_billing_enabled: true,
-  updated_at: new Date().toISOString(),
-};
+const ProviderSettingsSchema = z.object({
+  provider_id: z.string().uuid(),
+  trial_ends_at: z.string().datetime({ offset: true }).nullable(),
+  billing_exempt: z.boolean(),
+  exempt_reason: z.string().trim().max(500).nullable(),
+  admin_note: z.string().trim().max(1000).nullable(),
+}).refine((value) => !value.billing_exempt || Boolean(value.exempt_reason && value.exempt_reason.length >= 3), {
+  message: 'An exemption reason of at least 3 characters is required.', path: ['exempt_reason'],
+});
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  const access = await requireAdmin(req);
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+
+  const [{ data: settings, error: settingsError }, { data: accounts, error: accountsError }] = await Promise.all([
+    access.admin.from('platform_billing_settings')
+      .select('free_trial_days,fee_per_90_successful_redemptions_inr,usage_billing_enabled,updated_at')
+      .eq('singleton', true).maybeSingle(),
+    access.admin.from('provider_billing_accounts')
+      .select('provider_id,trial_started_at,trial_ends_at,billing_exempt,exempt_reason,admin_note,providers!inner(display_name,status)')
+      .order('created_at', { ascending: false }),
+  ]);
+  if (settingsError || accountsError) {
+    console.error('Billing settings query failed:', settingsError?.message || accountsError?.message);
+    return NextResponse.json({ success: false, error: 'Billing data could not be loaded.' }, { status: 503 });
   }
-
-  let settings = defaultSettings;
-  let providerAccounts: any[] = [];
-
-  try {
-    const admin = getAdminClient();
-    if (admin) {
-      const [{ data: dbSettings }, { data: accounts }] = await Promise.all([
-        admin.from('platform_billing_settings').select('free_trial_days,fee_per_90_successful_redemptions_inr,usage_billing_enabled,updated_at').eq('singleton', true).maybeSingle(),
-        admin.from('provider_billing_accounts').select('provider_id,trial_started_at,trial_ends_at,billing_exempt,exempt_reason,admin_note').order('created_at', { ascending: false }),
-      ]);
-
-      if (dbSettings) {
-        settings = dbSettings;
-      }
-
-      if (accounts && accounts.length > 0) {
-        const ids = accounts.map((a: any) => a.provider_id);
-        const { data: dbProviders } = await admin.from('providers').select('id,display_name,status').in('id', ids);
-        const pMap = new Map((dbProviders ?? []).map((p: any) => [p.id, p]));
-        providerAccounts = accounts.map((acc: any) => {
-          const prov = pMap.get(acc.provider_id);
-          return {
-            ...acc,
-            provider_name: prov?.display_name || 'Kitchen Partner',
-            provider_status: prov?.status || 'active',
-          };
-        });
-      }
-    }
-  } catch (err) {
-    console.warn('Billing accounts query fallback:', err);
-  }
-
-  // Fallback to active providers in platformStore if no accounts yet
-  if (providerAccounts.length === 0) {
-    providerAccounts = Array.from(platformStore.providers.values())
-      .filter((p) => p.status === 'active')
-      .map((p) => ({
-        provider_id: p.id,
-        provider_name: p.display_name,
-        provider_status: p.status,
-        trial_started_at: p.created_at,
-        trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-        billing_exempt: false,
-        exempt_reason: null,
-        admin_note: null,
-      }));
-  }
+  if (!settings) return NextResponse.json({ success: false, error: 'Platform billing settings are not initialized. Apply the billing migration first.' }, { status: 503 });
 
   return NextResponse.json({
     settings,
-    providers: providerAccounts,
-  });
+    providers: (accounts ?? []).map((account: any) => ({
+      provider_id: account.provider_id,
+      provider_name: account.providers.display_name,
+      provider_status: account.providers.status,
+      trial_started_at: account.trial_started_at,
+      trial_ends_at: account.trial_ends_at,
+      billing_exempt: account.billing_exempt,
+      exempt_reason: account.exempt_reason,
+      admin_note: account.admin_note,
+    })),
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
-export async function PATCH(request: NextRequest) {
-  const auth = await requireAdmin(request);
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
-  }
+export async function PATCH(req: NextRequest) {
+  const access = await requireAdmin(req);
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
   let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  try { payload = await req.json(); } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 });
   }
-
-  const settingsParsed = SettingsSchema.safeParse(payload);
-  if (settingsParsed.success) {
-    try {
-      const admin = getAdminClient();
-      if (admin) {
-        await admin
-          .from('platform_billing_settings')
-          .update({ ...settingsParsed.data, updated_by: 'admin-system' })
-          .eq('singleton', true);
-      }
-    } catch {
-      // fallback
+  const settings = SettingsSchema.safeParse(payload);
+  if (settings.success) {
+    if (settings.data.usage_billing_enabled && (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET || !process.env.RAZORPAY_WEBHOOK_SECRET)) {
+      return NextResponse.json({ success: false, error: 'Usage billing cannot be enabled until Razorpay credentials and webhook verification are configured.' }, { status: 409 });
     }
-
-    return NextResponse.json({
-      settings: {
-        ...settingsParsed.data,
-        updated_at: new Date().toISOString(),
-      },
-    });
+    const { data, error } = await access.admin.from('platform_billing_settings')
+      .update({ ...settings.data, updated_by: access.userId })
+      .eq('singleton', true)
+      .select('free_trial_days,fee_per_90_successful_redemptions_inr,usage_billing_enabled,updated_at')
+      .maybeSingle();
+    if (error || !data) {
+      console.error('Billing settings update failed:', error?.message || 'singleton missing');
+      return NextResponse.json({ success: false, error: 'Billing settings could not be saved.' }, { status: 503 });
+    }
+    return NextResponse.json({ success: true, settings: data });
   }
 
-  return NextResponse.json({ success: true, message: 'Billing policy updated.' });
+  const providerSettings = ProviderSettingsSchema.safeParse(payload);
+  if (!providerSettings.success) return NextResponse.json({ success: false, error: 'Invalid billing settings.', details: providerSettings.error.flatten() }, { status: 400 });
+  const { provider_id, ...updates } = providerSettings.data;
+  const { data, error } = await access.admin.from('provider_billing_accounts')
+    .update({ ...updates, updated_by: access.userId })
+    .eq('provider_id', provider_id)
+    .select('provider_id,trial_started_at,trial_ends_at,billing_exempt,exempt_reason,admin_note')
+    .maybeSingle();
+  if (error || !data) {
+    console.error('Provider billing update failed:', error?.message || 'provider billing account missing');
+    return NextResponse.json({ success: false, error: 'Provider billing settings could not be saved. Confirm the provider has an activated trial account.' }, { status: 503 });
+  }
+  return NextResponse.json({ success: true, provider: data });
 }

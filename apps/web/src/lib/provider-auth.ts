@@ -1,140 +1,66 @@
-import { NextRequest } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { createClient as createSessionClient } from '@/lib/supabase/server';
-import { getAdminClient } from '@/lib/supabase/admin';
-import { platformStore } from '@/lib/platform-service';
+import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
 
 export type ProviderAuthResult =
   | { ok: true; userId: string; providerId: string; isAdmin: boolean }
-  | { ok: false; status: 401 | 403; error: string };
+  | { ok: false; status: 400 | 401 | 403 | 503; error: string };
 
-/**
- * Validates that the requester is authenticated and authorized to mutate the target provider's state.
- * Authorized if:
- * 1. Requester is an administrator (via admin secret, bearer token, or session)
- * 2. Requester has a valid provider session matching targetProviderId or owns that provider
- */
+/** Provider mutations require a valid Supabase user and an active persisted membership. */
 export async function requireProviderOwnership(
   req: NextRequest,
-  targetProviderId: string
+  targetProviderId: string,
 ): Promise<ProviderAuthResult> {
-  if (!targetProviderId) {
-    return { ok: false, status: 401, error: 'Missing target provider ID' };
-  }
+  if (!targetProviderId) return { ok: false, status: 400, error: 'Provider ID is required.' };
 
-  // 1. Check Bearer Token in Authorization header
   const authHeader = req.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.substring(7).trim();
-
-    // Check if token is internal admin secret
-    const expectedSecret = process.env.ADMIN_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (expectedSecret && token === expectedSecret) {
-      return { ok: true, userId: 'admin-service', providerId: targetProviderId, isAdmin: true };
+    const token = authHeader.slice(7).trim();
+    const adminClient = getAdminClient();
+    if (!adminClient || !token || token.startsWith('jwt_')) {
+      return { ok: false, status: adminClient ? 401 : 503, error: 'A valid Supabase access token is required.' };
     }
+    const { data: { user }, error: tokenError } = await adminClient.auth.getUser(token);
+    if (tokenError || !user) return { ok: false, status: 401, error: 'Authentication required.' };
 
-    // Check if token is jwt_session_ / jwt_mock_
-    if (token.startsWith('jwt_session_') || token.startsWith('jwt_mock_')) {
-      try {
-        const raw = Buffer.from(token.replace(/^jwt_(session|mock)_/, ''), 'base64url').toString('utf8');
-        const session = JSON.parse(raw);
-        if (session) {
-          if (session.role === 'admin' || session.email === 'admin@thali.store') {
-            return { ok: true, userId: session.userId || 'admin', providerId: targetProviderId, isAdmin: true };
-          }
+    const { data: roles, error: roleError } = await adminClient.from('user_roles').select('id')
+      .eq('user_id', user.id).eq('role', 'admin').is('revoked_at', null).limit(1);
+    if (roleError) return { ok: false, status: 503, error: 'Permissions could not be verified.' };
+    if (roles?.length) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
 
-          // If provider session, match providerId or userId
-          if (
-            session.provider_id === targetProviderId ||
-            session.providerId === targetProviderId ||
-            session.userId === targetProviderId
-          ) {
-            return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
-          }
-
-          // Check if provider in platformStore belongs to this user
-          const p = platformStore.providers.get(targetProviderId);
-          if (
-            p &&
-            (p.owner_user_id === session.userId ||
-              p.id === session.userId ||
-              (session.email && p.email?.toLowerCase() === session.email.toLowerCase()))
-          ) {
-            return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
-          }
-
-          // Check Supabase DB for ownership if DB client is available
-          try {
-            const admin = getAdminClient();
-            if (admin) {
-              const { data: dbP } = await admin
-                .from('providers')
-                .select('id,owner_user_id,public_email')
-                .eq('id', targetProviderId)
-                .maybeSingle();
-
-              if (
-                dbP &&
-                (dbP.owner_user_id === session.userId ||
-                  dbP.id === session.userId ||
-                  (session.email && dbP.public_email?.toLowerCase() === session.email.toLowerCase()))
-              ) {
-                return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
-              }
-            }
-          } catch {}
-
-          // If session role is provider and no explicit conflict, allow matching targetProviderId
-          if (session.role === 'provider') {
-            return { ok: true, userId: session.userId, providerId: targetProviderId, isAdmin: false };
-          }
-        }
-      } catch {}
-    }
+    const { data: memberships, error: membershipError } = await adminClient.from('provider_memberships').select('id')
+      .eq('provider_id', targetProviderId).eq('user_id', user.id).eq('active', true)
+      .in('role', ['owner', 'manager']).limit(1);
+    if (membershipError) return { ok: false, status: 503, error: 'Provider permissions could not be verified.' };
+    if (memberships?.length) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+    return { ok: false, status: 403, error: 'You do not have permission to manage this provider.' };
   }
 
-  // 2. Check Supabase Session Cookies
+  const admin = await requireAdmin(req);
+  if (admin.ok) return { ok: true, userId: admin.userId, providerId: targetProviderId, isAdmin: true };
+  if (admin.status === 503) return admin;
+
+  let session;
   try {
-    const supabase = await createSessionClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (user) {
-      // Check admin
-      if (user.email === 'admin@thali.store' || user.user_metadata?.role === 'admin') {
-        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
-      }
-
-      // Check user metadata application or provider ID
-      const meta = user.user_metadata || {};
-      const userProvId = meta.application?.id || meta.provider_id;
-      if (userProvId === targetProviderId || user.id === targetProviderId) {
-        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
-      }
-
-      // Check PostgreSQL providers table ownership
-      const admin = getAdminClient();
-      if (admin) {
-        const { data: p } = await admin
-          .from('providers')
-          .select('id,owner_user_id')
-          .eq('id', targetProviderId)
-          .maybeSingle();
-
-        if (p && (p.owner_user_id === user.id || p.id === user.id)) {
-          return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
-        }
-      }
-    }
-  } catch {}
-
-  // 3. Fallback for recognized development/registered providers in platformStore
-  const provider = platformStore.providers.get(targetProviderId);
-  if (provider) {
-    return { ok: true, userId: provider.owner_user_id || targetProviderId, providerId: targetProviderId, isAdmin: false };
+    session = await createSessionClient();
+  } catch {
+    return { ok: false, status: 503, error: 'Authentication is not configured.' };
   }
 
-  return {
-    ok: false,
-    status: 403,
-    error: 'Forbidden: You do not have permission to manage this kitchen partner.',
-  };
+  const { data: { user }, error } = await session.auth.getUser();
+  if (error || !user) return { ok: false, status: 401, error: 'Authentication required.' };
+
+  const { data: membership, error: membershipError } = await session
+    .from('provider_memberships')
+    .select('id')
+    .eq('provider_id', targetProviderId)
+    .eq('user_id', user.id)
+    .eq('active', true)
+    .in('role', ['owner', 'manager'])
+    .limit(1)
+    .maybeSingle();
+
+  if (membershipError) return { ok: false, status: 503, error: 'Provider access could not be verified.' };
+  if (!membership) return { ok: false, status: 403, error: 'You do not have permission to manage this provider.' };
+  return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
 }

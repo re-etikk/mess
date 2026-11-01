@@ -1,34 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateProviderDailyQR } from '@/lib/platform-service';
+import { issueProviderQr } from '@/lib/provider-qr';
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const providerId = searchParams.get('provider_id') || 'prov-radhe-001';
-  const slot = searchParams.get('slot') || undefined;
-
-  const qrData = generateProviderDailyQR({
-    providerId,
-    slot,
-  });
-
-  return NextResponse.json({
-    success: true,
-    ...qrData,
-  });
+  const params = new URL(req.url).searchParams;
+  return issueProviderQr(req, params.get('provider_id'), params.get('slot'));
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  const providerId = body.provider_id || body.providerId || 'prov-radhe-001';
-  const slot = body.slot;
-
-  const qrData = generateProviderDailyQR({
-    providerId,
-    slot,
-  });
-
-  return NextResponse.json({
-    success: true,
-    ...qrData,
-  });
+  let body: { provider_id?: string; providerId?: string; slot?: string };
+  try { body = await req.json(); } catch { return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 }); }
+  return issueProviderQr(req, body.provider_id || body.providerId || null, body.slot || null);
 }

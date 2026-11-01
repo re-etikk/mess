@@ -1,40 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
+import { createClient } from '@/lib/supabase/server';
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const customerId = searchParams.get('customer_id') || 'cust-ritik-001';
-
-  const notifs = Array.from(platformStore.notifications.values())
-    .filter((n) => n.customer_id === customerId)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at));
-
-  return NextResponse.json({
-    success: true,
-    total: notifs.length,
-    unread_count: notifs.filter((n) => !n.is_read).length,
-    notifications: notifs,
-  });
+export async function GET() {
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
+  if (!auth.user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+  const { data, error } = await db.from('notifications').select('id,category,title,body,deep_link,metadata,read_at,created_at').eq('user_id', auth.user.id).order('created_at', { ascending: false }).limit(100);
+  if (error) return NextResponse.json({ success: false, error: 'Notifications are unavailable.' }, { status: 503 });
+  return NextResponse.json({ success: true, total: data.length, unread_count: data.filter((item) => !item.read_at).length, notifications: data }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function PATCH(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const notifId = body.notification_id;
-
-    if (notifId) {
-      const notif = platformStore.notifications.get(notifId);
-      if (notif) notif.is_read = true;
-    } else {
-      // Mark all read for customer
-      const customerId = body.customer_id || 'cust-ritik-001';
-      for (const n of platformStore.notifications.values()) {
-        if (n.customer_id === customerId) n.is_read = true;
-      }
-    }
-
-    return NextResponse.json({ success: true, message: 'Notifications updated.' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
+  if (!auth.user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+  let body: { notification_id?: string };
+  try { body = await req.json(); } catch { body = {}; }
+  let query = db.from('notifications').update({ read_at: new Date().toISOString() }).eq('user_id', auth.user.id);
+  if (body.notification_id) query = query.eq('id', body.notification_id);
+  const { error } = await query;
+  if (error) return NextResponse.json({ success: false, error: 'Could not update notifications.' }, { status: 503 });
+  return NextResponse.json({ success: true });
 }

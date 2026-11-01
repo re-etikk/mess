@@ -1,18 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
-import { requireAdmin } from '@/lib/supabase/admin';
+import { requireAdmin, getAdminClient } from '@/lib/supabase/admin';
 
 export async function GET(req: NextRequest) {
   const auth = await requireAdmin(req);
-  if (!auth.ok) {
-    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
-  }
-
-  const subs = Array.from(platformStore.subscriptions.values());
-  return NextResponse.json({
-    success: true,
-    total: subs.length,
-    active: subs.filter((s) => s.status === 'active').length,
-    subscriptions: subs,
-  });
+  if (!auth.ok) return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  const db = getAdminClient();
+  if (!db) return NextResponse.json({ success: false, error: 'Database is not configured.' }, { status: 503 });
+  const { data, error, count } = await db.from('subscriptions').select('*', { count: 'exact' }).order('created_at', { ascending: false }).limit(100);
+  if (error) return NextResponse.json({ success: false, error: 'Could not load persisted subscriptions.' }, { status: 503 });
+  return NextResponse.json({ success: true, total: count ?? 0, active: data.filter((item) => item.status === 'active').length, subscriptions: data }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

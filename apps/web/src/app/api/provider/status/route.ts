@@ -1,72 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, updateProviderStatus, isProviderOpen } from '@/lib/platform-service';
 import { getAdminClient } from '@/lib/supabase/admin';
-import { requireProviderOwnership } from '@/lib/provider-auth';
-
-export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const providerId = searchParams.get('providerId') || searchParams.get('provider_id');
-
-  if (!providerId) {
-    return NextResponse.json({ error: 'providerId is required' }, { status: 400 });
-  }
-
-  const isOpen = isProviderOpen(providerId);
-  const provider = platformStore.providers.get(providerId);
-
-  return NextResponse.json({
-    provider_id: providerId,
-    display_name: provider?.display_name || 'Kitchen Partner',
-    is_open_today: isOpen,
-    status_label: isOpen ? 'OPEN / SERVING TODAY' : 'CLOSED / OFF TODAY',
-  });
+  const providerId = new URL(req.url).searchParams.get('provider_id') || new URL(req.url).searchParams.get('providerId');
+  if (!providerId) return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+  const db = getAdminClient();
+  if (!db) return NextResponse.json({ success: false, error: 'Database is not configured.' }, { status: 503 });
+  const { data: provider, error } = await db.from('providers').select('id,display_name,status').eq('id', providerId).maybeSingle();
+  if (error) return NextResponse.json({ success: false, error: 'Provider status is unavailable.' }, { status: 503 });
+  if (!provider) return NextResponse.json({ success: false, error: 'Provider not found.' }, { status: 404 });
+  const weekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekdayName);
+  const { data: hours, error: hoursError } = await db.from('provider_operating_hours').select('opens_at,closes_at,closed').eq('provider_id', providerId).eq('weekday', weekday).maybeSingle();
+  if (hoursError) return NextResponse.json({ success: false, error: 'Operating hours are unavailable.' }, { status: 503 });
+  const localTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+  const currentMinutes = Number(localTime.slice(0, 2)) * 60 + Number(localTime.slice(3, 5));
+  const parse = (value?: string | null) => value ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5)) : null;
+  const opens = parse(hours?.opens_at);
+  const closes = parse(hours?.closes_at);
+  const isOpen = provider.status === 'active' && Boolean(hours && !hours.closed && opens !== null && closes !== null && currentMinutes >= opens && currentMinutes < closes);
+  return NextResponse.json({ success: true, provider_id: provider.id, display_name: provider.display_name, is_open_today: isOpen, status_label: provider.status !== 'active' ? 'NOT ACTIVE' : isOpen ? 'OPEN / SERVING TODAY' : hours ? 'CLOSED / OFF HOURS' : 'HOURS NOT SET' }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const providerId = body.provider_id || body.providerId;
-    const isOpen = Boolean(body.is_open ?? body.isOpen);
-
-    if (!providerId) {
-      return NextResponse.json({ success: false, error: 'provider_id is required' }, { status: 400 });
-    }
-
-    // Enforce Tenant Authorization / Prevent IDOR
-    const auth = await requireProviderOwnership(req, providerId);
-    if (!auth.ok) {
-      return NextResponse.json(
-        { success: false, error: auth.error },
-        { status: auth.status }
-      );
-    }
-
-    updateProviderStatus(providerId, isOpen);
-
-    // Also update Supabase if configured
-    try {
-      const admin = getAdminClient();
-      if (admin) {
-        await admin
-          .from('providers')
-          .update({ is_open_today: isOpen } as any)
-          .eq('id', providerId);
-      }
-    } catch {
-      // In-memory store handles it
-    }
-
-    return NextResponse.json({
-      success: true,
-      provider_id: providerId,
-      is_open_today: isOpen,
-      message: isOpen
-        ? '🟢 Kitchen is now marked OPEN & SERVING TODAY. Students can scan and claim meals.'
-        : '🔴 Kitchen is now marked CLOSED / OFF TODAY. Dark shade applied and scans are paused.',
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message || 'Failed to update status' }, { status: 500 });
-  }
+export async function POST() {
+  return NextResponse.json({ success: false, error: 'Use persisted operating-hours settings; live open/closed overrides are not configured.' }, { status: 503 });
 }

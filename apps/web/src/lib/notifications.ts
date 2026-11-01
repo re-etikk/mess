@@ -14,7 +14,6 @@ export interface ProviderApprovalNoticeParams {
   phone: string;
   email: string;
   user_id: string;
-  password?: string;
   login_url?: string;
 }
 
@@ -30,7 +29,6 @@ export interface NotificationDispatchResult {
     user_id: string;
     email: string;
     phone: string;
-    password: string;
     login_url: string;
   };
   error?: string;
@@ -42,16 +40,14 @@ export async function sendProviderApprovalNotice(
   const cleanPhone = params.phone.replace(/\D/g, '');
   const phoneFormatted = cleanPhone.length === 10 ? `+91${cleanPhone}` : `+${cleanPhone}`;
   const phone10Digits = cleanPhone.slice(-10);
-  const password = params.password || 'MessOwner@2026';
-  const loginUrl = params.login_url || 'https://mess-beta.vercel.app/auth/login';
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '');
+  const loginUrl = params.login_url || (configuredBaseUrl ? `${configuredBaseUrl}/partner/login` : '');
 
   const messageText = `Namaste! Aapka mess "${params.provider_name}" Thali platform par successfully verify aur activate ho gaya hai.
 
-Aapke Kitchen Partner Login Credentials:
-• Portal URL: ${loginUrl}
-• User ID / Phone: ${phone10Digits}
-• Email: ${params.email}
-• Password: ${password}
+Partner portal: ${loginUrl || 'Please use the partner portal link provided by Thali.'}
+Email: ${params.email}
+Use the password you registered with, or choose “Forgot password” to reset it.
 
 Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakte hain aur customer subscriptions manage kar sakte hain. Shubhkaamnaye!`;
 
@@ -76,7 +72,7 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
         body: JSON.stringify({
           from: process.env.RESEND_FROM_EMAIL || 'Thali Notifications <onboarding@resend.dev>',
           to: [params.email],
-          subject: `🎉 Your mess "${params.provider_name}" is verified on Thali - Login Credentials`,
+          subject: `Your mess "${params.provider_name}" is verified on Thali`,
           text: messageText,
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
@@ -90,7 +86,6 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
                 <p style="margin: 4px 0; font-size: 14px;"><strong>Portal Link:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
                 <p style="margin: 4px 0; font-size: 14px;"><strong>User ID / Phone:</strong> ${phone10Digits}</p>
                 <p style="margin: 4px 0; font-size: 14px;"><strong>Registered Email:</strong> ${params.email}</p>
-                <p style="margin: 4px 0; font-size: 14px;"><strong>Password:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px;">${password}</code></p>
               </div>
 
               <a href="${loginUrl}" style="display: inline-block; background: #0f172a; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px;">
@@ -98,7 +93,7 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
               </a>
 
               <p style="color: #64748b; font-size: 13px; margin-top: 24px;">
-                You can also open the Thali Kitchen Partner Mobile App and sign in with your phone number and password to generate today's daily QR code.
+                Sign in with your registered account. Use “Forgot password” if you need to reset it.
               </p>
             </div>
           `,
@@ -113,8 +108,8 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
         console.warn('Resend email dispatch error:', errJson);
         // On Resend free tier without custom domain, sending to other emails is restricted.
         // Forward admin confirmation copy to the registered account owner email
-        const adminEmail = process.env.ADMIN_EMAIL || process.env.RESEND_ACCOUNT_EMAIL || 'admin@thali.store';
-        if (params.email !== adminEmail) {
+        const adminEmail = process.env.ADMIN_EMAIL || process.env.RESEND_ACCOUNT_EMAIL;
+        if (adminEmail && params.email !== adminEmail) {
           try {
             const adminCopyRes = await fetch('https://api.resend.com/emails', {
               method: 'POST',
@@ -132,7 +127,6 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
                     <h3>Kitchen Partner Verified: ${params.provider_name}</h3>
                     <p><strong>Owner Email:</strong> ${params.email}</p>
                     <p><strong>Phone:</strong> ${phone10Digits}</p>
-                    <p><strong>Password:</strong> <code>${password}</code></p>
                     <p><strong>Login URL:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
                   </div>
                 `,
@@ -162,7 +156,7 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
         },
         body: JSON.stringify({
           route: 'q',
-          message: `Thali Mess Verified! Kitchen: ${params.provider_name}. Login at ${loginUrl} with Phone: ${phone10Digits}, Pass: ${password}`,
+          message: `Thali Mess verified: ${params.provider_name}. Sign in at ${loginUrl} with your registered account. Use Forgot password if needed.`,
           language: 'english',
           flash: 0,
           numbers: phone10Digits,
@@ -191,7 +185,7 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
       const formParams = new URLSearchParams();
       formParams.append('To', phoneFormatted);
       formParams.append('From', twilioPhone);
-      formParams.append('Body', `Thali Mess Verified! Kitchen: ${params.provider_name}. Login at ${loginUrl} with Phone: ${phone10Digits}, Pass: ${password}`);
+      formParams.append('Body', `Thali Mess verified: ${params.provider_name}. Sign in at ${loginUrl} with your registered account. Use Forgot password if needed.`);
 
       const twilioRes = await fetch(twilioUrl, {
         method: 'POST',
@@ -223,7 +217,6 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
       user_id: phone10Digits,
       email: params.email,
       phone: phone10Digits,
-      password,
       login_url: loginUrl,
     },
   };

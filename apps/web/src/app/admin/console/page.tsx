@@ -56,8 +56,6 @@ export default function AdminConsole() {
   const [settings, setSettings] = useState<BillingSettings | null>(null);
   const [providers, setProviders] = useState<ProviderAccount[]>([]);
   const [applications, setApplications] = useState<ProviderApplication[]>([]);
-  const [approvalNotice, setApprovalNotice] = useState<any | null>(null);
-  const [copiedNotice, setCopiedNotice] = useState(false);
   const [reviewReasons, setReviewReasons] = useState<Record<string, string>>({});
   const [dates, setDates] = useState<Record<string, string>>({});
   const [exemptions, setExemptions] = useState<Record<string, boolean>>({});
@@ -182,18 +180,9 @@ export default function AdminConsole() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Provider review could not be saved.');
 
-      setMessage(
-        decision === 'approve'
-          ? `✅ ${application.display_name} approved! Kitchen listing & plans are now live on Mobile Apps and Web Directory.`
-          : `${application.display_name} application rejected.`
-      );
-
-      if (decision === 'approve' && result.notification) {
-        setApprovalNotice({
-          ...result.notification,
-          provider_name: application.display_name,
-        });
-      }
+      setMessage(decision === 'approve'
+        ? `${application.display_name} approved. The provider can now sign in and configure its menu and plans.`
+        : `${application.display_name} application rejected.`);
 
       await load();
     } catch (err) {
@@ -243,109 +232,6 @@ export default function AdminConsole() {
           <div role="status" className="mt-5 flex gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 font-medium">
             <CheckCircle2 className="shrink-0 text-emerald-700" size={18} aria-hidden="true" />
             {message}
-          </div>
-        )}
-
-        {/* MESS OWNER VERIFIED & CREDENTIALS BANNER */}
-        {approvalNotice && (
-          <div className="mt-5 rounded-2xl border-2 border-emerald-500 bg-white p-5 shadow-lg sm:p-6 transition-all">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-xl font-bold">
-                  ✓
-                </span>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    Kitchen Partner Verified &amp; Credentials Ready
-                  </h3>
-                  <p className="text-xs text-slate-600">
-                    Approval successful for <strong>{approvalNotice.provider_name || 'Mess Partner'}</strong>. Deliver these login credentials to the owner:
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setApprovalNotice(null)}
-                className="self-end sm:self-auto rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100 transition"
-              >
-                Dismiss ✕
-              </button>
-            </div>
-
-            {/* Credentials Info Grid */}
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
-              <div>
-                <span className="font-semibold text-slate-500 uppercase tracking-wider block text-[10px]">User ID / Phone</span>
-                <span className="text-sm font-mono font-bold text-slate-900">{approvalNotice.credentials?.phone || '—'}</span>
-              </div>
-              <div>
-                <span className="font-semibold text-slate-500 uppercase tracking-wider block text-[10px]">Registered Email</span>
-                <span className="text-sm font-mono font-semibold text-slate-900 truncate block">{approvalNotice.credentials?.email || '—'}</span>
-              </div>
-              <div>
-                <span className="font-semibold text-slate-500 uppercase tracking-wider block text-[10px]">Initial Password</span>
-                <span className="text-sm font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
-                  {approvalNotice.credentials?.password || 'MessOwner@2026'}
-                </span>
-              </div>
-              <div>
-                <span className="font-semibold text-slate-500 uppercase tracking-wider block text-[10px]">Partner Login Portal</span>
-                <a
-                  href={approvalNotice.credentials?.login_url || '/auth/login'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-semibold text-amber-700 underline truncate block"
-                >
-                  {approvalNotice.credentials?.login_url || '/auth/login'}
-                </a>
-              </div>
-            </div>
-
-            {/* Dispatch Status & Instant 1-Click Delivery Buttons */}
-            <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-semibold ${
-                  approvalNotice.email_sent ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                }`}>
-                  📧 {approvalNotice.email_sent ? 'Email Sent (Resend)' : 'Email: Direct Dispatch Ready'}
-                </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-semibold ${
-                  approvalNotice.sms_sent ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                }`}>
-                  📱 {approvalNotice.sms_sent ? 'SMS Sent (Fast2SMS)' : 'SMS: Direct Dispatch Ready'}
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={approvalNotice.whatsapp_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 transition"
-                >
-                  💬 Send via WhatsApp
-                </a>
-                <a
-                  href={approvalNotice.sms_url}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-sky-700 transition"
-                >
-                  📱 Send via SMS
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (approvalNotice.message_text) {
-                      void navigator.clipboard.writeText(approvalNotice.message_text);
-                      setCopiedNotice(true);
-                      setTimeout(() => setCopiedNotice(false), 2500);
-                    }
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-                >
-                  📋 {copiedNotice ? 'Copied!' : 'Copy Message'}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 

@@ -71,7 +71,7 @@ export default function LoginPage() {
           <div className="space-y-1">
             <div className="flex justify-between">
               <label className="font-semibold text-slate-700 block">Password</label>
-              <span className="text-slate-400">Contact support for account recovery</span>
+              <Link href="/auth/forgot-password" className="text-amber-700 hover:text-amber-800 font-semibold underline underline-offset-2">Forgot password?</Link>
             </div>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />

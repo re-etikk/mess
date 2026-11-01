@@ -1,145 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
-import { platformStore } from '@/lib/platform-service';
+import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 export async function POST(req: NextRequest) {
+  let body: { email?: string; password?: string; role?: string; name?: string; display_name?: string; phone?: string };
   try {
-    const body = await req.json().catch(() => ({}));
-    const email = body.email?.trim().toLowerCase();
-    const password = body.password;
-    const requestedRole = (body.role || 'customer').toLowerCase();
-    const name = body.name || body.display_name || body.business_name || email?.split('@')[0] || 'User';
-    const phone = body.phone || '';
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 });
+  }
 
-    if (!email || !password) {
-      return NextResponse.json(
-        { success: false, error: 'Email and password are required.' },
-        { status: 400 }
-      );
+  const email = body.email?.trim().toLowerCase();
+  const password = body.password;
+  const name = (body.name || body.display_name || '').trim();
+  const phone = body.phone?.trim() || null;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length < 8 || name.length < 2) {
+    return NextResponse.json({ success: false, error: 'Enter a valid email, name, and password of at least 8 characters.' }, { status: 400 });
+  }
+  if (body.role && body.role !== 'customer') {
+    return NextResponse.json({ success: false, error: 'Provider applications must use the partner onboarding flow. Admin accounts cannot self-register.' }, { status: 403 });
+  }
+
+  const admin = getAdminClient();
+  if (!admin) return NextResponse.json({ success: false, error: 'Registration is unavailable until server-side Supabase credentials are configured.' }, { status: 503 });
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: name, phone } },
+    });
+    if (error || !data.user) {
+      return NextResponse.json({ success: false, error: error?.message || 'Account could not be created.' }, { status: 400 });
+    }
+    if ((data.user.identities ?? []).length === 0) {
+      return NextResponse.json({ success: false, error: 'An account with this email may already exist. Please sign in or recover access.' }, { status: 409 });
     }
 
-    if (password.length < 6) {
-      return NextResponse.json(
-        { success: false, error: 'Password must be at least 6 characters long.' },
-        { status: 400 }
-      );
+    const { error: profileError } = await admin.from('profiles').insert({ id: data.user.id, display_name: name, phone_e164: phone });
+    const { data: existingRole, error: existingRoleError } = await admin.from('user_roles')
+      .select('id,revoked_at').eq('user_id', data.user.id).eq('role', 'customer').maybeSingle();
+    const roleResult = existingRoleError
+      ? { error: existingRoleError }
+      : existingRole
+        ? existingRole.revoked_at
+          ? await admin.from('user_roles').update({ revoked_at: null }).eq('id', existingRole.id)
+          : { error: null }
+        : await admin.from('user_roles').insert({ user_id: data.user.id, role: 'customer' });
+    if (profileError || roleResult.error) {
+      console.error('Account provisioning failed', { profileError: profileError?.message, roleError: roleResult.error?.message });
+      return NextResponse.json({ success: false, error: 'Account was created but profile setup failed. Contact support before retrying.' }, { status: 503 });
     }
-
-    // Security check: Prevent public self-registration of administrative privileges
-    if (requestedRole === 'admin') {
-      return NextResponse.json(
-        { success: false, error: 'Forbidden: Administrator accounts cannot be self-registered.' },
-        { status: 403 }
-      );
-    }
-
-    const role = requestedRole === 'provider' ? 'provider' : 'customer';
-    const userId = `usr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-    let providerData = null;
-    let providerIdVal: string | undefined = undefined;
-
-    if (role === 'provider') {
-      const providerId = `prov-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`;
-      providerIdVal = providerId;
-      const businessName = body.business_name || body.display_name || `${name} Mess`;
-      const slug = businessName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-      providerData = {
-        id: providerId,
-        owner_user_id: userId,
-        display_name: businessName,
-        slug,
-        description: body.description || 'Authentic daily meals and tiffin service.',
-        phone: phone || '+91 98765 43210',
-        email,
-        address: body.address || 'Main Campus Road',
-        locality: body.locality || 'Campus Area',
-        city: body.city || 'Noida',
-        rating: 5.0,
-        total_reviews: 0,
-        cuisines: body.cuisines || ['North Indian', 'Homestyle'],
-        dietary_types: body.dietary_types || ['veg'],
-        status: 'pending_review' as const,
-        created_at: new Date().toISOString(),
-      };
-      platformStore.providers.set(providerId, providerData);
-
-      // Persist to Supabase GoTrue Auth and Providers table if admin client available
-      try {
-        const admin = getAdminClient();
-        if (admin) {
-          await admin.auth.admin.createUser({
-            email,
-            password,
-            email_confirm: true,
-            user_metadata: {
-              role: 'provider',
-              display_name: businessName,
-              phone,
-              application: {
-                id: providerId,
-                display_name: businessName,
-                public_phone: phone,
-                email,
-                status: 'pending_review',
-                created_at: new Date().toISOString(),
-              },
-            },
-          });
-        }
-      } catch (err) {
-        console.warn('Supabase provider registration note:', err);
-      }
-    } else {
-      // Customer registration in Supabase
-      try {
-        const admin = getAdminClient();
-        if (admin) {
-          await admin.auth.admin.createUser({
-            email,
-            password,
-            email_confirm: true,
-            user_metadata: {
-              role: 'customer',
-              display_name: name,
-              phone,
-            },
-          });
-        }
-      } catch (err) {
-        console.warn('Supabase customer registration note:', err);
-      }
-    }
-
-    const token = `jwt_session_${Buffer.from(
-      JSON.stringify({
-        userId,
-        email,
-        role,
-        providerId: providerIdVal,
-        provider_id: providerIdVal,
-      })
-    ).toString('base64url')}`;
 
     return NextResponse.json({
       success: true,
-      user: {
-        id: userId,
-        email,
-        name,
-        role,
-        phone,
-        provider_id: providerData?.id,
-        provider_name: providerData?.display_name,
-      },
-      provider: providerData,
-      token,
-      message: `Registration successful as ${role}.`,
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      { success: false, error: err.message || 'Registration failed' },
-      { status: 500 }
-    );
+      user: { id: data.user.id, email: data.user.email, name, role: 'customer', phone },
+      session_created: Boolean(data.session),
+      message: data.session ? 'Registration successful.' : 'Check your email to confirm your account before signing in.',
+    }, { status: 201 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Registration is unavailable.';
+    return NextResponse.json({ success: false, error: message }, { status: 503 });
   }
 }

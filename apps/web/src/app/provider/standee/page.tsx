@@ -8,16 +8,17 @@ import Link from 'next/link';
 
 function CounterStandeeContent() {
   const searchParams = useSearchParams();
-  const providerId = searchParams.get('provider_id') || 'prov-radhe-001';
+  const providerId = searchParams.get('provider_id') || '';
 
-  const [providerName, setProviderName] = useState('Mess Partner');
-  const [providerAddress, setProviderAddress] = useState('Campus Area');
+  const [providerName, setProviderName] = useState('');
+  const [providerAddress, setProviderAddress] = useState('');
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
-  const joinUrl = `https://mess-beta.vercel.app/join/${providerId}`;
+  const joinUrl = providerId && typeof window !== 'undefined' ? `${window.location.origin}/join/${providerId}` : '';
 
   useEffect(() => {
+    if (!joinUrl || !providerName) return;
     QRCode.toDataURL(joinUrl, {
       width: 320,
       margin: 1,
@@ -28,16 +29,17 @@ function CounterStandeeContent() {
     })
       .then(setQrDataUrl)
       .catch(() => {});
-  }, [joinUrl]);
+  }, [joinUrl, providerName]);
 
   useEffect(() => {
     async function loadProvider() {
+      if (!providerId) return;
       try {
-        const res = await fetch(`/api/provider/dashboard?provider_id=${providerId}`).then((r) => r.json());
-        if (res?.provider) {
-          setProviderName(res.provider.display_name || 'Mess Partner');
-          setProviderAddress(res.provider.address || res.provider.city || 'Campus Location');
-        }
+        const res = await fetch('/api/providers').then((r) => r.json());
+        const provider = res?.providers?.find((item: { id: string }) => item.id === providerId);
+        if (!provider) return;
+        setProviderName(provider.display_name || '');
+        setProviderAddress([provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '));
       } catch {}
     }
     void loadProvider();
@@ -57,10 +59,12 @@ function CounterStandeeContent() {
           <button
             type="button"
             onClick={() => {
+              if (!joinUrl || !providerName) return;
               void navigator.clipboard.writeText(joinUrl);
               setCopied(true);
               setTimeout(() => setCopied(false), 2000);
             }}
+            disabled={!joinUrl || !providerName}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
           >
             <Copy size={13} /> {copied ? 'Copied Link!' : 'Copy Link'}
@@ -68,6 +72,7 @@ function CounterStandeeContent() {
           <button
             type="button"
             onClick={() => window.print()}
+            disabled={!providerName}
             className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-700 transition"
           >
             <Printer size={14} /> Print Standee
@@ -78,12 +83,10 @@ function CounterStandeeContent() {
       {/* PRINTABLE STANDEE CARD */}
       <div className="w-full max-w-sm rounded-3xl border-4 border-slate-900 bg-white p-7 shadow-xl text-center print:border-2 print:shadow-none print:m-0 print:p-8">
         <div className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[11px] font-bold text-emerald-800 uppercase tracking-wider">
-          <ShieldCheck size={14} /> Verified Meal Partner
+          <ShieldCheck size={14} /> {providerName ? 'Active Meal Partner' : 'Provider not loaded'}
         </div>
 
-        <h1 className="mt-3 text-2xl font-black text-slate-950 uppercase tracking-tight">
-          {providerName}
-        </h1>
+        <h1 className="mt-3 text-2xl font-black text-slate-950 uppercase tracking-tight">{providerName || 'Provider standee unavailable'}</h1>
         <p className="mt-0.5 text-xs font-medium text-slate-600">{providerAddress}</p>
 
         {/* QR BOX */}
@@ -100,10 +103,10 @@ function CounterStandeeContent() {
 
         <div className="mt-5 rounded-2xl bg-amber-500/10 border border-amber-300 p-3 text-center">
           <p className="text-xs font-black uppercase tracking-wider text-amber-950">
-            Scan To Subscribe &amp; Get Meal Pass
+            Provider information
           </p>
           <p className="mt-0.5 text-[11px] text-amber-900">
-            Works with any Mobile Camera, GPay, PhonePe or Paytm
+            Online plan purchase is not currently available.
           </p>
         </div>
 
@@ -111,20 +114,20 @@ function CounterStandeeContent() {
         <div className="mt-5 grid grid-cols-3 gap-2 text-left border-t border-slate-100 pt-4 text-[10px] text-slate-600">
           <div>
             <span className="font-bold text-slate-900 block text-xs">1. Scan</span>
-            Open camera &amp; scan this standee QR
+            Scan to view provider details
           </div>
           <div>
             <span className="font-bold text-slate-900 block text-xs">2. Select</span>
-            Pick your monthly or flexi meal plan
+            Plan checkout is being connected
           </div>
           <div>
             <span className="font-bold text-slate-900 block text-xs">3. Eat</span>
-            Instant digital meal pass on your phone
+            No meal pass is issued yet
           </div>
         </div>
 
         <div className="mt-6 text-[10px] text-slate-400 font-mono">
-          Powered by Thali · mess-beta.vercel.app
+          Powered by Thali
         </div>
       </div>
     </main>

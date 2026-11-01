@@ -1,66 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, SubscriptionData, validateAndApplyPromo } from '@/lib/platform-service';
-import crypto from 'crypto';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const customerId = body.customer_id || body.userId || 'cust-ritik-001';
-    const providerId = body.provider_id || 'prov-radhe-001';
-    const planId = body.plan_id;
-    const planType = body.plan_type || 'meal_credits';
-    const durationDays = body.duration_days || (planType === 'fixed_period' ? 30 : 60);
-    const mealCredits = body.meal_credits !== undefined ? body.meal_credits : (planType === 'meal_credits' ? 60 : null);
-    let pricePaise = body.price_paise || (planType === 'fixed_period' ? 280000 : 480000);
-    const promoCode = body.promo_code;
-    let discountPaise = 0;
-
-    if (promoCode) {
-      const promoResult = validateAndApplyPromo({
-        code: promoCode,
-        orderAmountPaise: pricePaise,
-      });
-      if (promoResult.isValid) {
-        discountPaise = promoResult.discountPaise;
-        pricePaise = promoResult.finalAmountPaise;
-      }
-    }
-
-    const paymentId = body.payment_id || `pay_${crypto.randomBytes(6).toString('hex')}`;
-    const plan = planId ? platformStore.plans.get(planId) : null;
-    const planName = plan ? plan.name : (planType === 'fixed_period' ? 'Fixed-Period Plan' : 'Meal-Tracker Plan');
-
-    const subId = `sub-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-    const newSub: SubscriptionData = {
-      id: subId,
-      customer_id: customerId,
-      provider_id: providerId,
-      plan_id: planId || 'plan-custom',
-      plan_type: planType,
-      plan_name: planName,
-      status: 'active',
-      starts_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString(),
-      remaining_meal_credits: mealCredits,
-      initial_meal_credits: mealCredits,
-      price_paid_paise: pricePaise,
-      razorpay_payment_id: paymentId,
-      created_at: new Date().toISOString(),
-    };
-
-    platformStore.subscriptions.set(subId, newSub);
-
-    return NextResponse.json({
-      success: true,
-      subscription: newSub,
-      discount_applied: discountPaise > 0 ? discountPaise / 100 : 0,
-      final_price_inr: pricePaise / 100,
-      message: `Successfully subscribed to ${planName}!${discountPaise > 0 ? ` (Saved ₹${discountPaise / 100} with ${promoCode})` : ''}`,
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      { success: false, error: err.message || 'Failed to create subscription' },
-      { status: 500 }
-    );
-  }
+/** No entitlement may be created until a verified payment order + webhook flow is configured. */
+export async function POST() {
+  return NextResponse.json({
+    success: false,
+    code: 'payments_not_configured',
+    error: 'Online purchases are temporarily unavailable. No subscription or payment was created.',
+  }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
 }

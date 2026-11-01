@@ -1,157 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const q = (searchParams.get('q') || '').toLowerCase().trim();
-  const city = searchParams.get('city');
-  const cuisine = searchParams.get('cuisine')?.toLowerCase();
-  const dietary = searchParams.get('dietary')?.toLowerCase();
-  const sortBy = searchParams.get('sort') || 'rating'; // 'rating' | 'distance' | 'popular'
+  const params = new URL(req.url).searchParams;
+  const query = params.get('q')?.trim().slice(0, 100) || '';
+  const city = params.get('city')?.trim().slice(0, 100) || '';
+  const cuisine = params.get('cuisine')?.trim();
+  const dietary = params.get('dietary')?.trim().toLowerCase();
+  if (cuisine) return NextResponse.json({ success: false, error: 'Cuisine filtering is not supported by the current verified database schema.' }, { status: 422 });
 
-  // 1. Fetch active providers across persistent storage
   try {
-    const admin = getAdminClient();
-    if (admin) {
-      // From Auth metadata
-      try {
-        const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 100 });
-        if (usersData?.users) {
-          for (const u of usersData.users) {
-            const meta = u.user_metadata || {};
-            if (meta.role === 'provider' && meta.application && meta.application.status === 'active') {
-              const app = meta.application;
-              const pId = app.id || u.id;
-              if (!platformStore.providers.has(pId)) {
-                platformStore.providers.set(pId, {
-                  id: pId,
-                  owner_user_id: u.id,
-                  display_name: app.display_name || 'Mess Partner',
-                  slug: app.slug || `mess-${pId.slice(0, 6)}`,
-                  description: app.description || 'Authentic homestyle daily meals.',
-                  phone: app.public_phone || meta.phone || '',
-                  email: u.email || `${pId}@thali.mess`,
-                  address: `${app.address_line1}, ${app.locality ? app.locality + ', ' : ''}${app.city}`,
-                  locality: app.locality || app.city,
-                  city: app.city,
-                  rating: 5.0,
-                  total_reviews: 0,
-                  cuisines: ['North Indian', 'Homestyle'],
-                  dietary_types: ['veg'],
-                  distance_km: 1.0,
-                  status: 'active',
-                  created_at: app.created_at || u.created_at,
-                });
-              }
-            }
-          }
-        }
-      } catch {}
-
-      // From PostgreSQL providers table
-      try {
-        const { data: dbProviders } = await admin
-          .from('providers')
-          .select('id,owner_user_id,display_name,slug,description,public_phone,public_email,address_line1,locality,city,state,pincode,status,created_at')
-          .eq('status', 'active');
-
-        if (dbProviders && dbProviders.length > 0) {
-          for (const dbP of dbProviders) {
-            if (!platformStore.providers.has(dbP.id)) {
-              platformStore.providers.set(dbP.id, {
-                id: dbP.id,
-                owner_user_id: dbP.owner_user_id,
-                display_name: dbP.display_name,
-                slug: dbP.slug,
-                description: dbP.description || 'Authentic homestyle daily meals.',
-                phone: dbP.public_phone,
-                email: dbP.public_email || `${dbP.slug}@thali.mess`,
-                address: `${dbP.address_line1}, ${dbP.locality ? dbP.locality + ', ' : ''}${dbP.city}`,
-                locality: dbP.locality || dbP.city,
-                city: dbP.city,
-                rating: 5.0,
-                total_reviews: 0,
-                cuisines: ['North Indian', 'Homestyle'],
-                dietary_types: ['veg'],
-                distance_km: 1.0,
-                status: 'active',
-                created_at: dbP.created_at,
-              });
-            }
-          }
-        }
-      } catch {}
-    }
-  } catch (err) {
-    console.warn('Failed to query active providers for search:', err);
-  }
-
-  let results = Array.from(platformStore.providers.values()).filter(
-    (p) => p.status === 'active'
-  );
-
-  if (city) {
-    results = results.filter((p) => p.city.toLowerCase() === city.toLowerCase());
-  }
-
-  if (dietary) {
-    results = results.filter((p) =>
-      p.dietary_types.some((d) => d.toLowerCase() === dietary)
-    );
-  }
-
-  if (cuisine) {
-    results = results.filter((p) =>
-      p.cuisines.some((c) => c.toLowerCase().includes(cuisine))
-    );
-  }
-
-  if (q) {
-    results = results.filter((p) => {
-      const matchName = p.display_name.toLowerCase().includes(q);
-      const matchLocality = p.locality.toLowerCase().includes(q);
-      const matchDesc = p.description.toLowerCase().includes(q);
-      const matchCuisine = p.cuisines.some((c) => c.toLowerCase().includes(q));
-
-      const menus = Array.from(platformStore.menus.values()).filter((m) => m.provider_id === p.id);
-      const matchMenu = menus.some((m) =>
-        m.items_included.some((item) => item.toLowerCase().includes(q)) ||
-        m.items_extra.some((extra) => extra.name.toLowerCase().includes(q))
-      );
-
-      return matchName || matchLocality || matchDesc || matchCuisine || matchMenu;
+    const supabase = await createClient();
+    let providersQuery = supabase.from('providers')
+      .select('id,display_name,slug,description,public_phone,public_email,address_line1,locality,city,state,pincode,latitude,longitude,status,created_at')
+      .eq('status', 'active').order('display_name').limit(500);
+    if (city) providersQuery = providersQuery.ilike('city', city.replace(/[\\%_]/g, '\\$&'));
+    const [{ data: providers, error: providersError }, { data: menuMatches, error: menuError }] = await Promise.all([
+      providersQuery,
+      query ? supabase.from('menu_items').select('provider_id,name,dietary_type').eq('active', true).ilike('name', `%${query.replace(/[\\%_]/g, '\\$&')}%`).limit(1000) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (providersError || menuError) throw providersError || menuError;
+    const matchingMenuIds = new Set((menuMatches ?? []).map((item) => item.provider_id));
+    let filtered = (providers ?? []).filter((provider) => {
+      if (!query) return true;
+      const text = `${provider.display_name} ${provider.description || ''} ${provider.locality} ${provider.city} ${provider.state}`.toLowerCase();
+      return text.includes(query.toLowerCase()) || matchingMenuIds.has(provider.id);
     });
-  }
 
-  // Sorting
-  if (sortBy === 'distance') {
-    results.sort((a, b) => (a.distance_km ?? 99) - (b.distance_km ?? 99));
-  } else if (sortBy === 'popular') {
-    results.sort((a, b) => b.total_reviews - a.total_reviews);
-  } else {
-    results.sort((a, b) => b.rating - a.rating);
-  }
+    if (dietary) {
+      const accepted = dietary === 'veg' ? ['vegetarian', 'vegan'] : dietary === 'non_veg' ? ['non_vegetarian'] : dietary === 'jain' ? ['jain'] : [dietary];
+      const { data: dietaryItems, error } = await supabase.from('menu_items').select('provider_id')
+        .eq('active', true).in('dietary_type', accepted).limit(1000);
+      if (error) throw error;
+      const providerIds = new Set((dietaryItems ?? []).map((item) => item.provider_id));
+      filtered = filtered.filter((provider) => providerIds.has(provider.id));
+    }
 
-  const enriched = results.map((provider) => {
-    const plans = Array.from(platformStore.plans.values()).filter((plan) => plan.provider_id === provider.id && plan.is_active);
-    const menus = Array.from(platformStore.menus.values()).filter((menu) => menu.provider_id === provider.id);
-    const reviews = Array.from(platformStore.reviews.values()).filter((r) => r.provider_id === provider.id);
-    const timings = platformStore.timings.get(provider.id) || null;
-    return {
+    const ids = filtered.map((provider) => provider.id);
+    const [{ data: plans, error: plansError }, { data: slots, error: slotsError }] = ids.length ? await Promise.all([
+      supabase.from('subscription_plans').select('id,provider_id,name,description,plan_type,duration_months,meal_credits,price_paise,currency,promo_price_paise,daily_meal_limit,published,active').in('provider_id', ids).eq('published', true).eq('active', true),
+      supabase.from('meal_slots').select('id,provider_id,name,starts_at_local,ends_at_local,active').in('provider_id', ids).eq('active', true),
+    ]) : [{ data: [], error: null }, { data: [], error: null }];
+    if (plansError || slotsError) throw plansError || slotsError;
+
+    const results = filtered.map((provider) => ({
       ...provider,
-      plans,
-      menus,
-      reviews_preview: reviews.slice(0, 3),
-      timings,
-    };
-  });
+      rating: null,
+      total_reviews: null,
+      cuisines: [],
+      dietary_types: [...new Set((menuMatches ?? []).filter((item) => item.provider_id === provider.id).map((item) => item.dietary_type))],
+      distance_km: null,
+      plans: (plans ?? []).filter((plan) => plan.provider_id === provider.id),
+      meal_slots: (slots ?? []).filter((slot) => slot.provider_id === provider.id),
+    }));
 
-  return NextResponse.json({
-    success: true,
-    total: enriched.length,
-    providers: enriched,
-  });
+    return NextResponse.json({ success: true, total: results.length, providers: results }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    console.error('Provider search failed:', error instanceof Error ? error.message : 'unknown error');
+    return NextResponse.json({ success: false, error: 'Search is temporarily unavailable. Please retry.' }, { status: 503 });
+  }
 }

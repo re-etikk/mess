@@ -1,88 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, getCurrentMealSlot, generateProviderDailyQR } from '@/lib/platform-service';
-import { getIndiaDateString } from '@/lib/crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { requireProviderOwnership } from '@/lib/provider-auth';
+import { generateCounterQRToken, getIndiaDateString } from '@/lib/crypto';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const providerId = searchParams.get('provider_id');
+  const providerId = new URL(req.url).searchParams.get('provider_id') || '';
+  const access = await requireProviderOwnership(req, providerId);
+  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  const db = getAdminClient();
+  if (!db) return NextResponse.json({ success: false, error: 'Provider data service is not configured.' }, { status: 503 });
 
-  if (!providerId) {
-    return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+  const [{ data: provider, error: providerError }, { data: slots, error: slotsError }, subs, plans, scans] = await Promise.all([
+    db.from('providers').select('id,display_name,status,timezone').eq('id', providerId).maybeSingle(),
+    db.from('meal_slots').select('id,name,starts_at_local,ends_at_local').eq('provider_id', providerId).eq('active', true),
+    db.from('subscriptions').select('id', { count: 'exact', head: true }).eq('provider_id', providerId).eq('status', 'active'),
+    db.from('subscription_plans').select('id', { count: 'exact', head: true }).eq('provider_id', providerId).eq('active', true),
+    db.from('meal_redemptions').select('id,redeemed_at,customer_id,subscription_id,confirmation_method,profiles(display_name),meal_bookings!inner(service_date,meal_slots(name))', { count: 'exact' }).eq('provider_id', providerId).order('redeemed_at', { ascending: false }).limit(15),
+  ]);
+  if (providerError || slotsError || subs.error || plans.error || scans.error) {
+    const issue = providerError || slotsError || subs.error || plans.error || scans.error;
+    console.error('Provider dashboard query failed:', issue?.message);
+    return NextResponse.json({ success: false, error: 'Provider dashboard data could not be loaded.' }, { status: 503 });
   }
+  if (!provider) return NextResponse.json({ success: false, error: 'Provider not found.' }, { status: 404 });
 
-  let provider = platformStore.providers.get(providerId);
+  const now = new Date();
+  const localTime = new Intl.DateTimeFormat('en-GB', { timeZone: provider.timezone || 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+  const current = (slots ?? []).find((slot) => slot.starts_at_local <= localTime && slot.ends_at_local >= localTime);
+  const today = getIndiaDateString(now);
+  const todayStart = new Date(`${today}T00:00:00+05:30`).toISOString();
+  const tomorrow = new Date(new Date(todayStart).getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const { count: todayCount, error: todayError } = await db.from('meal_redemptions')
+    .select('id', { count: 'exact', head: true }).eq('provider_id', providerId).gte('redeemed_at', todayStart).lt('redeemed_at', tomorrow);
+  if (todayError) return NextResponse.json({ success: false, error: 'Today’s attendance could not be loaded.' }, { status: 503 });
 
-  // If not found in memory, query Supabase database
-  if (!provider) {
-    try {
-      const admin = getAdminClient();
-      if (admin) {
-        const { data: dbP } = await admin.from('providers').select('*').eq('id', providerId).maybeSingle();
-        if (dbP) {
-          provider = {
-            id: dbP.id,
-            owner_user_id: dbP.owner_user_id,
-            display_name: dbP.display_name,
-            slug: dbP.slug,
-            description: dbP.description || 'Homestyle daily meals.',
-            phone: dbP.public_phone,
-            email: dbP.public_email || `${dbP.slug}@thali.mess`,
-            address: `${dbP.address_line1}, ${dbP.locality ? dbP.locality + ', ' : ''}${dbP.city}`,
-            locality: dbP.locality || dbP.city,
-            city: dbP.city,
-            rating: 5.0,
-            total_reviews: 0,
-            cuisines: ['North Indian', 'Homestyle'],
-            dietary_types: ['veg'],
-            status: dbP.status,
-            created_at: dbP.created_at,
-          };
-          platformStore.providers.set(provider.id, provider);
-        }
-      }
-    } catch (err) {
-      console.warn('Dashboard provider fetch note:', err);
-    }
-  }
-
-  const currentSlot = getCurrentMealSlot();
-  const today = getIndiaDateString();
-
-  const scanStats = platformStore.providerScanCounts.get(providerId) || { total: 0, unbilled: 0 };
-
-  const todayRedemptions = Array.from(platformStore.redemptions.values()).filter(
-    (r) => r.provider_id === providerId && r.date === today
-  );
-
-  const activePlans = Array.from(platformStore.plans.values()).filter(
-    (p) => p.provider_id === providerId && p.is_active
-  );
-
-  const activeSubscribers = Array.from(platformStore.subscriptions.values()).filter(
-    (s) => s.provider_id === providerId && s.status === 'active'
-  );
-
-  const qrData = generateProviderDailyQR({
-    providerId,
-    slot: currentSlot,
-  });
-
+  const qrToken = provider.status === 'active' && current ? generateCounterQRToken({ providerId, date: today, slot: current.name }) : null;
+  const recent = (scans.data ?? []).map((row: any) => ({
+    id: row.id,
+    user_id: row.customer_id,
+    customer_name: Array.isArray(row.profiles) ? row.profiles[0]?.display_name || '' : row.profiles?.display_name || '',
+    subscription_id: row.subscription_id,
+    slot: row.meal_bookings?.meal_slots?.name || '',
+    date: row.meal_bookings?.service_date,
+    redeemed_at: row.redeemed_at,
+    confirmation_method: row.confirmation_method,
+  }));
   return NextResponse.json({
     success: true,
-    provider: provider || null,
+    provider: { id: provider.id, display_name: provider.display_name, status: provider.status },
     today_date: today,
-    current_slot: currentSlot,
-    qr_token: qrData.token,
+    current_slot: current?.name || null,
+    qr_token: qrToken,
     metrics: {
-      today_scans_count: todayRedemptions.length,
-      total_scans: scanStats.total,
-      unbilled_scans: scanStats.unbilled,
-      active_subscribers: activeSubscribers.length,
-      active_plans_count: activePlans.length,
+      today_scans_count: todayCount ?? 0,
+      total_scans: scans.count ?? 0,
+      active_subscribers: subs.count ?? 0,
+      active_plans_count: plans.count ?? 0,
     },
-    today_redemptions: todayRedemptions.slice(0, 15),
-  });
+    today_redemptions: recent.filter((item) => item.date === today),
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

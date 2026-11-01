@@ -1,17 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
+import { NextResponse } from 'next/server';
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const providerId = searchParams.get('provider_id');
-
-  let list = Array.from(platformStore.announcements.values()).filter((a) => a.is_active);
-  if (providerId) {
-    list = list.filter((a) => !a.provider_id || a.provider_id === providerId);
-  }
-
-  return NextResponse.json({
-    success: true,
-    announcements: list,
-  });
+/** No announcements table exists in the verified live schema. */
+export async function GET() {
+  return NextResponse.json({ success: false, error: 'Announcements are unavailable because this feature has no persisted backend table yet.' }, { status: 503 });
 }

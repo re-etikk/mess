@@ -6,7 +6,6 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { APP_CONFIG } from '@/lib/config';
 import { ArrowRight } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -22,18 +21,18 @@ export default function RegisterPage() {
     setError('');
     setMessage('');
     try {
-      const supabase = createClient();
-      const { data, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: name, phone } },
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name, phone, role: 'customer' }),
       });
-      if (authError) throw authError;
-      if (data.session) {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Registration failed. Please try again.');
+      if (result.session_created) {
         router.replace('/customer/dashboard');
         router.refresh();
       } else {
-        setMessage('Check your email to confirm your account before signing in.');
+        setMessage(result.message || 'Check your email to confirm your account before signing in.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
@@ -115,7 +114,7 @@ export default function RegisterPage() {
             type="submit"
             className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-md shadow-sm transition-colors flex items-center justify-center space-x-1.5"
           >
-            <span>Complete Registration</span>
+            <span>Create Customer Account</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

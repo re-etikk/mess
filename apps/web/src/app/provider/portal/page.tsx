@@ -52,15 +52,15 @@ export default function ProviderPortal() {
     businessName: string;
     email: string;
     phone: string;
+    status: string;
   } | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
 
   // Form State for 5-Step Wizard - NO FAKE / PRE-FILLED DEFAULTS
   const [businessName, setBusinessName] = useState('');
-  const [ownerName, setOwnerName] = useState('');
   const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [cuisine, setCuisine] = useState('');
+  const [description, setDescription] = useState('');
 
   // Step 2: Location
   const [address, setAddress] = useState('');
@@ -71,8 +71,8 @@ export default function ProviderPortal() {
 
   // Step 3: Timings
   const [bfTime, setBfTime] = useState('');
-  const [lunchTime, setLunchTime] = useState('12:00 PM - 03:30 PM');
-  const [dinnerTime, setDinnerTime] = useState('07:30 PM - 10:30 PM');
+  const [lunchTime, setLunchTime] = useState('');
+  const [dinnerTime, setDinnerTime] = useState('');
 
   // Step 4: Real Custom Menu (starts completely EMPTY - user must add real dishes)
   const [dishes, setDishes] = useState<MenuDish[]>([]);
@@ -84,10 +84,10 @@ export default function ProviderPortal() {
   // Step 5: Real Custom Plans (starts completely EMPTY - user must configure their real prices)
   const [plans, setPlans] = useState<CustomPlan[]>([]);
   const [newPlanName, setNewPlanName] = useState('');
-  const [newPlanDays, setNewPlanDays] = useState('30');
+  const [newPlanDays, setNewPlanDays] = useState('');
   const [newPlanPrice, setNewPlanPrice] = useState('');
   const [newPlanType, setNewPlanType] = useState<'fixed_period' | 'meal_credits'>('fixed_period');
-  const [newPlanCredits, setNewPlanCredits] = useState('60');
+  const [newPlanCredits, setNewPlanCredits] = useState('');
   const [newPlanDiscount, setNewPlanDiscount] = useState('');
   const [agreedTerms, setAgreedTerms] = useState(false);
 
@@ -96,11 +96,7 @@ export default function ProviderPortal() {
     const cleanPhone = phone.replace(/\D/g, '');
     return (
       businessName.trim().length >= 3 &&
-      ownerName.trim().length >= 3 &&
-      cleanPhone.length === 10 &&
-      email.trim().includes('@') &&
-      email.trim().includes('.') &&
-      password.trim().length >= 6
+      cleanPhone.length === 10
     );
   }
 
@@ -134,7 +130,7 @@ export default function ProviderPortal() {
       return;
     }
     if (targetStep >= 2 && !isStep1Valid()) {
-      setError('Please complete Step 1 (Basics) with business name, owner name, 10-digit phone, email, and password (min 6 chars) before moving forward.');
+      setError('Please complete Step 1 with your business name and verified contact phone.');
       return;
     }
     if (targetStep >= 3 && !isStep2Valid()) {
@@ -192,13 +188,13 @@ export default function ProviderPortal() {
   const [counterOrders, setCounterOrders] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [selectedSubHistory, setSelectedSubHistory] = useState<any | null>(null);
-  const [isOpenToday, setIsOpenToday] = useState(true);
+  const [isOpenToday, setIsOpenToday] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
 
   // New counter sale modal state
-  const [orderCustomer, setOrderCustomer] = useState('Walk-in Student');
-  const [orderItems, setOrderItems] = useState('1x Regular Thali');
-  const [orderAmount, setOrderAmount] = useState('80');
+  const [orderCustomer, setOrderCustomer] = useState('');
+  const [orderItems, setOrderItems] = useState('');
+  const [orderAmount, setOrderAmount] = useState('');
   const [orderMode, setOrderMode] = useState('cash');
 
   // Support ticket state
@@ -211,18 +207,27 @@ export default function ProviderPortal() {
   const [error, setError] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
 
-  // Check saved session on mount
+  // Resolve the signed Supabase session and provider membership; never trust browser storage for authorization.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('mess_provider_web_session');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.providerId) {
-          setSession(parsed);
-          loadPortalData(parsed.providerId);
+    fetch('/api/provider/session', { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Sign in required.');
+        setAuthenticated(true);
+        if (result.provider) {
+          const providerSession = {
+            providerId: result.provider.id,
+            businessName: result.provider.name,
+            email: result.provider.email,
+            phone: result.provider.phone,
+            status: result.provider.status,
+          };
+          setSession(providerSession);
+          if (providerSession.status === 'active') loadPortalData(providerSession.providerId);
         }
-      }
-    } catch {}
+      })
+      .catch(() => setAuthenticated(false))
+      .finally(() => setSessionChecked(true));
   }, []);
 
   async function loadPortalData(providerId: string) {
@@ -283,6 +288,10 @@ export default function ProviderPortal() {
 
   async function handleOnboardingSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!authenticated) {
+      setError('Sign in to your Thali account before submitting a partner application.');
+      return;
+    }
     if (!agreedTerms) {
       setError('Please agree to the platform provider terms to continue.');
       return;
@@ -296,9 +305,7 @@ export default function ProviderPortal() {
         body: JSON.stringify({
           display_name: businessName,
           phone,
-          email,
-          password: password || 'ProviderPass@2026',
-          description: `${cuisine}. Serving timings: Lunch (${lunchTime}), Dinner (${dinnerTime}).`,
+          description,
           address_line1: address,
           locality: locality || city,
           city,
@@ -309,54 +316,18 @@ export default function ProviderPortal() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to submit application.');
+      const providerId = data.application?.provider_id || data.application?.id;
+      if (!providerId) throw new Error('The application was not saved with a provider ID. Please retry.');
 
       const newSession = {
-        providerId: data.application?.id || 'prov-new',
+        providerId,
         businessName,
-        email,
+        email: data.user?.email || '',
         phone,
+        status: 'pending_review',
       };
       setSession(newSession);
-      try {
-        localStorage.setItem('mess_provider_web_session', JSON.stringify(newSession));
-      } catch {}
-
-      // Save initial custom menu dishes
-      for (const d of dishes) {
-        await fetch('/api/provider/menu', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider_id: newSession.providerId,
-            action: 'add_item',
-            item_name: d.name,
-            slot: d.slot,
-            price: d.price,
-            is_extra: d.isExtra,
-          }),
-        }).catch(() => null);
-      }
-
-      // Save initial custom plans
-      for (const p of plans) {
-        await fetch('/api/provider/plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider_id: newSession.providerId,
-            name: p.name,
-            description: `${p.days} Days mess pass with verified attendance.`,
-            plan_type: p.type,
-            duration_days: p.days,
-            price_inr: p.price,
-            meal_credits: p.credits,
-            discount_percent: p.discount,
-          }),
-        }).catch(() => null);
-      }
-
-      setSuccessNotice('Your kitchen has been registered successfully! You can now manage your menu, plans, QR and subscribers.');
-      loadPortalData(newSession.providerId);
+      setSuccessNotice('Your application was submitted to Thali for review. Partner tools become available after approval.');
     } catch (err: any) {
       setError(err.message || 'Registration failed.');
     } finally {
@@ -386,24 +357,27 @@ export default function ProviderPortal() {
   async function recordCounterOrder() {
     if (!session) return;
     try {
-      const amt = Number(orderAmount) || 80;
-      await fetch('/api/provider/orders', {
+      const response = await fetch('/api/provider/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider_id: session.providerId,
-          customer_name: orderCustomer.trim() || 'Walk-in Student',
-          items_summary: orderItems.trim() || '1x Thali',
-          total_amount_inr: amt,
+          customer_name: orderCustomer.trim(),
+          items_summary: orderItems.trim(),
+          total_amount_inr: Number(orderAmount),
           payment_mode: orderMode,
         }),
       });
-      loadPortalData(session.providerId);
-      setOrderCustomer('Walk-in Student');
-      setOrderItems('1x Regular Thali');
-      setOrderAmount('80');
-      alert(`Recorded order: ₹${amt} via ${orderMode.toUpperCase()}`);
-    } catch {}
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not save the order.');
+      await loadPortalData(session.providerId);
+      setOrderCustomer('');
+      setOrderItems('');
+      setOrderAmount('');
+      alert(result.message || 'Order saved.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not save the order.');
+    }
   }
 
   async function submitSupportDesk() {
@@ -439,13 +413,18 @@ export default function ProviderPortal() {
     } catch {}
   }
 
-  const joinLink = session ? `https://mess-beta.vercel.app/join/${session.providerId}` : '';
-  const standeeLink = session ? `https://mess-beta.vercel.app/provider/standee?provider_id=${session.providerId}` : '';
+  const siteBase = process.env.NEXT_PUBLIC_SITE_URL || (typeof window !== 'undefined' ? window.location.origin : 'https://mess.store');
+  const joinLink = session ? `${siteBase}/join/${session.providerId}` : '';
+  const standeeLink = session ? `${siteBase}/provider/standee?provider_id=${session.providerId}` : '';
 
   // ------------------------------------------------------------------------------------------------
   // RENDER PORTAL (IF LOGGED IN)
   // ------------------------------------------------------------------------------------------------
+  if (!sessionChecked) return <main className="mx-auto min-h-[60vh] max-w-3xl px-4 py-16"><p role="status" className="text-sm text-slate-600">Checking your signed-in partner account…</p></main>;
   if (session) {
+    if (session.status !== 'active') {
+      return <main className="mx-auto min-h-[70vh] max-w-3xl px-4 py-16"><section className="rounded-2xl border border-amber-200 bg-white p-7 shadow-sm"><p className="text-xs font-bold uppercase tracking-widest text-amber-800">Partner application</p><h1 className="mt-2 text-2xl font-black text-slate-950">{session.businessName}</h1><p className="mt-3 text-sm text-slate-700">Your application status: <strong>{session.status.replace('_', ' ')}</strong>.</p><p className="mt-2 text-sm text-slate-600">Menu, plans, QR, and subscriber tools unlock after Thali approves the business.</p><button type="button" onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); setSession(null); setAuthenticated(false); }} className="mt-5 min-h-11 rounded-lg border border-slate-300 px-4 text-sm font-semibold">Sign out</button></section></main>;
+    }
     return (
       <main className="min-h-screen bg-[#f7f6f2] px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
@@ -468,11 +447,10 @@ export default function ProviderPortal() {
               </Link>
               <button
                 type="button"
-                onClick={() => {
-                  try {
-                    localStorage.removeItem('mess_provider_web_session');
-                  } catch {}
+              onClick={async () => {
+                  await fetch('/api/auth/logout', { method: 'POST' });
                   setSession(null);
+                  setAuthenticated(false);
                 }}
                 className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-bold text-red-800 hover:bg-red-100 transition"
               >
@@ -694,29 +672,23 @@ export default function ProviderPortal() {
           {activeTab === 'qr' && (
             <div className="mt-6 grid gap-6 sm:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-center">
-                <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
-                  DAILY ATTENDANCE QR
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
+                  SECURE REDEMPTION
                 </span>
-                <h3 className="mt-3 text-lg font-bold text-slate-950">Live Counter QR Token</h3>
-                <p className="mt-1 text-xs text-slate-500">Students scan this with the mobile app during Lunch/Dinner.</p>
-                <div className="my-6 inline-block rounded-2xl border-2 border-slate-900 p-4 bg-white shadow-md">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-                      `MESS_QR|${session.providerId}|${new Date().toISOString().slice(0, 10)}|LUNCH|TOKEN`
-                    )}`}
-                    alt="Daily Attendance QR"
-                    className="h-48 w-48 mx-auto"
-                  />
+                <h3 className="mt-3 text-lg font-bold text-slate-950">Daily meal QR is not active</h3>
+                <p className="mt-1 text-xs text-slate-500">A secure, database-backed QR will appear here after atomic redemption is enabled.</p>
+                <div className="my-6 grid h-48 place-items-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 text-sm text-slate-500">
+                  No redeemable QR has been issued.
                 </div>
-                <p className="text-xs font-bold text-slate-700">Cryptographically signed token</p>
+                <p className="text-xs font-bold text-amber-800">No meal can be checked in yet.</p>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-center">
                 <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
-                  DESK STANDEE QR (JOIN & PAY)
+                  PARTNER PAGE
                 </span>
                 <h3 className="mt-3 text-lg font-bold text-slate-950">Walk-in Registration Standee</h3>
-                <p className="mt-1 text-xs text-slate-500">Scan with ANY phone camera (GPay/Paytm/Lens) to join instantly.</p>
+                <p className="mt-1 text-xs text-slate-500">Share your partner page. Online checkout is not active yet.</p>
                 <div className="my-6 inline-block rounded-2xl border-2 border-amber-500 p-4 bg-white shadow-md">
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(joinLink)}`}
@@ -1017,12 +989,13 @@ export default function ProviderPortal() {
         )}
 
         {/* STEP FORMS */}
+        {sessionChecked && !authenticated && <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><p>Partner onboarding requires a signed-in Thali account.</p><div className="mt-3 flex gap-3"><Link className="font-bold underline" href="/partner/login">Sign in</Link><Link className="font-bold underline" href="/auth/register">Create account</Link></div></div>}
         <form onSubmit={handleOnboardingSubmit} className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
           {/* STEP 1: BASICS */}
           {activeStep === 1 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-bold text-slate-950">Step 1: Kitchen Profile & Login Credentials</h2>
-              <p className="text-xs text-slate-500">Provide legal owner and mess identity.</p>
+              <h2 className="text-lg font-bold text-slate-950">Step 1: Business details</h2>
+              <p className="text-xs text-slate-500">Your existing signed-in account is used for partner access.</p>
               <div className="grid gap-4 sm:grid-cols-2 pt-2">
                 <label className="text-xs font-bold text-slate-700">
                   Mess / Business Name *
@@ -1032,17 +1005,6 @@ export default function ProviderPortal() {
                     placeholder="e.g. Radhe Krishna Homely Mess"
                     value={businessName}
                     onChange={(e) => setBusinessName(e.target.value)}
-                    className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
-                  />
-                </label>
-                <label className="text-xs font-bold text-slate-700">
-                  Owner Legal Name *
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Rajesh Kumar"
-                    value={ownerName}
-                    onChange={(e) => setOwnerName(e.target.value)}
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
                   />
                 </label>
@@ -1057,35 +1019,13 @@ export default function ProviderPortal() {
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
                   />
                 </label>
-                <label className="text-xs font-bold text-slate-700">
-                  Contact Email *
-                  <input
-                    type="email"
-                    required
-                    placeholder="owner@radhemess.in"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
-                  />
-                </label>
-                <label className="text-xs font-bold text-slate-700">
-                  Portal Login Password (Min 6 Characters) *
-                  <input
-                    type="password"
-                    required
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
-                  />
-                </label>
-                <label className="text-xs font-bold text-slate-700">
-                  Cuisine Style
-                  <input
-                    type="text"
-                    placeholder="e.g. Homestyle Pure Veg, North Indian"
-                    value={cuisine}
-                    onChange={(e) => setCuisine(e.target.value)}
+                <label className="text-xs font-bold text-slate-700 sm:col-span-2">
+                  Business description
+                  <textarea
+                    rows={3}
+                    maxLength={1000}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-amber-600"
                   />
                 </label>
@@ -1098,21 +1038,9 @@ export default function ProviderPortal() {
                       setError('Please enter a valid mess/business name (at least 3 characters).');
                       return;
                     }
-                    if (!ownerName.trim() || ownerName.trim().length < 3) {
-                      setError('Please enter the owner full legal name (at least 3 characters).');
-                      return;
-                    }
                     const cleanPhone = phone.replace(/\D/g, '');
                     if (cleanPhone.length !== 10) {
                       setError('Please enter a valid 10-digit Indian mobile number.');
-                      return;
-                    }
-                    if (!email.trim() || !email.includes('@') || !email.includes('.')) {
-                      setError('Please enter a valid email address.');
-                      return;
-                    }
-                    if (!password || password.length < 6) {
-                      setError('Please create a portal login password with at least 6 characters.');
                       return;
                     }
                     setError('');

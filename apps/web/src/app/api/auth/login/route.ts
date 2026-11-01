@@ -1,221 +1,78 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore } from '@/lib/platform-service';
-import { getAdminClient } from '@/lib/supabase/admin';
-import { createClient as createSessionClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  let body: { email?: string; password?: string; role?: string };
   try {
-    const body = await req.json().catch(() => ({}));
-    const rawIdentifier = (body.email || body.phone || '').trim();
-    const password = body.password;
-    const requestedRole = body.role?.trim().toLowerCase();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 });
+  }
 
-    if (!rawIdentifier || !password) {
-      return NextResponse.json(
-        { success: false, error: 'Email/phone and password are required.' },
-        { status: 400 }
-      );
+  const email = body.email?.trim().toLowerCase();
+  const password = body.password;
+  if (!email || !password || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ success: false, error: 'A valid email and password are required.' }, { status: 400 });
+  }
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data.user) {
+      return NextResponse.json({ success: false, error: 'Invalid email or password.' }, { status: 401 });
     }
 
-    const email = rawIdentifier.toLowerCase();
-    const cleanDigits = rawIdentifier.replace(/\D/g, '');
-
-    let authenticatedUserId: string | null = null;
-    let authenticatedEmail: string = email;
-    let resolvedRole: string = requestedRole || 'customer';
-    let providerData: any = null;
-
-    // 1. Attempt Supabase Auth Password Verification
-    let supabaseAuthSucceeded = false;
-    try {
-      const sessionClient = await createSessionClient();
-      const { data: authData, error: authError } = await sessionClient.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (!authError && authData.user) {
-        supabaseAuthSucceeded = true;
-        authenticatedUserId = authData.user.id;
-        authenticatedEmail = authData.user.email || email;
-
-        // Check if user has explicit admin role
-        const { data: roleRow } = await sessionClient
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', authData.user.id)
-          .is('revoked_at', null)
-          .maybeSingle();
-
-        if (roleRow?.role === 'admin' || authenticatedEmail === 'admin@thali.store') {
-          resolvedRole = 'admin';
-        } else if (authData.user.user_metadata?.role === 'provider' || requestedRole === 'provider') {
-          resolvedRole = 'provider';
-        } else {
-          resolvedRole = 'customer';
-        }
-      }
-    } catch {
-      // Supabase unconfigured or offline fallback
+    const [{ data: roles, error: rolesError }, { data: memberships, error: membershipsError }] = await Promise.all([
+      supabase.from('user_roles').select('role').eq('user_id', data.user.id).is('revoked_at', null),
+      supabase.from('provider_memberships').select('provider_id,role').eq('user_id', data.user.id).eq('active', true),
+    ]);
+    if (rolesError || membershipsError) {
+      await supabase.auth.signOut();
+      return NextResponse.json({ success: false, error: 'Account permissions could not be verified.' }, { status: 503 });
     }
 
-    // 2. If Supabase Auth failed or unconfigured, check Supabase Admin / user metadata credentials
-    if (!supabaseAuthSucceeded) {
-      const admin = getAdminClient();
-      let matchedUser: any = null;
+    const roleNames = new Set((roles ?? []).map((row) => row.role));
+    const activeMemberships = memberships ?? [];
+    const resolvedRole = roleNames.has('admin')
+      ? 'admin'
+      : activeMemberships.length > 0 || roleNames.has('provider')
+        ? 'provider'
+        : roleNames.has('customer')
+          ? 'customer'
+          : null;
 
-      if (admin) {
-        try {
-          const { data: usersData } = await admin.auth.admin.listUsers({ perPage: 100 });
-          if (usersData?.users) {
-            matchedUser = usersData.users.find((u) => {
-              const meta = u.user_metadata || {};
-              const uPhoneDigits = (meta.phone || '').replace(/\D/g, '');
-              const matchesIdentifier =
-                u.id === rawIdentifier ||
-                u.email?.toLowerCase() === email ||
-                (cleanDigits.length >= 7 && uPhoneDigits.includes(cleanDigits)) ||
-                meta.application?.id === rawIdentifier;
-
-              return matchesIdentifier;
-            });
-
-            if (matchedUser) {
-              const meta = matchedUser.user_metadata || {};
-              // Verify password against stored password or initial password
-              const expectedPassword = meta.initial_password || meta.login_password || meta.password;
-              if (expectedPassword && expectedPassword === password) {
-                supabaseAuthSucceeded = true;
-                authenticatedUserId = matchedUser.id;
-                authenticatedEmail = matchedUser.email || email;
-                resolvedRole = (meta.role === 'admin' || authenticatedEmail === 'admin@thali.store')
-                  ? 'admin'
-                  : (meta.role === 'provider' || requestedRole === 'provider' ? 'provider' : 'customer');
-              }
-            }
-          }
-        } catch {}
-      }
+    if (!resolvedRole || (body.role && body.role !== resolvedRole)) {
+      await supabase.auth.signOut();
+      return NextResponse.json({ success: false, error: 'This account is not authorized for that portal.' }, { status: 403 });
     }
 
-    // 3. Fallback verification for demo / offline platformStore accounts
-    if (!supabaseAuthSucceeded) {
-      // Only recognize hardcoded platform accounts if password matches
-      if (email === 'admin@thali.store' && (password === 'admin123' || password === 'admin@123' || password === 'Ritik@2026')) {
-        authenticatedUserId = 'usr-admin-ritik';
-        resolvedRole = 'admin';
-        supabaseAuthSucceeded = true;
-      } else if (email === 'owner@radhemess.in' && (password === 'owner123' || password === 'mess123')) {
-        authenticatedUserId = 'prov-radhe-001';
-        resolvedRole = 'provider';
-        supabaseAuthSucceeded = true;
-      } else {
-        // Check if there is an in-memory provider registered with matching password
-        const inMemProvider = Array.from(platformStore.providers.values()).find(
-          (p: any) => (p.email?.toLowerCase() === email || p.id === rawIdentifier) && p.password === password
-        );
-        if (inMemProvider) {
-          authenticatedUserId = inMemProvider.id;
-          resolvedRole = 'provider';
-          providerData = inMemProvider;
-          supabaseAuthSucceeded = true;
-        }
-      }
-    }
-
-    // If all credential verifications failed, reject with 401 Unauthorized
-    if (!supabaseAuthSucceeded) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid email/phone or password. Please verify your credentials.' },
-        { status: 401 }
-      );
-    }
-
-    // 4. If Provider role, resolve associated Kitchen entity
-    if (resolvedRole === 'provider') {
-      // Check in platformStore
-      let found = Array.from(platformStore.providers.values()).find(
-        (p) =>
-          p.email.toLowerCase() === authenticatedEmail ||
-          p.id === authenticatedUserId ||
-          p.owner_user_id === authenticatedUserId ||
-          (cleanDigits.length >= 7 && p.phone.replace(/\D/g, '').includes(cleanDigits))
-      );
-
-      // Check in Supabase DB if not in platformStore
-      if (!found) {
-        try {
-          const admin = getAdminClient();
-          if (admin) {
-            const { data: dbMatches } = await admin
-              .from('providers')
-              .select('*')
-              .or(`owner_user_id.eq.${authenticatedUserId},id.eq.${authenticatedUserId},public_email.ilike.%${authenticatedEmail}%`)
-              .limit(1);
-
-            if (dbMatches && dbMatches.length > 0) {
-              const dbP = dbMatches[0];
-              found = {
-                id: dbP.id,
-                owner_user_id: dbP.owner_user_id || authenticatedUserId,
-                display_name: dbP.display_name,
-                slug: dbP.slug,
-                description: dbP.description || 'Homestyle daily meals.',
-                phone: dbP.public_phone,
-                email: dbP.public_email || `${dbP.slug}@thali.mess`,
-                address: `${dbP.address_line1}, ${dbP.locality ? dbP.locality + ', ' : ''}${dbP.city}`,
-                locality: dbP.locality || dbP.city,
-                city: dbP.city,
-                rating: 5.0,
-                total_reviews: 0,
-                cuisines: ['North Indian', 'Homestyle'],
-                dietary_types: ['veg'],
-                status: dbP.status || 'active',
-                created_at: dbP.created_at,
-              };
-              platformStore.providers.set(found.id, found);
-            }
-          }
-        } catch {}
-      }
-
-      if (found) {
-        providerData = found;
-      }
-    }
-
-    const userId = authenticatedUserId || `usr-${resolvedRole}-${Buffer.from(authenticatedEmail).toString('hex').slice(0, 8)}`;
-    const providerIdVal = providerData?.id || (resolvedRole === 'provider' ? (authenticatedUserId || userId) : undefined);
-    const token = `jwt_session_${Buffer.from(
-      JSON.stringify({
-        userId,
-        email: authenticatedEmail,
-        role: resolvedRole,
-        providerId: providerIdVal,
-        provider_id: providerIdVal,
-      })
-    ).toString('base64url')}`;
+    const profileResult = await supabase.from('profiles').select('display_name').eq('id', data.user.id).maybeSingle();
+    const providerId = activeMemberships.find((membership) => ['owner', 'manager'].includes(membership.role))?.provider_id;
+    const { data: provider } = providerId
+      ? await supabase.from('providers').select('id,display_name,status').eq('id', providerId).maybeSingle()
+      : { data: null };
 
     return NextResponse.json({
       success: true,
       user: {
-        id: userId,
-        email: authenticatedEmail,
-        name: providerData ? providerData.display_name : authenticatedEmail.split('@')[0],
+        id: data.user.id,
+        email: data.user.email,
+        name: profileResult.data?.display_name || data.user.email?.split('@')[0] || '',
         role: resolvedRole,
-        provider_id: providerData?.id,
-        provider_name: providerData?.display_name,
+        provider_id: provider?.id,
+        provider_name: provider?.display_name,
+        provider_status: provider?.status,
       },
-      provider: providerData,
-      token,
+      // Real Supabase session tokens are returned for authenticated mobile API clients.
+      token: data.session?.access_token,
+      refresh_token: data.session?.refresh_token,
+      expires_at: data.session?.expires_at,
       message: 'Login successful.',
     });
-  } catch (err: any) {
-    return NextResponse.json(
-      { success: false, error: err.message || 'Login failed' },
-      { status: 500 }
-    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Authentication is unavailable.';
+    return NextResponse.json({ success: false, error: message }, { status: 503 });
   }
 }

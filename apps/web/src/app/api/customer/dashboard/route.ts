@@ -1,57 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { platformStore, getCurrentMealSlot } from '@/lib/platform-service';
-import { getIndiaDateString } from '@/lib/crypto';
+import { createClient } from '@/lib/supabase/server';
+import { getAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const customerId = searchParams.get('customer_id');
-  const currentSlot = getCurrentMealSlot();
+export async function GET(_req: NextRequest) {
+  try {
+    const session = await createClient();
+    const { data: { user }, error: authError } = await session.auth.getUser();
+    if (authError || !user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
 
-  if (!customerId) {
-    return NextResponse.json({
-      success: true,
-      today_date: getIndiaDateString(),
-      current_slot: currentSlot,
-      active_subscription: null,
-      provider: null,
-      todays_menu: null,
-      recent_redemptions: [],
-    });
+    const db = getAdminClient();
+    if (!db) return NextResponse.json({ success: false, error: 'Customer data service is not configured.' }, { status: 503 });
+    const [subscriptions, redemptions] = await Promise.all([
+      db.from('subscriptions')
+        .select('id,status,plan_type_snapshot,plan_name_snapshot,initial_meal_credits,remaining_meal_credits,starts_at,expires_at,created_at,providers(id,display_name,slug,locality,city)')
+        .eq('customer_id', user.id).order('created_at', { ascending: false }).limit(30),
+      db.from('meal_redemptions')
+        .select('id,redeemed_at,provider_id,providers(display_name),meal_bookings(service_date,meal_slots(name))')
+        .eq('customer_id', user.id).order('redeemed_at', { ascending: false }).limit(30),
+    ]);
+    if (subscriptions.error || redemptions.error) {
+      console.error('Customer dashboard API query failed:', subscriptions.error?.message || redemptions.error?.message);
+      return NextResponse.json({ success: false, error: 'Customer records could not be loaded.' }, { status: 503 });
+    }
+    return NextResponse.json({ success: true, subscriptions: subscriptions.data ?? [], recent_redemptions: redemptions.data ?? [] }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    console.error('Customer dashboard API unavailable:', error instanceof Error ? error.message : 'unknown error');
+    return NextResponse.json({ success: false, error: 'Customer dashboard is temporarily unavailable.' }, { status: 503 });
   }
-
-  // Find genuine active subscription
-  const activeSub = Array.from(platformStore.subscriptions.values()).find(
-    (s) => s.customer_id === customerId && s.status === 'active'
-  );
-
-  const provider = activeSub ? platformStore.providers.get(activeSub.provider_id) : null;
-
-  // Today's menu for current slot if subscribed
-  let menu = null;
-  if (provider && activeSub) {
-    const menuKey = `${activeSub.provider_id}_Daily_${currentSlot}`;
-    menu = platformStore.menus.get(menuKey) || Array.from(platformStore.menus.values()).find((m) => m.provider_id === activeSub.provider_id);
-  }
-
-  // Genuine customer redemptions
-  const redemptions = Array.from(platformStore.redemptions.values())
-    .filter((r) => r.user_id === customerId)
-    .sort((a, b) => b.redeemed_at.localeCompare(a.redeemed_at))
-    .slice(0, 15);
-
-  return NextResponse.json({
-    success: true,
-    today_date: getIndiaDateString(),
-    current_slot: currentSlot,
-    active_subscription: activeSub || null,
-    provider: provider || null,
-    todays_menu: menu ? {
-      slot: menu.slot,
-      items_included: menu.items_included,
-      items_extra: menu.items_extra,
-    } : null,
-    recent_redemptions: redemptions,
-  });
 }
