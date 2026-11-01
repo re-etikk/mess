@@ -25,6 +25,7 @@
 - Current slice: `npm test` passed (4 files, 32 tests); `npm run build` passed on 2026-11-02 including the operations route and page. Build reports one existing `<img>` optimization warning in `src/app/provider/portal/page.tsx:693`.
 - Production Supabase data/schema and production deployment were not changed.
 - Usage billing is explicitly blocked in the API until payment webhook processing and ledger reconciliation are repaired and verified; entering gateway credentials alone cannot enable it.
+- The Razorpay webhook endpoint now fails closed with HTTP 503 and does not mutate transaction or entitlement state until signature, idempotency, amount matching, and atomic database transitions are implemented.
 - Current branch preview can be used for review, but admin access still requires an authenticated user with a current persisted admin role.
 - Do not mark a module complete because a page renders; record backend and behavior evidence for each slice.
 
