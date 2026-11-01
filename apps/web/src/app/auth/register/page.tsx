@@ -29,10 +29,10 @@ export default function RegisterPage() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Registration failed. Please try again.');
       if (result.session_created) {
-        router.replace('/customer/dashboard');
+        router.replace('/provider/portal');
         router.refresh();
       } else {
-        setMessage(result.message || 'Check your email to confirm your account before signing in.');
+        setMessage(result.message || 'Check your email to confirm your account, then sign in to submit your partner application.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
@@ -52,8 +52,8 @@ export default function RegisterPage() {
               className="h-14 w-auto object-contain rounded-md"
             />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Create your {APP_CONFIG.brandName} Account</h1>
-          <p className="text-xs text-slate-500">Create a customer account to discover local meals.</p>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Create your partner account</h1>
+          <p className="text-xs text-slate-500">Use your account to apply for a mess partner profile. Partner tools unlock after review.</p>
         </div>
 
         <form onSubmit={handleRegister} className="space-y-3.5 text-xs">

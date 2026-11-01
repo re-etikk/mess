@@ -9,11 +9,11 @@ const SITE_URL = 'https://www.thali.store';
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `Thali — Your Meals. Your Choice.`,
+    default: `Thali Partner — Mess Owner Workspace`,
     template: `%s | Thali`,
   },
-  description: 'Thali connects students and professionals with local mess and tiffin providers for affordable daily meals. Find breakfast, lunch and dinner near you.',
-  keywords: ['thali', 'mess', 'tiffin', 'daily meals', 'student food', 'local food', 'meal subscription'],
+  description: 'A partner workspace for mess owners to manage business details, menus, meal plans, and daily operations.',
+  keywords: ['Thali Partner', 'mess management', 'mess owner portal', 'meal plans'],
   authors: [{ name: 'Thali' }],
   creator: 'Thali',
   publisher: 'Thali',
@@ -33,8 +33,8 @@ export const metadata: Metadata = {
     locale: 'en_IN',
     url: SITE_URL,
     siteName: 'Thali',
-    title: 'Thali — Your Meals. Your Choice.',
-    description: 'Find local mess and tiffin providers for affordable daily breakfast, lunch and dinner near you.',
+    title: 'Thali Partner — Mess Owner Workspace',
+    description: 'Manage your mess profile, menu, plans, and daily partner operations.',
     images: [
       {
         url: '/brand/logo.png',
@@ -46,8 +46,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary',
-    title: 'Thali — Your Meals. Your Choice.',
-    description: 'Find local mess and tiffin providers for affordable daily meals.',
+    title: 'Thali Partner — Mess Owner Workspace',
+    description: 'Manage your mess profile, menu, plans, and daily partner operations.',
     images: ['/brand/logo.png'],
   },
   icons: {
@@ -70,7 +70,7 @@ const jsonLd = {
       '@id': `${SITE_URL}/#website`,
       url: SITE_URL,
       name: 'Thali',
-      description: 'Local meal marketplace connecting students and professionals with mess and tiffin providers.',
+      description: 'Partner workspace for mess owners and administrators.',
       inLanguage: 'en-IN',
     },
     {
