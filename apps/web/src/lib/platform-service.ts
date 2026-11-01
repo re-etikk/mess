@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { APP_CONFIG, calculateProviderDailyUsageFee } from './config';
-import { getIndiaDateString, verifyCounterQRToken, verifySignedQRToken } from './crypto';
+import { generateCounterQRToken, getIndiaDateString, verifyCounterQRToken, verifySignedQRToken } from './crypto';
 import { MessReview, PromoCode, Announcement, CustomerNotification } from '@/types';
 
 export interface PlanData {
@@ -432,7 +432,7 @@ export function verifyAnyQRToken(token: string): {
   const trimmed = token.trim();
   const today = getIndiaDateString();
 
-  // Format 1: MESS_QR|<providerId>|<date>|<slot>|<signature>
+  // Format 1: short-lived MESS_QR counter token.
   if (trimmed.startsWith('MESS_QR|')) {
     return verifyCounterQRToken(trimmed);
   }
@@ -444,7 +444,9 @@ export function verifyAnyQRToken(token: string): {
       const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf-8');
       const payload = JSON.parse(payloadStr);
 
-      const secret = process.env.QR_SIGNING_SECRET || process.env.QR_HMAC_SECRET || 'test-only-qr-signing-secret-not-for-production-0001';
+      const secret = process.env.QR_SIGNING_SECRET || process.env.QR_HMAC_SECRET
+        || (process.env.NODE_ENV === 'test' ? 'test-only-qr-signing-secret-not-for-production-0001' : '');
+      if (secret.length < 32) return { isValid: false, isExpired: false, error: 'QR signing is not configured.' };
       const expectedSig = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
 
       const sigBuf = Buffer.from(sig, 'hex');
@@ -454,6 +456,15 @@ export function verifyAnyQRToken(token: string): {
       }
 
       const tokenDate = payload.date || payload.booking_date;
+      const now = Date.now();
+      const issuedAt = Number(payload.issued_at);
+      const expiresAt = Number(payload.expires_at);
+      if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt)
+        || typeof payload.nonce !== 'string' || !/^[0-9a-f]{32}$/i.test(payload.nonce)
+        || issuedAt > now + 30_000 || expiresAt <= now || expiresAt <= issuedAt
+        || expiresAt - issuedAt > 5 * 60 * 1000) {
+        return { isValid: false, isExpired: expiresAt <= now, error: 'QR code is expired or invalid.' };
+      }
       if (tokenDate && tokenDate !== today) {
         return { isValid: false, isExpired: true, error: `QR expired. Code date: ${tokenDate}, today: ${today}` };
       }
@@ -487,13 +498,16 @@ export function generateProviderDailyQR(params: {
 } {
   const date = params.date || getIndiaDateString();
   const slot = params.slot || getCurrentMealSlot();
-  const secret = process.env.QR_SIGNING_SECRET || process.env.QR_HMAC_SECRET || 'test-only-qr-signing-secret-not-for-production-0001';
+  const secret = process.env.QR_SIGNING_SECRET || process.env.QR_HMAC_SECRET
+    || (process.env.NODE_ENV === 'test' ? 'test-only-qr-signing-secret-not-for-production-0001' : '');
+  if (secret.length < 32) throw new Error('QR_SIGNING_SECRET must be configured with at least 32 characters.');
 
   // Format 1: Pipe token
-  const pipeToken = `MESS_QR|${params.providerId}|${date}|${slot}|${crypto.createHmac('sha256', secret).update(`${params.providerId}:${date}:${slot}`).digest('hex')}`;
+  const pipeToken = generateCounterQRToken({ providerId: params.providerId, date, slot });
 
   // Format 2: JSON HMAC token
-  const payload = { provider_id: params.providerId, date, slot };
+  const issuedAt = Date.now();
+  const payload = { provider_id: params.providerId, date, slot, issued_at: issuedAt, expires_at: issuedAt + 5 * 60 * 1000, nonce: crypto.randomBytes(16).toString('hex') };
   const payloadStr = JSON.stringify(payload);
   const jsonToken = `${Buffer.from(payloadStr).toString('base64url')}.${crypto.createHmac('sha256', secret).update(payloadStr).digest('hex')}`;
 

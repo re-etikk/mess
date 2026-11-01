@@ -153,9 +153,12 @@ export function generateCounterQRToken(params: {
 }): string {
   const dateStr = params.date || getIndiaDateString();
   const slotStr = params.slot || 'ALL';
-  const rawData = `${params.providerId}:${dateStr}:${slotStr}`;
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + APP_CONFIG.qrSecurity.validityWindowMinutes * 60 * 1000;
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const rawData = `${params.providerId}:${dateStr}:${slotStr}:${issuedAt}:${expiresAt}:${nonce}`;
   const signature = crypto.createHmac('sha256', getQrSecret()).update(rawData).digest('hex');
-  return `MESS_QR|${params.providerId}|${dateStr}|${slotStr}|${signature}`;
+  return `MESS_QR|${params.providerId}|${dateStr}|${slotStr}|${issuedAt}|${expiresAt}|${nonce}|${signature}`;
 }
 
 /**
@@ -178,11 +181,11 @@ export function verifyCounterQRToken(token: string): {
     const prefix = parts[0];
     const today = getIndiaDateString();
 
-    if (prefix !== 'MESS_QR' || parts.length < 5) {
+    if (prefix !== 'MESS_QR') {
       return { isValid: false, isExpired: false, error: 'Unrecognized QR token type' };
     }
 
-    const [, providerId, date, slot, signature] = parts;
+    const [, providerId, date, slot] = parts;
 
     // Check date against Asia/Kolkata date
     if (date !== today) {
@@ -196,7 +199,26 @@ export function verifyCounterQRToken(token: string): {
       };
     }
 
-    const rawData = `${providerId}:${date}:${slot}`;
+    // Legacy day-long codes are intentionally rejected after rollout.
+    if (parts.length !== 8) {
+      return { isValid: false, isExpired: false, error: 'QR token must be refreshed.' };
+    }
+
+    const [, , , , issuedAtRaw, expiresAtRaw, nonce, signature] = parts;
+    const issuedAt = Number(issuedAtRaw);
+    const expiresAt = Number(expiresAtRaw);
+    const now = Date.now();
+    const maxLifetime = APP_CONFIG.qrSecurity.validityWindowMinutes * 60 * 1000;
+    if (!Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(expiresAt)
+      || !/^[0-9a-f]{32}$/i.test(nonce)
+      || issuedAt > now + 30_000
+      || expiresAt <= now
+      || expiresAt <= issuedAt
+      || expiresAt - issuedAt > maxLifetime) {
+      return { isValid: false, isExpired: expiresAt <= now, error: 'QR code is expired or invalid. Refresh it at the counter.' };
+    }
+
+    const rawData = `${providerId}:${date}:${slot}:${issuedAt}:${expiresAt}:${nonce}`;
     const expectedSignature = crypto.createHmac('sha256', getQrSecret()).update(rawData).digest('hex');
 
     const sigBuf = Buffer.from(signature, 'hex');
