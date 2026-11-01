@@ -27,6 +27,7 @@
 - Usage billing is explicitly blocked in the API until payment webhook processing and ledger reconciliation are repaired and verified; entering gateway credentials alone cannot enable it.
 - The Razorpay webhook endpoint now fails closed with HTTP 503 and does not mutate transaction or entitlement state until signature, idempotency, amount matching, and atomic database transitions are implemented.
 - Provider approval/rejection and billing mutations are blocked on Vercel Preview deployments to prevent preview environments from writing to a production Supabase project when no staging database is configured.
+- Preview screenshot confirmed the real admin page renders, but live list APIs return 503. Supabase Postgres logs identify `permission denied for table ...` for the server `service_role`; required tables exist, and all migration history is empty. Added an explicit least-privilege, read-only grant migration. It has not been applied to production pending staging/history review.
 - Current branch preview can be used for review, but admin access still requires an authenticated user with a current persisted admin role.
 - Do not mark a module complete because a page renders; record backend and behavior evidence for each slice.
 
