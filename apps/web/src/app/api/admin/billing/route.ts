@@ -23,13 +23,17 @@ export async function GET(req: NextRequest) {
   const access = await requireAdmin(req);
   if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
-  const [{ data: settings, error: settingsError }, { data: accounts, error: accountsError }] = await Promise.all([
+  const params = new URL(req.url).searchParams;
+  const page = Math.min(100000, Math.max(1, Number(params.get('page')) || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(params.get('page_size')) || 20));
+  const [{ data: settings, error: settingsError }, { data: accounts, error: accountsError, count }] = await Promise.all([
     access.admin.from('platform_billing_settings')
       .select('free_trial_days,fee_per_90_successful_redemptions_inr,usage_billing_enabled,updated_at')
       .eq('singleton', true).maybeSingle(),
     access.admin.from('provider_billing_accounts')
-      .select('provider_id,trial_started_at,trial_ends_at,billing_exempt,exempt_reason,admin_note,providers!inner(display_name,status)')
-      .order('created_at', { ascending: false }),
+      .select('provider_id,trial_started_at,trial_ends_at,billing_exempt,exempt_reason,admin_note,providers!inner(display_name,status)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range((page - 1) * pageSize, page * pageSize - 1),
   ]);
   if (settingsError || accountsError) {
     console.error('Billing settings query failed:', settingsError?.message || accountsError?.message);
@@ -39,6 +43,9 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     settings,
+    total: count ?? 0,
+    page,
+    page_size: pageSize,
     providers: (accounts ?? []).map((account: any) => ({
       provider_id: account.provider_id,
       provider_name: account.providers.display_name,
@@ -62,8 +69,8 @@ export async function PATCH(req: NextRequest) {
   }
   const settings = SettingsSchema.safeParse(payload);
   if (settings.success) {
-    if (settings.data.usage_billing_enabled && (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET || !process.env.RAZORPAY_WEBHOOK_SECRET)) {
-      return NextResponse.json({ success: false, error: 'Usage billing cannot be enabled until Razorpay credentials and webhook verification are configured.' }, { status: 409 });
+    if (settings.data.usage_billing_enabled) {
+      return NextResponse.json({ success: false, error: 'Usage billing is not ready to activate. The payment webhook and ledger reconciliation must be repaired and verified first.' }, { status: 409 });
     }
     const { data, error } = await access.admin.from('platform_billing_settings')
       .update({ ...settings.data, updated_by: access.userId })

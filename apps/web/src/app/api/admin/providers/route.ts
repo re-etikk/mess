@@ -7,24 +7,45 @@ export const dynamic = 'force-dynamic';
 const ReviewSchema = z.object({
   provider_id: z.string().uuid(),
   decision: z.enum(['approve', 'reject']),
-  reason: z.string().trim().max(500).default('Review completed.'),
+  reason: z.string().trim().min(3).max(500),
 });
 
 export async function GET(req: NextRequest) {
   const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
-  const includeActive = new URL(req.url).searchParams.get('all') === 'true';
+  const params = new URL(req.url).searchParams;
+  const includeActive = params.get('all') === 'true';
+  const page = Math.min(100000, Math.max(1, Number(params.get('page')) || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(params.get('page_size')) || 20));
+  const search = params.get('q')?.trim().replace(/[%_,]/g, '').slice(0, 80) ?? '';
+  const from = (page - 1) * pageSize;
   const base = auth.admin.from('providers')
-    .select('id,owner_user_id,display_name,public_phone,public_email,description,address_line1,locality,city,state,pincode,created_at,status');
+    .select('id,owner_user_id,display_name,public_phone,public_email,description,address_line1,locality,city,state,pincode,created_at,status', { count: 'exact' });
+  let pendingQuery = base.eq('status', 'pending_review').order('created_at', { ascending: false });
+  if (search) pendingQuery = pendingQuery.ilike('display_name', `%${search}%`);
+  pendingQuery = pendingQuery.range(from, from + pageSize - 1);
+  let activeQuery = auth.admin.from('providers')
+    .select('id,owner_user_id,display_name,public_phone,public_email,description,address_line1,locality,city,state,pincode,created_at,status', { count: 'exact' })
+    .eq('status', 'active').order('display_name');
+  if (search) activeQuery = activeQuery.ilike('display_name', `%${search}%`);
+  activeQuery = activeQuery.range(from, from + pageSize - 1);
   const [pending, active] = await Promise.all([
-    base.eq('status', 'pending_review').order('created_at', { ascending: false }),
-    includeActive ? auth.admin.from('providers').select('id,owner_user_id,display_name,public_phone,public_email,description,address_line1,locality,city,state,pincode,created_at,status').eq('status', 'active').order('display_name') : Promise.resolve({ data: [], error: null }),
+    pendingQuery,
+    includeActive ? activeQuery : Promise.resolve({ data: [], error: null, count: 0 }),
   ]);
   if (pending.error || active.error) {
     console.error('Provider review queue query failed:', pending.error?.message || active.error?.message);
     return NextResponse.json({ success: false, error: 'Provider records could not be loaded.' }, { status: 503 });
   }
-  return NextResponse.json({ success: true, applications: pending.data ?? [], active_providers: active.data ?? [] }, { headers: { 'Cache-Control': 'private, no-store' } });
+  return NextResponse.json({
+    success: true,
+    applications: pending.data ?? [],
+    applications_total: pending.count ?? 0,
+    active_providers: active.data ?? [],
+    active_total: active.count ?? 0,
+    page,
+    page_size: pageSize,
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function PATCH(req: NextRequest) {
