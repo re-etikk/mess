@@ -62,6 +62,9 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const access = await requireAdmin(req);
   if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  if (process.env.VERCEL_ENV === 'preview') {
+    return NextResponse.json({ success: false, error: 'Billing policy changes are disabled in preview deployments. Review the settings here, then change them in the production admin workspace.' }, { status: 403 });
+  }
 
   let payload: unknown;
   try { payload = await req.json(); } catch {

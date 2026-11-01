@@ -51,6 +51,9 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  if (process.env.VERCEL_ENV === 'preview') {
+    return NextResponse.json({ success: false, error: 'Provider decisions are disabled in preview deployments. Use the production admin workspace after review.' }, { status: 403 });
+  }
   let payload: unknown;
   try { payload = await req.json(); } catch { return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 }); }
   const parsed = ReviewSchema.safeParse(payload);
