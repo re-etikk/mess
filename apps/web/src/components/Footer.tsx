@@ -20,7 +20,6 @@ export default function Footer() {
             <li><Link href="/provider/portal" className="hover:text-orange-300">Partner workspace</Link></li>
             <li><Link href="/partner/login" className="hover:text-orange-300">Partner sign in</Link></li>
             <li><Link href="/contact" className="hover:text-orange-300">Contact support</Link></li>
-            <li><Link href="/admin/console" className="hover:text-orange-300">Administrator access</Link></li>
           </ul>
         </nav>
         <nav aria-label="Policies">

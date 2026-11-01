@@ -50,7 +50,7 @@ function CounterStandeeContent() {
       {/* NO-PRINT CONTROLS */}
       <div className="print:hidden w-full max-w-md mb-6 flex items-center justify-between">
         <Link
-          href="/admin/console"
+          href="/provider/portal"
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900"
         >
           <ArrowLeft size={15} /> Back

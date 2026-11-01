@@ -142,7 +142,7 @@ export default function HomePage() {
       <section className="mx-auto max-w-7xl px-5 py-14 sm:px-8 lg:px-10">
         <div className="flex flex-col gap-5 rounded-3xl bg-slate-950 px-6 py-8 text-white sm:flex-row sm:items-center sm:justify-between sm:px-9 sm:py-10">
           <div><p className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-orange-300"><CircleHelp size={14} /> Need help?</p><h2 className="mt-2 text-2xl font-black">We’ll help you get your mess set up.</h2><p className="mt-2 text-sm text-slate-300">Contact the Thali team for partner onboarding or account support.</p></div>
-          <div className="flex flex-col gap-2 sm:items-end"><Link href="/contact" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-slate-950 transition hover:bg-orange-50">Contact support <ArrowRight size={16} /></Link><Link href="/admin/console" className="px-2 py-1 text-xs font-medium text-slate-300 underline decoration-slate-600 underline-offset-4 hover:text-white">Administrator access</Link></div>
+          <div className="flex flex-col gap-2 sm:items-end"><Link href="/contact" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-slate-950 transition hover:bg-orange-50">Contact support <ArrowRight size={16} /></Link></div>
         </div>
         <p className="mt-5 text-center text-xs text-slate-500">Customer ordering and meal passes continue through the Thali mobile app for now. {APP_CONFIG.brandName} web is currently focused on mess partners and administrators.</p>
       </section>

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useState } from 'react';
 import { APP_CONFIG } from '@/lib/config';
-import { ArrowRight, Menu, ShieldCheck, Store, X } from 'lucide-react';
+import { ArrowRight, Menu, Store, X } from 'lucide-react';
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
@@ -20,7 +20,6 @@ export default function Navbar() {
         <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
           <Link href="/#tools" className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-950">Partner tools</Link>
           <Link href="/contact" className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-950">Support</Link>
-          <Link href="/admin/console" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-950"><ShieldCheck size={15} /> Admin</Link>
           <Link href="/partner/login" className="ml-2 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-800 transition hover:border-slate-400 hover:bg-slate-50">Sign in</Link>
           <Link href="/provider/portal" className="ml-1 inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-orange-700 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-orange-800">Partner workspace <ArrowRight size={15} /></Link>
         </nav>
@@ -33,7 +32,6 @@ export default function Navbar() {
         <div className="mx-auto grid max-w-7xl gap-2">
           <Link onClick={() => setOpen(false)} href="/#tools" className="rounded-lg px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Partner tools</Link>
           <Link onClick={() => setOpen(false)} href="/contact" className="rounded-lg px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Support</Link>
-          <Link onClick={() => setOpen(false)} href="/admin/console" className="flex items-center gap-2 rounded-lg px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ShieldCheck size={16} /> Admin access</Link>
           <div className="mt-1 grid grid-cols-2 gap-2">
             <Link onClick={() => setOpen(false)} href="/partner/login" className="flex min-h-11 items-center justify-center rounded-xl border border-slate-300 px-3 text-sm font-bold text-slate-800">Sign in</Link>
             <Link onClick={() => setOpen(false)} href="/provider/portal" className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-orange-700 px-3 text-sm font-bold text-white"><Store size={15} /> Partner portal</Link>

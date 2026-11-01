@@ -23,7 +23,8 @@ export default function LoginPage() {
       const supabase = createClient();
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
       if (authError) throw authError;
-      router.replace('/customer/dashboard');
+      const nextPath = new URLSearchParams(window.location.search).get('next');
+      router.replace(nextPath === '/admin/console' ? nextPath : '/provider/portal');
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed. Check your details and try again.');
