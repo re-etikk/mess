@@ -7,19 +7,34 @@ class CustomerAuthResult {
     required this.email,
     required this.name,
     required this.token,
+    this.refreshToken = '',
   });
 
   final String userId;
   final String email;
   final String name;
   final String token;
+  final String refreshToken;
 }
 
 class CustomerAuthService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://mess-beta.vercel.app',
+    defaultValue: 'https://www.thali.store',
   );
+
+  static Map<String, dynamic> _decodeResponse(http.Response response) {
+    if (response.statusCode >= 300 && response.statusCode < 400) {
+      throw Exception('The sign-in service redirected the request. Update the app and try again.');
+    }
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } on FormatException {
+      // Translate proxy, deployment, and HTML responses into a useful app error.
+    }
+    throw Exception('The server returned an unexpected response. Please try again shortly.');
+  }
 
   static Future<CustomerAuthResult> login({
     required String email,
@@ -38,7 +53,7 @@ class CustomerAuthService {
         )
         .timeout(const Duration(seconds: 12));
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeResponse(response);
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       return CustomerAuthResult(
@@ -46,9 +61,22 @@ class CustomerAuthService {
         email: user['email']?.toString() ?? email.trim(),
         name: user['name']?.toString() ?? email.split('@')[0],
         token: data['token']?.toString() ?? '',
+        refreshToken: data['refresh_token']?.toString() ?? '',
       );
     }
     throw Exception(data['error'] ?? data['message'] ?? 'Login failed. Please check credentials.');
+  }
+
+  static Future<CustomerAuthResult> refreshSession({required String refreshToken, required String fallbackUserId, required String fallbackEmail, required String fallbackName}) async {
+    final response = await http.post(Uri.parse('$baseUrl/api/auth/refresh'),
+      headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refresh_token': refreshToken})).timeout(const Duration(seconds: 12));
+    final data = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
+      throw Exception(data['error'] ?? 'Your session could not be refreshed. Please sign in again.');
+    }
+    final user = data['user'] as Map<String, dynamic>? ?? {};
+    return CustomerAuthResult(userId: user['id']?.toString() ?? fallbackUserId, email: user['email']?.toString() ?? fallbackEmail,
+      name: user['name']?.toString() ?? fallbackName, token: data['token']?.toString() ?? '', refreshToken: data['refresh_token']?.toString() ?? refreshToken);
   }
 
   static Future<CustomerAuthResult> register({
@@ -72,7 +100,7 @@ class CustomerAuthService {
         )
         .timeout(const Duration(seconds: 12));
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeResponse(response);
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       return CustomerAuthResult(

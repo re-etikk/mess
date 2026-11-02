@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/mess_models.dart';
 import '../repositories/http_mess_repository.dart';
 import '../repositories/mess_repository.dart';
+import '../services/customer_auth_service.dart';
 
 class AppState extends ChangeNotifier {
   AppState({MessRepository? repository}) : repository = repository ?? HttpMessRepository();
@@ -16,6 +17,8 @@ class AppState extends ChangeNotifier {
   String customerId = '';
   String customerName = 'Student';
   String customerEmail = '';
+  String authToken = '';
+  String refreshToken = '';
   String location = 'Sector 62, Noida';
   String selectedProviderId = '';
   ActiveSubscription? _activeSubscription;
@@ -36,7 +39,21 @@ class AppState extends ChangeNotifier {
         customerName = data['customerName']?.toString() ?? 'Student';
         customerEmail = data['customerEmail']?.toString() ?? '';
         location = data['location']?.toString() ?? 'Sector 62, Noida';
-        isSignedIn = data['isSignedIn'] == true;
+        authToken = data['authToken']?.toString() ?? '';
+        refreshToken = data['refreshToken']?.toString() ?? '';
+        isSignedIn = data['isSignedIn'] == true && customerId.isNotEmpty && authToken.isNotEmpty;
+        if (isSignedIn && refreshToken.isNotEmpty) {
+          try {
+            final refreshed = await CustomerAuthService.refreshSession(refreshToken: refreshToken, fallbackUserId: customerId, fallbackEmail: customerEmail, fallbackName: customerName);
+            customerId = refreshed.userId;
+            customerEmail = refreshed.email;
+            customerName = refreshed.name;
+            authToken = refreshed.token;
+            refreshToken = refreshed.refreshToken;
+          } catch (_) {
+            // Keep the existing authenticated state if startup refresh is temporarily unreachable.
+          }
+        }
         if (data['selectedProviderId'] != null) {
           selectedProviderId = data['selectedProviderId'].toString();
         }
@@ -61,6 +78,7 @@ class AppState extends ChangeNotifier {
           );
         }
         notifyListeners();
+        if (isSignedIn) await _persistSession();
       }
     } catch (_) {}
   }
@@ -75,6 +93,8 @@ class AppState extends ChangeNotifier {
         'customerEmail': customerEmail,
         'location': location,
         'isSignedIn': isSignedIn,
+        'authToken': authToken,
+        'refreshToken': refreshToken,
         'selectedProviderId': selectedProviderId,
         'activeSubscription': sub == null ? null : {
           'id': sub.id,
@@ -137,9 +157,11 @@ class AppState extends ChangeNotifier {
     return provider;
   }
 
-  void signIn({required String emailOrPhone, required String name, String? userId}) {
+  void signIn({required String emailOrPhone, required String name, String? userId, String? token, String? refreshToken}) {
     customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
     customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
+    if (token != null) authToken = token;
+    if (refreshToken != null) this.refreshToken = refreshToken;
     if (userId != null && userId.isNotEmpty) {
       customerId = userId;
     }
@@ -150,6 +172,8 @@ class AppState extends ChangeNotifier {
 
   void signOut() {
     isSignedIn = false;
+    authToken = '';
+    refreshToken = '';
     _activeSubscription = null;
     _dailyMeal = null;
     _redeemedSlots.clear();

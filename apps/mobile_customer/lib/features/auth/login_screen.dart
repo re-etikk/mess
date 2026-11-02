@@ -41,6 +41,8 @@ class _LoginScreenState extends State<LoginScreen> {
         emailOrPhone: result.email,
         name: result.name,
         userId: result.userId,
+          token: result.token,
+          refreshToken: result.refreshToken,
       );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Welcome, ${result.name}!')));
     } catch (e) {
