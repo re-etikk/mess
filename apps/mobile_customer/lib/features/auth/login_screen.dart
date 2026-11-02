@@ -42,8 +42,10 @@ class _LoginScreenState extends State<LoginScreen> {
         name: result.name,
         userId: result.userId,
         token: result.token,
+        refreshToken: result.refreshToken,
       );
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Welcome, ${result.name}!')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Welcome, ${result.name}!')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -69,54 +71,96 @@ class _LoginScreenState extends State<LoginScreen> {
                   constraints: const BoxConstraints(maxWidth: 430),
                   child: Form(
                     key: _formKey,
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      const Center(child: MessLogo()),
-                      SizedBox(height: compact ? 34 : 52),
-                      Text('Welcome back', style: Theme.of(context).textTheme.headlineLarge),
-                      const SizedBox(height: 8),
-                      Text('Sign in to manage your meals and subscriptions.', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: MessColors.muted)),
-                      const SizedBox(height: 28),
-                      TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.username, AutofillHints.email],
-                        decoration: const InputDecoration(
-                          labelText: 'Email or phone number',
-                          hintText: 'e.g. 7250171036 or name@gmail.com',
-                          prefixIcon: Icon(Icons.person_outline_rounded),
-                        ),
-                        validator: (value) => value == null || value.trim().length < 3 ? 'Enter your email or phone number.' : null,
-                      ),
-                      const SizedBox(height: 13),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: !_showPassword,
-                        autofillHints: const [AutofillHints.password],
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          hintText: 'Enter account password',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          suffixIcon: IconButton(
-                            tooltip: _showPassword ? 'Hide password' : 'Show password',
-                            onPressed: () => setState(() => _showPassword = !_showPassword),
-                            icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Center(child: MessLogo()),
+                          SizedBox(height: compact ? 34 : 52),
+                          Text('Welcome back',
+                              style: Theme.of(context).textTheme.headlineLarge),
+                          const SizedBox(height: 8),
+                          Text(
+                              'Sign in to manage your meals and subscriptions.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyLarge
+                                  ?.copyWith(color: MessColors.muted)),
+                          const SizedBox(height: 28),
+                          TextFormField(
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [
+                              AutofillHints.username,
+                              AutofillHints.email
+                            ],
+                            decoration: const InputDecoration(
+                              labelText: 'Email or phone number',
+                              hintText: 'e.g. 7250171036 or name@gmail.com',
+                              prefixIcon: Icon(Icons.person_outline_rounded),
+                            ),
+                            validator: (value) =>
+                                value == null || value.trim().length < 3
+                                    ? 'Enter your email or phone number.'
+                                    : null,
                           ),
-                        ),
-                        validator: (value) => value == null || value.length < 6 ? 'Password must contain at least 6 characters.' : null,
-                      ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(onPressed: () => Navigator.push(context, messRoute(const ForgotPasswordScreen())), child: const Text('Forgot password?')),
-                      ),
-                      const SizedBox(height: 8),
-                      MessActionButton(label: 'Sign in', loading: _busy, onPressed: _login),
-                      const SizedBox(height: 20),
-                      const SizedBox(height: 26),
-                      Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                        Text('New to MESS? ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: MessColors.muted)),
-                        TextButton(onPressed: () => Navigator.push(context, messRoute(const RegisterScreen())), style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 3)), child: const Text('Create account')),
-                      ]),
-                    ]),
+                          const SizedBox(height: 13),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: !_showPassword,
+                            autofillHints: const [AutofillHints.password],
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              hintText: 'Enter account password',
+                              prefixIcon:
+                                  const Icon(Icons.lock_outline_rounded),
+                              suffixIcon: IconButton(
+                                tooltip: _showPassword
+                                    ? 'Hide password'
+                                    : 'Show password',
+                                onPressed: () => setState(
+                                    () => _showPassword = !_showPassword),
+                                icon: Icon(_showPassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined),
+                              ),
+                            ),
+                            validator: (value) => value == null ||
+                                    value.length < 6
+                                ? 'Password must contain at least 6 characters.'
+                                : null,
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                                onPressed: () => Navigator.push(context,
+                                    messRoute(const ForgotPasswordScreen())),
+                                child: const Text('Forgot password?')),
+                          ),
+                          const SizedBox(height: 8),
+                          MessActionButton(
+                              label: 'Sign in',
+                              loading: _busy,
+                              onPressed: _login),
+                          const SizedBox(height: 20),
+                          const SizedBox(height: 26),
+                          Wrap(
+                              alignment: WrapAlignment.center,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text('New to MESS? ',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(color: MessColors.muted)),
+                                TextButton(
+                                    onPressed: () => Navigator.push(context,
+                                        messRoute(const RegisterScreen())),
+                                    style: TextButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 3)),
+                                    child: const Text('Create account')),
+                              ]),
+                        ]),
                   ),
                 ),
               ),
@@ -125,4 +169,3 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
 }
-

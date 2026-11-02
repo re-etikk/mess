@@ -5,9 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/mess_models.dart';
 import '../repositories/http_mess_repository.dart';
 import '../repositories/mess_repository.dart';
+import '../services/customer_auth_service.dart';
 
 class AppState extends ChangeNotifier {
-  AppState({MessRepository? repository}) : repository = repository ?? HttpMessRepository();
+  AppState({MessRepository? repository})
+      : repository = repository ?? HttpMessRepository();
 
   final MessRepository repository;
   static const String _sessionKey = 'thali_customer_saved_session';
@@ -17,6 +19,7 @@ class AppState extends ChangeNotifier {
   String customerName = 'Student';
   String customerEmail = '';
   String authToken = '';
+  String refreshToken = '';
   String location = 'Sector 62, Noida';
   String selectedProviderId = '';
   ActiveSubscription? _activeSubscription;
@@ -37,9 +40,27 @@ class AppState extends ChangeNotifier {
         customerName = data['customerName']?.toString() ?? 'Student';
         customerEmail = data['customerEmail']?.toString() ?? '';
         location = data['location']?.toString() ?? 'Sector 62, Noida';
-        // Persisted local profile data is not an authenticated Supabase session.
-        authToken = '';
-        isSignedIn = false;
+        authToken = data['authToken']?.toString() ?? '';
+        refreshToken = data['refreshToken']?.toString() ?? '';
+        isSignedIn = data['isSignedIn'] == true &&
+            customerId.isNotEmpty &&
+            authToken.isNotEmpty;
+        if (isSignedIn && refreshToken.isNotEmpty) {
+          try {
+            final refreshed = await CustomerAuthService.refreshSession(
+                refreshToken: refreshToken,
+                fallbackUserId: customerId,
+                fallbackEmail: customerEmail,
+                fallbackName: customerName);
+            customerId = refreshed.userId;
+            customerEmail = refreshed.email;
+            customerName = refreshed.name;
+            authToken = refreshed.token;
+            refreshToken = refreshed.refreshToken;
+          } catch (_) {
+            // A temporary network outage must not sign the user out on app launch.
+          }
+        }
         if (data['selectedProviderId'] != null) {
           selectedProviderId = data['selectedProviderId'].toString();
         }
@@ -56,14 +77,20 @@ class AppState extends ChangeNotifier {
             providerName: s['providerName']?.toString() ?? '',
             planName: s['planName']?.toString() ?? '',
             type: subType,
-            startDate: DateTime.tryParse(s['startDate']?.toString() ?? '') ?? DateTime.now(),
-            endDate: DateTime.tryParse(s['endDate']?.toString() ?? '') ?? DateTime.now().add(const Duration(days: 30)),
-            slotIds: (s['slotIds'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? ['lunch', 'dinner'],
+            startDate: DateTime.tryParse(s['startDate']?.toString() ?? '') ??
+                DateTime.now(),
+            endDate: DateTime.tryParse(s['endDate']?.toString() ?? '') ??
+                DateTime.now().add(const Duration(days: 30)),
+            slotIds: (s['slotIds'] as List<dynamic>?)
+                    ?.map((e) => e.toString())
+                    .toList() ??
+                ['lunch', 'dinner'],
             totalMeals: s['totalMeals'] as int?,
             mealsUsed: (s['mealsUsed'] as int?) ?? 0,
           );
         }
         notifyListeners();
+        if (isSignedIn) await _persistSession();
       }
     } catch (_) {}
   }
@@ -72,26 +99,32 @@ class AppState extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final sub = _activeSubscription;
-      await prefs.setString(_sessionKey, jsonEncode({
-        'customerId': customerId,
-        'customerName': customerName,
-        'customerEmail': customerEmail,
-        'location': location,
-        'isSignedIn': isSignedIn,
-        'selectedProviderId': selectedProviderId,
-        'activeSubscription': sub == null ? null : {
-          'id': sub.id,
-          'providerId': sub.providerId,
-          'providerName': sub.providerName,
-          'planName': sub.planName,
-          'type': sub.type.name,
-          'startDate': sub.startDate.toIso8601String(),
-          'endDate': sub.endDate.toIso8601String(),
-          'slotIds': sub.slotIds,
-          'totalMeals': sub.totalMeals,
-          'mealsUsed': sub.mealsUsed,
-        },
-      }));
+      await prefs.setString(
+          _sessionKey,
+          jsonEncode({
+            'customerId': customerId,
+            'customerName': customerName,
+            'customerEmail': customerEmail,
+            'location': location,
+            'isSignedIn': isSignedIn,
+            'authToken': authToken,
+            'refreshToken': refreshToken,
+            'selectedProviderId': selectedProviderId,
+            'activeSubscription': sub == null
+                ? null
+                : {
+                    'id': sub.id,
+                    'providerId': sub.providerId,
+                    'providerName': sub.providerName,
+                    'planName': sub.planName,
+                    'type': sub.type.name,
+                    'startDate': sub.startDate.toIso8601String(),
+                    'endDate': sub.endDate.toIso8601String(),
+                    'slotIds': sub.slotIds,
+                    'totalMeals': sub.totalMeals,
+                    'mealsUsed': sub.mealsUsed,
+                  },
+          }));
     } catch (_) {}
   }
 
@@ -106,13 +139,22 @@ class AppState extends ChangeNotifier {
   DailyMealEntitlement? get dailyMeal => _dailyMeal;
   List<MealRedemption> get history => List.unmodifiable(_history);
   Map<String, int> get pendingAddOns => Map.unmodifiable(_pendingAddOns);
-  bool get hasActiveSubscription => _activeSubscription != null && _activeSubscription!.isValidToday && _activeSubscription!.hasMealsRemaining;
-  bool get hasAnyMealAccess => hasActiveSubscription || (_dailyMeal?.isPaid == true && _dailyMeal!.isForToday(DateTime.now()));
+  bool get hasActiveSubscription =>
+      _activeSubscription != null &&
+      _activeSubscription!.isValidToday &&
+      _activeSubscription!.hasMealsRemaining;
+  bool get hasAnyMealAccess =>
+      hasActiveSubscription ||
+      (_dailyMeal?.isPaid == true && _dailyMeal!.isForToday(DateTime.now()));
   bool get canOpenScanner => true;
 
   MessProvider? get activeProvider {
-    final activeId = _activeSubscription?.isValidToday == true ? _activeSubscription!.providerId : null;
-    final dailyId = _dailyMeal != null && _dailyMeal!.isForToday(DateTime.now()) ? _dailyMeal!.providerId : null;
+    final activeId = _activeSubscription?.isValidToday == true
+        ? _activeSubscription!.providerId
+        : null;
+    final dailyId = _dailyMeal != null && _dailyMeal!.isForToday(DateTime.now())
+        ? _dailyMeal!.providerId
+        : null;
     final id = activeId ?? dailyId ?? selectedProviderId;
     return _cachedProviders.where((item) => item.id == id).firstOrNull;
   }
@@ -120,7 +162,9 @@ class AppState extends ChangeNotifier {
   Future<List<MessProvider>> getProviders() async {
     final providers = await repository.getProviders();
     _cachedProviders = providers;
-    if (_cachedProviders.isNotEmpty && (selectedProviderId.isEmpty || !_cachedProviders.any((p) => p.id == selectedProviderId))) {
+    if (_cachedProviders.isNotEmpty &&
+        (selectedProviderId.isEmpty ||
+            !_cachedProviders.any((p) => p.id == selectedProviderId))) {
       selectedProviderId = _cachedProviders.first.id;
     }
     return providers;
@@ -140,10 +184,19 @@ class AppState extends ChangeNotifier {
     return provider;
   }
 
-  void signIn({required String emailOrPhone, required String name, String? userId, String? token}) {
-    customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
-    customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
+  void signIn(
+      {required String emailOrPhone,
+      required String name,
+      String? userId,
+      String? token,
+      String? refreshToken}) {
+    customerEmail = emailOrPhone.contains('@')
+        ? emailOrPhone.trim()
+        : '$emailOrPhone@student.local';
+    customerName =
+        name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
     if (token != null) authToken = token;
+    if (refreshToken != null) this.refreshToken = refreshToken;
     if (userId != null && userId.isNotEmpty) {
       customerId = userId;
     }
@@ -155,6 +208,7 @@ class AppState extends ChangeNotifier {
   void signOut() {
     isSignedIn = false;
     authToken = '';
+    refreshToken = '';
     _activeSubscription = null;
     _dailyMeal = null;
     _redeemedSlots.clear();
@@ -180,7 +234,8 @@ class AppState extends ChangeNotifier {
   }
 
   void adjustAddOn(String itemId, int delta, {int maxQuantity = 5}) {
-    final newQuantity = ((_pendingAddOns[itemId] ?? 0) + delta).clamp(0, maxQuantity).toInt();
+    final newQuantity =
+        ((_pendingAddOns[itemId] ?? 0) + delta).clamp(0, maxQuantity).toInt();
     if (newQuantity == 0) {
       _pendingAddOns.remove(itemId);
     } else {
@@ -196,9 +251,12 @@ class AppState extends ChangeNotifier {
 
   Future<ActiveSubscription> purchasePlan(MealPlan plan) async {
     if (plan.type == SubscriptionType.dailyMeal) {
-      throw const RepositoryException('Use purchaseDailyMeal for a daily meal pass.', code: 'wrong_plan_type');
+      throw const RepositoryException(
+          'Use purchaseDailyMeal for a daily meal pass.',
+          code: 'wrong_plan_type');
     }
-    final subscription = await repository.purchasePlan(plan: plan, customerId: customerId);
+    final subscription =
+        await repository.purchasePlan(plan: plan, customerId: customerId);
     _activeSubscription = subscription;
     _dailyMeal = null;
     selectedProviderId = plan.providerId;
@@ -208,13 +266,17 @@ class AppState extends ChangeNotifier {
     return subscription;
   }
 
-  Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) => purchasePlan(plan);
+  Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) =>
+      purchasePlan(plan);
 
-  Future<DailyMealEntitlement> purchaseDailyMeal(MealPlan plan, String slotId) async {
+  Future<DailyMealEntitlement> purchaseDailyMeal(
+      MealPlan plan, String slotId) async {
     if (plan.type != SubscriptionType.dailyMeal) {
-      throw const RepositoryException('This plan is not a daily meal.', code: 'wrong_plan_type');
+      throw const RepositoryException('This plan is not a daily meal.',
+          code: 'wrong_plan_type');
     }
-    final entitlement = await repository.purchaseDailyMeal(plan: plan, slotId: slotId, customerId: customerId);
+    final entitlement = await repository.purchaseDailyMeal(
+        plan: plan, slotId: slotId, customerId: customerId);
     _dailyMeal = entitlement;
     selectedProviderId = plan.providerId;
     clearAddOns();
@@ -222,7 +284,9 @@ class AppState extends ChangeNotifier {
     return entitlement;
   }
 
-  Future<DailyMealEntitlement> purchaseDailyMealDemo(MealPlan plan, String slotId) => purchaseDailyMeal(plan, slotId);
+  Future<DailyMealEntitlement> purchaseDailyMealDemo(
+          MealPlan plan, String slotId) =>
+      purchaseDailyMeal(plan, slotId);
 
   Future<MealRedemption> redeemMealQr(String payload) async {
     final trimmed = payload.trim();
@@ -238,18 +302,22 @@ class AppState extends ChangeNotifier {
     final today = _dateKey(DateTime.now());
     final entitlementKey = '$providerId|$today|${slotName.toLowerCase()}';
     if (_redeemedSlots.contains(entitlementKey)) {
-      throw RepositoryException('Meal already redeemed for $slotName today.', code: 'duplicate_redemption');
+      throw RepositoryException('Meal already redeemed for $slotName today.',
+          code: 'duplicate_redemption');
     }
 
     // Call backend API /api/scan to verify QR token & customer entitlement
-    final redemption = await repository.redeemMeal(qrPayload: payload, customerId: customerId);
+    final redemption =
+        await repository.redeemMeal(qrPayload: payload, customerId: customerId);
 
     _redeemedSlots.add(entitlementKey);
     _history.insert(0, redemption);
 
     // If tracker plan, decrement locally to keep UI in sync
     final sub = _activeSubscription;
-    if (sub != null && sub.type == SubscriptionType.mealTracker && sub.mealsRemaining != null) {
+    if (sub != null &&
+        sub.type == SubscriptionType.mealTracker &&
+        sub.mealsRemaining != null) {
       _activeSubscription = ActiveSubscription(
         id: sub.id,
         providerId: sub.providerId,
@@ -272,7 +340,8 @@ class AppState extends ChangeNotifier {
 
   Future<MealRedemption> redeemDemoQr(String payload) => redeemMealQr(payload);
 
-  void recordAddOnPayment({required String providerName, required List<CartAddOn> addOns}) {
+  void recordAddOnPayment(
+      {required String providerName, required List<CartAddOn> addOns}) {
     if (addOns.isEmpty) return;
     final now = DateTime.now();
     _history.insert(
@@ -289,15 +358,26 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void recordDemoAddOnPayment({required String providerName, required List<CartAddOn> addOns}) => recordAddOnPayment(providerName: providerName, addOns: addOns);
+  void recordDemoAddOnPayment(
+          {required String providerName, required List<CartAddOn> addOns}) =>
+      recordAddOnPayment(providerName: providerName, addOns: addOns);
 
-  bool isSlotRedeemed(String providerId, String slotId, DateTime date) => _redeemedSlots.contains('$providerId|${_dateKey(date)}|${slotId.toLowerCase()}');
+  bool isSlotRedeemed(String providerId, String slotId, DateTime date) =>
+      _redeemedSlots
+          .contains('$providerId|${_dateKey(date)}|${slotId.toLowerCase()}');
 
-  static String _dateKey(DateTime date) => '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  static String _dateKey(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
   static String _nameFromEmail(String email) {
-    final local = email.split('@').first.replaceAll(RegExp(r'[._-]+'), ' ').trim();
+    final local =
+        email.split('@').first.replaceAll(RegExp(r'[._-]+'), ' ').trim();
     if (local.isEmpty) return 'Student';
-    return local.split(' ').map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}').join(' ');
+    return local
+        .split(' ')
+        .map((part) => part.isEmpty
+            ? part
+            : '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
 }

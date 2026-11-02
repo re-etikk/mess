@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ProviderSession {
   ProviderSession({
     required this.token,
+    this.refreshToken = '',
     required this.userId,
     required this.email,
     required this.providerId,
@@ -12,26 +13,30 @@ class ProviderSession {
   });
 
   final String token;
+  final String refreshToken;
   final String userId;
   final String email;
   final String providerId;
   final String businessName;
 
   Map<String, dynamic> toJson() => {
-    'token': token,
-    'userId': userId,
-    'email': email,
-    'providerId': providerId,
-    'businessName': businessName,
-  };
+        'token': token,
+        'refreshToken': refreshToken,
+        'userId': userId,
+        'email': email,
+        'providerId': providerId,
+        'businessName': businessName,
+      };
 
-  factory ProviderSession.fromJson(Map<String, dynamic> json) => ProviderSession(
-    token: json['token'] as String? ?? '',
-    userId: json['userId'] as String? ?? '',
-    email: json['email'] as String? ?? '',
-    providerId: json['providerId'] as String? ?? '',
-    businessName: json['businessName'] as String? ?? '',
-  );
+  factory ProviderSession.fromJson(Map<String, dynamic> json) =>
+      ProviderSession(
+        token: json['token'] as String? ?? '',
+        refreshToken: json['refreshToken'] as String? ?? '',
+        userId: json['userId'] as String? ?? '',
+        email: json['email'] as String? ?? '',
+        providerId: json['providerId'] as String? ?? '',
+        businessName: json['businessName'] as String? ?? '',
+      );
 }
 
 class DashboardMetrics {
@@ -64,7 +69,8 @@ class ProviderApiService {
 
   static Map<String, dynamic> _decodeResponse(http.Response response) {
     if (response.statusCode >= 300 && response.statusCode < 400) {
-      throw Exception('The sign-in service redirected the request. Update the app and try again.');
+      throw Exception(
+          'The sign-in service redirected the request. Update the app and try again.');
     }
     try {
       final decoded = jsonDecode(response.body);
@@ -72,11 +78,18 @@ class ProviderApiService {
     } on FormatException {
       // Translate proxy, deployment, and HTML responses into a useful app error.
     }
-    throw Exception('The server returned an unexpected response. Please try again shortly.');
+    throw Exception(
+        'The server returned an unexpected response. Please try again shortly.');
   }
 
   static ProviderSession? currentSession;
   static const String _sessionKey = 'mess_provider_saved_session';
+
+  static Map<String, String> _authHeaders({bool json = false}) => {
+        if (json) 'Content-Type': 'application/json',
+        if (currentSession?.token.isNotEmpty == true)
+          'Authorization': 'Bearer ${currentSession!.token}',
+      };
 
   static Future<void> saveSession(ProviderSession session) async {
     try {
@@ -94,10 +107,47 @@ class ProviderApiService {
         final json = jsonDecode(str) as Map<String, dynamic>;
         final session = ProviderSession.fromJson(json);
         currentSession = session;
-        return session;
+        if (session.refreshToken.isNotEmpty) {
+          try {
+            final refreshed = await refreshSession(session.refreshToken);
+            await saveSession(refreshed);
+            return refreshed;
+          } catch (_) {
+            // Keep a valid current access token when refresh is temporarily unavailable.
+            if (session.token.isEmpty) return null;
+          }
+        }
+        currentSession = session;
+        return session.token.isEmpty ? null : session;
       }
     } catch (_) {}
     return null;
+  }
+
+  static Future<ProviderSession> refreshSession(String refreshToken) async {
+    final response = await http
+        .post(Uri.parse('$baseUrl/api/auth/refresh'),
+            headers: _authHeaders(json: true),
+            body: jsonEncode({'refresh_token': refreshToken}))
+        .timeout(const Duration(seconds: 12));
+    final data = _decodeResponse(response);
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        data['success'] != true) {
+      throw Exception(data['error'] ?? 'Session refresh failed.');
+    }
+    final previous = currentSession;
+    final user = data['user'] as Map<String, dynamic>? ?? {};
+    return ProviderSession(
+        token: data['token']?.toString() ?? '',
+        refreshToken: data['refresh_token']?.toString() ?? refreshToken,
+        userId: user['id']?.toString() ?? previous?.userId ?? '',
+        email: user['email']?.toString() ?? previous?.email ?? '',
+        providerId:
+            user['provider_id']?.toString() ?? previous?.providerId ?? '',
+        businessName: user['provider_name']?.toString() ??
+            previous?.businessName ??
+            'My Mess');
   }
 
   static Future<void> clearSession() async {
@@ -109,14 +159,23 @@ class ProviderApiService {
   }
 
   static Future<void> deleteAccount(ProviderSession session) async {
-    if (session.token.isEmpty) throw Exception('Your login session expired. Sign in again before deleting your account.');
+    if (session.token.isEmpty) {
+      throw Exception(
+          'Your login session expired. Sign in again before deleting your account.');
+    }
     final response = await http.delete(
       Uri.parse('$baseUrl/api/account/deletion'),
-      headers: {'Authorization': 'Bearer ${session.token}', 'x-account-deletion-confirmation': 'DELETE'},
+      headers: {
+        'Authorization': 'Bearer ${session.token}',
+        'x-account-deletion-confirmation': 'DELETE'
+      },
     ).timeout(const Duration(seconds: 20));
     final data = _decodeResponse(response);
-    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
-      throw Exception(data['error'] ?? 'Account deletion could not be completed.');
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        data['success'] != true) {
+      throw Exception(
+          data['error'] ?? 'Account deletion could not be completed.');
     }
     await clearSession();
   }
@@ -129,7 +188,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'email': email.trim(),
             'password': password,
@@ -139,19 +198,26 @@ class ProviderApiService {
         .timeout(const Duration(seconds: 12));
 
     final data = _decodeResponse(response);
-    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       final provider = data['provider'] as Map<String, dynamic>?;
       final providerId = user['provider_id'] ?? provider?['id'];
-      final businessName = user['provider_name'] ?? provider?['display_name'] ?? 'My Mess';
+      final businessName =
+          user['provider_name'] ?? provider?['display_name'] ?? 'My Mess';
 
       if (providerId == null || providerId.toString().isEmpty) {
-        throw Exception('No approved mess found for this login. Please register your mess and await admin approval.');
+        throw Exception(
+            'No approved mess found for this login. Please register your mess and await admin approval.');
       }
 
       final session = ProviderSession(
         token: data['token'] as String? ?? '',
-        userId: user['id'] as String? ?? (throw Exception('Authentication response is missing the account ID.')),
+        refreshToken: data['refresh_token'] as String? ?? '',
+        userId: user['id'] as String? ??
+            (throw Exception(
+                'Authentication response is missing the account ID.')),
         email: email.trim(),
         providerId: providerId.toString(),
         businessName: businessName.toString(),
@@ -159,14 +225,18 @@ class ProviderApiService {
       await saveSession(session);
       return session;
     } else {
-      throw Exception(data['error'] ?? data['message'] ?? 'Login failed. Please verify credentials.');
+      throw Exception(data['error'] ??
+          data['message'] ??
+          'Login failed. Please verify credentials.');
     }
   }
 
   static Future<List<Map<String, dynamic>>> fetchApprovedProviders() async {
     try {
       final uri = Uri.parse('$baseUrl/api/providers');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = (data is Map && data['providers'] is List)
@@ -191,7 +261,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'email': email.trim(),
             'password': password,
@@ -206,14 +276,20 @@ class ProviderApiService {
         .timeout(const Duration(seconds: 12));
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       final provider = data['provider'] as Map<String, dynamic>?;
       final providerId = user['provider_id'] ?? provider?['id'];
-      if (providerId == null || providerId.toString().isEmpty || user['id'] == null) {
-        throw Exception('The server did not return a valid partner account. Please sign in or contact support.');
+      if (providerId == null ||
+          providerId.toString().isEmpty ||
+          user['id'] == null) {
+        throw Exception(
+            'The server did not return a valid partner account. Please sign in or contact support.');
       }
-      final name = user['provider_name'] ?? provider?['display_name'] ?? businessName;
+      final name =
+          user['provider_name'] ?? provider?['display_name'] ?? businessName;
 
       final session = ProviderSession(
         token: data['token'] as String? ?? '',
@@ -225,13 +301,18 @@ class ProviderApiService {
       await saveSession(session);
       return session;
     } else {
-      throw Exception(data['error'] ?? data['message'] ?? 'Registration failed. Please check inputs.');
+      throw Exception(data['error'] ??
+          data['message'] ??
+          'Registration failed. Please check inputs.');
     }
   }
 
   static Future<DashboardMetrics> fetchDashboard(String providerId) async {
-    final uri = Uri.parse('$baseUrl/api/provider/dashboard?provider_id=$providerId');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final uri =
+        Uri.parse('$baseUrl/api/provider/dashboard?provider_id=$providerId');
+    final response = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final metrics = data['metrics'] as Map<String, dynamic>? ?? {};
@@ -243,30 +324,43 @@ class ProviderApiService {
         todayScans: (metrics['today_scans_count'] as num?)?.toInt() ?? 0,
         totalScans: (metrics['total_scans'] as num?)?.toInt() ?? 0,
         unbilledScans: (metrics['unbilled_scans'] as num?)?.toInt() ?? 0,
-        activeSubscribers: (metrics['active_subscribers'] as num?)?.toInt() ?? 0,
+        activeSubscribers:
+            (metrics['active_subscribers'] as num?)?.toInt() ?? 0,
         activePlans: (metrics['active_plans_count'] as num?)?.toInt() ?? 0,
         currentSlot: (data['current_slot'] as String?) ?? 'LUNCH',
         todayDate: (data['today_date'] as String?) ?? '',
         recentRedemptions: redemptions,
       );
     }
-    throw Exception('Failed to load dashboard metrics.');
+    final data = _decodeResponse(response);
+    throw Exception(data['error'] ??
+        'Failed to load dashboard metrics (HTTP ${response.statusCode}).');
   }
 
-  static Future<String> fetchDailyQrToken(String providerId, {String? slot}) async {
+  static Future<String> fetchDailyQrToken(String providerId,
+      {String? slot}) async {
     final slotQuery = slot != null ? '&slot=$slot' : '';
-    final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final uri = Uri.parse(
+        '$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
+    final response = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       return (data['token'] as String?) ?? '';
     }
-    throw Exception('Failed to generate daily QR token.');
+    final data = _decodeResponse(response);
+    throw Exception(data['error'] ??
+        'Failed to generate daily QR token (HTTP ${response.statusCode}).');
   }
 
-  static Future<List<Map<String, dynamic>>> fetchSubscribers(String providerId) async {
-    final uri = Uri.parse('$baseUrl/api/provider/subscriptions?provider_id=$providerId');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+  static Future<List<Map<String, dynamic>>> fetchSubscribers(
+      String providerId) async {
+    final uri = Uri.parse(
+        '$baseUrl/api/provider/subscriptions?provider_id=$providerId');
+    final response = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = (data['subscriptions'] as List<dynamic>? ?? [])
@@ -277,10 +371,14 @@ class ProviderApiService {
     return [];
   }
 
-  static Future<List<Map<String, dynamic>>> fetchAttendance(String providerId, {String? date}) async {
+  static Future<List<Map<String, dynamic>>> fetchAttendance(String providerId,
+      {String? date}) async {
     final dateQuery = date != null ? '&date=$date' : '';
-    final uri = Uri.parse('$baseUrl/api/provider/redemptions?provider_id=$providerId$dateQuery');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final uri = Uri.parse(
+        '$baseUrl/api/provider/redemptions?provider_id=$providerId$dateQuery');
+    final response = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = (data['redemptions'] as List<dynamic>? ?? [])
@@ -291,10 +389,14 @@ class ProviderApiService {
     return [];
   }
 
-  static Future<List<Map<String, dynamic>>> fetchProviderPlans(String providerId) async {
+  static Future<List<Map<String, dynamic>>> fetchProviderPlans(
+      String providerId) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/provider/plans?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final uri =
+          Uri.parse('$baseUrl/api/provider/plans?provider_id=$providerId');
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = (data is Map && data['plans'] is List)
@@ -322,12 +424,13 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'provider_id': providerId,
             'customer_name': customerName.trim(),
             'customer_phone': customerPhone.trim(),
-            if (customerEmail != null && customerEmail.isNotEmpty) 'customer_email': customerEmail.trim(),
+            if (customerEmail != null && customerEmail.isNotEmpty)
+              'customer_email': customerEmail.trim(),
             if (planId != null && planId.isNotEmpty) 'plan_id': planId,
             'payment_mode': paymentMode,
             if (amountPaid != null) 'amount_paid_inr': amountPaid,
@@ -339,7 +442,9 @@ class ProviderApiService {
         .timeout(const Duration(seconds: 12));
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data['success'] == true) {
       return data;
     }
     throw Exception(data['error'] ?? 'Failed to add manual member.');
@@ -357,7 +462,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'provider_id': providerId,
             'subscription_id': subscriptionId,
@@ -370,16 +475,22 @@ class ProviderApiService {
         .timeout(const Duration(seconds: 12));
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data['success'] == true) {
       return data;
     }
     throw Exception(data['error'] ?? 'Failed to renew subscription.');
   }
 
-  static Future<List<Map<String, dynamic>>> fetchSubscriberHistory(String providerId, String subscriberId) async {
+  static Future<List<Map<String, dynamic>>> fetchSubscriberHistory(
+      String providerId, String subscriberId) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/provider/subscribers/$subscriberId/history?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final uri = Uri.parse(
+          '$baseUrl/api/provider/subscribers/$subscriberId/history?provider_id=$providerId');
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final list = (data['history'] as List<dynamic>? ?? [])
@@ -393,11 +504,16 @@ class ProviderApiService {
 
   static Future<Map<String, dynamic>> fetchMenu(String providerId) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final uri =
+          Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final menuList = (data['menus'] as List<dynamic>? ?? data['menu'] as List<dynamic>? ?? []);
+        final menuList = (data['menus'] as List<dynamic>? ??
+            data['menu'] as List<dynamic>? ??
+            []);
         return {'menus': menuList, 'menu': menuList};
       }
     } catch (_) {}
@@ -412,22 +528,25 @@ class ProviderApiService {
     bool isExtra = false,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-      },
-      body: jsonEncode({
-        'provider_id': providerId,
-        'action': 'add_item',
-        'name': name,
-        'item_name': name,
-        'slot': slot.toLowerCase(),
-        'price': price,
-        'is_extra': isExtra,
-      }),
-    ).timeout(const Duration(seconds: 10));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            if (currentSession?.token.isNotEmpty == true)
+              'Authorization': 'Bearer ${currentSession!.token}',
+          },
+          body: jsonEncode({
+            'provider_id': providerId,
+            'action': 'add_item',
+            'name': name,
+            'item_name': name,
+            'slot': slot.toLowerCase(),
+            'price': price,
+            'is_extra': isExtra,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to add menu item');
@@ -440,20 +559,23 @@ class ProviderApiService {
     required String slot,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-      },
-      body: jsonEncode({
-        'provider_id': providerId,
-        'action': 'remove_item',
-        'name': name,
-        'item_name': name,
-        'slot': slot.toLowerCase(),
-      }),
-    ).timeout(const Duration(seconds: 10));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            if (currentSession?.token.isNotEmpty == true)
+              'Authorization': 'Bearer ${currentSession!.token}',
+          },
+          body: jsonEncode({
+            'provider_id': providerId,
+            'action': 'remove_item',
+            'name': name,
+            'item_name': name,
+            'slot': slot.toLowerCase(),
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to remove menu item');
@@ -466,20 +588,23 @@ class ProviderApiService {
     required bool isAvailable,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-      },
-      body: jsonEncode({
-        'provider_id': providerId,
-        'action': 'toggle_availability',
-        'name': name,
-        'item_name': name,
-        'is_available': isAvailable,
-      }),
-    ).timeout(const Duration(seconds: 10));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            if (currentSession?.token.isNotEmpty == true)
+              'Authorization': 'Bearer ${currentSession!.token}',
+          },
+          body: jsonEncode({
+            'provider_id': providerId,
+            'action': 'toggle_availability',
+            'name': name,
+            'item_name': name,
+            'is_available': isAvailable,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to toggle availability');
@@ -498,24 +623,27 @@ class ProviderApiService {
     int? discountPercent,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/plan');
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-      },
-      body: jsonEncode({
-        'provider_id': providerId,
-        if (planId != null) 'id': planId,
-        'name': name,
-        'description': description,
-        'plan_type': planType,
-        'duration_days': durationDays,
-        'price_inr': priceInr,
-        if (mealCredits != null) 'meal_credits': mealCredits,
-        if (discountPercent != null) 'discount_percent': discountPercent,
-      }),
-    ).timeout(const Duration(seconds: 10));
+    final response = await http
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            if (currentSession?.token.isNotEmpty == true)
+              'Authorization': 'Bearer ${currentSession!.token}',
+          },
+          body: jsonEncode({
+            'provider_id': providerId,
+            if (planId != null) 'id': planId,
+            'name': name,
+            'description': description,
+            'plan_type': planType,
+            'duration_days': durationDays,
+            'price_inr': priceInr,
+            if (mealCredits != null) 'meal_credits': mealCredits,
+            if (discountPercent != null) 'discount_percent': discountPercent,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
 
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
@@ -527,11 +655,13 @@ class ProviderApiService {
     required String providerId,
     required String planId,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/provider/plan?provider_id=$providerId&plan_id=$planId');
+    final uri = Uri.parse(
+        '$baseUrl/api/provider/plan?provider_id=$providerId&plan_id=$planId');
     final response = await http.delete(
       uri,
       headers: {
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+        if (currentSession?.token.isNotEmpty == true)
+          'Authorization': 'Bearer ${currentSession!.token}',
       },
     ).timeout(const Duration(seconds: 10));
     final data = jsonDecode(response.body);
@@ -540,10 +670,14 @@ class ProviderApiService {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> fetchOrders(String providerId) async {
+  static Future<List<Map<String, dynamic>>> fetchOrders(
+      String providerId) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/provider/orders?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final uri =
+          Uri.parse('$baseUrl/api/provider/orders?provider_id=$providerId');
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final list = (data['orders'] as List<dynamic>? ?? [])
@@ -564,18 +698,20 @@ class ProviderApiService {
     String paymentMode = 'cash',
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/orders');
-    final response = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'provider_id': providerId,
-        'customer_name': customerName,
-        'customer_phone': customerPhone ?? '',
-        'items_summary': itemsSummary,
-        'total_amount_inr': totalAmount,
-        'payment_mode': paymentMode,
-      }),
-    ).timeout(const Duration(seconds: 10));
+    final response = await http
+        .post(
+          uri,
+          headers: _authHeaders(json: true),
+          body: jsonEncode({
+            'provider_id': providerId,
+            'customer_name': customerName,
+            'customer_phone': customerPhone ?? '',
+            'items_summary': itemsSummary,
+            'total_amount_inr': totalAmount,
+            'payment_mode': paymentMode,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to record order');
@@ -584,8 +720,11 @@ class ProviderApiService {
 
   static Future<Map<String, dynamic>> fetchTimings(String providerId) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/provider/timings?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final uri =
+          Uri.parse('$baseUrl/api/provider/timings?provider_id=$providerId');
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return data['timings'] as Map<String, dynamic>? ?? {};
@@ -599,14 +738,16 @@ class ProviderApiService {
     required Map<String, dynamic> timings,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/timings');
-    await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'provider_id': providerId,
-        ...timings,
-      }),
-    ).timeout(const Duration(seconds: 10));
+    await http
+        .post(
+          uri,
+          headers: _authHeaders(json: true),
+          body: jsonEncode({
+            'provider_id': providerId,
+            ...timings,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
   }
 
   static Future<void> submitSupportTicket({
@@ -619,19 +760,21 @@ class ProviderApiService {
     String category = 'general',
   }) async {
     final uri = Uri.parse('$baseUrl/api/support/ticket');
-    final response = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'name': name,
-        'email': email,
-        'phone': phone,
-        'role': role,
-        'subject': subject,
-        'message': message,
-        'category': category,
-      }),
-    ).timeout(const Duration(seconds: 12));
+    final response = await http
+        .post(
+          uri,
+          headers: _authHeaders(json: true),
+          body: jsonEncode({
+            'name': name,
+            'email': email,
+            'phone': phone,
+            'role': role,
+            'subject': subject,
+            'message': message,
+            'category': category,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to submit support ticket');
@@ -640,8 +783,11 @@ class ProviderApiService {
 
   static Future<bool> fetchKitchenStatus(String providerId) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/provider/status?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final uri =
+          Uri.parse('$baseUrl/api/provider/status?provider_id=$providerId');
+      final response = await http
+          .get(uri, headers: _authHeaders())
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return (data['is_open_today'] as bool?) ?? true;
@@ -661,7 +807,8 @@ class ProviderApiService {
             uri,
             headers: {
               'Content-Type': 'application/json',
-              if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+              if (currentSession?.token.isNotEmpty == true)
+                'Authorization': 'Bearer ${currentSession!.token}',
             },
             body: jsonEncode({
               'provider_id': providerId,
