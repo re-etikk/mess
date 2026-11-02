@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ProviderSession {
   ProviderSession({
     required this.token,
+    this.refreshToken = '',
     required this.userId,
     required this.email,
     required this.providerId,
@@ -12,6 +13,7 @@ class ProviderSession {
   });
 
   final String token;
+  final String refreshToken;
   final String userId;
   final String email;
   final String providerId;
@@ -19,6 +21,7 @@ class ProviderSession {
 
   Map<String, dynamic> toJson() => {
     'token': token,
+    'refreshToken': refreshToken,
     'userId': userId,
     'email': email,
     'providerId': providerId,
@@ -27,6 +30,7 @@ class ProviderSession {
 
   factory ProviderSession.fromJson(Map<String, dynamic> json) => ProviderSession(
     token: json['token'] as String? ?? '',
+    refreshToken: json['refreshToken'] as String? ?? '',
     userId: json['userId'] as String? ?? '',
     email: json['email'] as String? ?? '',
     providerId: json['providerId'] as String? ?? '',
@@ -78,6 +82,11 @@ class ProviderApiService {
   static ProviderSession? currentSession;
   static const String _sessionKey = 'mess_provider_saved_session';
 
+  static Map<String, String> _authHeaders({bool json = false}) => {
+    if (json) 'Content-Type': 'application/json',
+    if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+  };
+
   static Future<void> saveSession(ProviderSession session) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -94,10 +103,33 @@ class ProviderApiService {
         final json = jsonDecode(str) as Map<String, dynamic>;
         final session = ProviderSession.fromJson(json);
         currentSession = session;
-        return session;
+        if (session.refreshToken.isNotEmpty) {
+          try {
+            final refreshed = await refreshSession(session.refreshToken);
+            await saveSession(refreshed);
+            return refreshed;
+          } catch (_) {
+            if (session.token.isEmpty) return null;
+          }
+        }
+        return session.token.isEmpty ? null : session;
       }
     } catch (_) {}
     return null;
+  }
+
+  static Future<ProviderSession> refreshSession(String refreshToken) async {
+    final response = await http.post(Uri.parse('$baseUrl/api/auth/refresh'),
+      headers: _authHeaders(json: true), body: jsonEncode({'refresh_token': refreshToken})).timeout(const Duration(seconds: 12));
+    final data = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
+      throw Exception(data['error'] ?? 'Session refresh failed.');
+    }
+    final previous = currentSession;
+    final user = data['user'] as Map<String, dynamic>? ?? {};
+    return ProviderSession(token: data['token']?.toString() ?? '', refreshToken: data['refresh_token']?.toString() ?? refreshToken,
+      userId: user['id']?.toString() ?? previous?.userId ?? '', email: user['email']?.toString() ?? previous?.email ?? '',
+      providerId: previous?.providerId ?? '', businessName: previous?.businessName ?? 'My Mess');
   }
 
   static Future<void> clearSession() async {
@@ -116,7 +148,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'email': email.trim(),
             'password': password,
@@ -138,6 +170,7 @@ class ProviderApiService {
 
       final session = ProviderSession(
         token: data['token'] as String? ?? '',
+        refreshToken: data['refresh_token'] as String? ?? '',
         userId: user['id'] as String? ?? 'usr-provider',
         email: email.trim(),
         providerId: providerId.toString(),
@@ -153,7 +186,7 @@ class ProviderApiService {
   static Future<List<Map<String, dynamic>>> fetchApprovedProviders() async {
     try {
       final uri = Uri.parse('$baseUrl/api/providers');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = (data is Map && data['providers'] is List)
@@ -178,7 +211,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'email': email.trim().isNotEmpty ? email.trim() : '${businessName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}@mess.in',
             'password': password.isNotEmpty ? password : 'ProviderPass@123',
@@ -215,7 +248,7 @@ class ProviderApiService {
 
   static Future<DashboardMetrics> fetchDashboard(String providerId) async {
     final uri = Uri.parse('$baseUrl/api/provider/dashboard?provider_id=$providerId');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final metrics = data['metrics'] as Map<String, dynamic>? ?? {};
@@ -234,23 +267,25 @@ class ProviderApiService {
         recentRedemptions: redemptions,
       );
     }
-    throw Exception('Failed to load dashboard metrics.');
+    final data = _decodeResponse(response);
+    throw Exception(data['error'] ?? 'Failed to load dashboard metrics (HTTP ${response.statusCode}).');
   }
 
   static Future<String> fetchDailyQrToken(String providerId, {String? slot}) async {
     final slotQuery = slot != null ? '&slot=$slot' : '';
     final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       return (data['token'] as String?) ?? '';
     }
-    throw Exception('Failed to generate daily QR token.');
+    final data = _decodeResponse(response);
+    throw Exception(data['error'] ?? 'Failed to generate daily QR token (HTTP ${response.statusCode}).');
   }
 
   static Future<List<Map<String, dynamic>>> fetchSubscribers(String providerId) async {
     final uri = Uri.parse('$baseUrl/api/provider/subscriptions?provider_id=$providerId');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = (data['subscriptions'] as List<dynamic>? ?? [])
@@ -264,7 +299,7 @@ class ProviderApiService {
   static Future<List<Map<String, dynamic>>> fetchAttendance(String providerId, {String? date}) async {
     final dateQuery = date != null ? '&date=$date' : '';
     final uri = Uri.parse('$baseUrl/api/provider/redemptions?provider_id=$providerId$dateQuery');
-    final response = await http.get(uri).timeout(const Duration(seconds: 12));
+    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final list = (data['redemptions'] as List<dynamic>? ?? [])
@@ -278,7 +313,7 @@ class ProviderApiService {
   static Future<List<Map<String, dynamic>>> fetchProviderPlans(String providerId) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/plans?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = (data is Map && data['plans'] is List)
@@ -306,7 +341,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'provider_id': providerId,
             'customer_name': customerName.trim(),
@@ -341,7 +376,7 @@ class ProviderApiService {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'provider_id': providerId,
             'subscription_id': subscriptionId,
@@ -363,7 +398,7 @@ class ProviderApiService {
   static Future<List<Map<String, dynamic>>> fetchSubscriberHistory(String providerId, String subscriberId) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/subscribers/$subscriberId/history?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final list = (data['history'] as List<dynamic>? ?? [])
@@ -378,7 +413,7 @@ class ProviderApiService {
   static Future<Map<String, dynamic>> fetchMenu(String providerId) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final menuList = (data['menus'] as List<dynamic>? ?? data['menu'] as List<dynamic>? ?? []);
@@ -527,7 +562,7 @@ class ProviderApiService {
   static Future<List<Map<String, dynamic>>> fetchOrders(String providerId) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/orders?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final list = (data['orders'] as List<dynamic>? ?? [])
@@ -550,7 +585,7 @@ class ProviderApiService {
     final uri = Uri.parse('$baseUrl/api/provider/orders');
     final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _authHeaders(json: true),
       body: jsonEncode({
         'provider_id': providerId,
         'customer_name': customerName,
@@ -569,7 +604,7 @@ class ProviderApiService {
   static Future<Map<String, dynamic>> fetchTimings(String providerId) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/timings?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return data['timings'] as Map<String, dynamic>? ?? {};
@@ -585,7 +620,7 @@ class ProviderApiService {
     final uri = Uri.parse('$baseUrl/api/provider/timings');
     await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _authHeaders(json: true),
       body: jsonEncode({
         'provider_id': providerId,
         ...timings,
@@ -605,7 +640,7 @@ class ProviderApiService {
     final uri = Uri.parse('$baseUrl/api/support/ticket');
     final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _authHeaders(json: true),
       body: jsonEncode({
         'name': name,
         'email': email,
@@ -625,7 +660,7 @@ class ProviderApiService {
   static Future<bool> fetchKitchenStatus(String providerId) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/status?provider_id=$providerId');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return (data['is_open_today'] as bool?) ?? true;

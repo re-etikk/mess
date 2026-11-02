@@ -7,12 +7,14 @@ class CustomerAuthResult {
     required this.email,
     required this.name,
     required this.token,
+    this.refreshToken = '',
   });
 
   final String userId;
   final String email;
   final String name;
   final String token;
+  final String refreshToken;
 }
 
 class CustomerAuthService {
@@ -59,9 +61,22 @@ class CustomerAuthService {
         email: user['email']?.toString() ?? email.trim(),
         name: user['name']?.toString() ?? email.split('@')[0],
         token: data['token']?.toString() ?? '',
+        refreshToken: data['refresh_token']?.toString() ?? '',
       );
     }
     throw Exception(data['error'] ?? data['message'] ?? 'Login failed. Please check credentials.');
+  }
+
+  static Future<CustomerAuthResult> refreshSession({required String refreshToken, required String fallbackUserId, required String fallbackEmail, required String fallbackName}) async {
+    final response = await http.post(Uri.parse('$baseUrl/api/auth/refresh'),
+      headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refresh_token': refreshToken})).timeout(const Duration(seconds: 12));
+    final data = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
+      throw Exception(data['error'] ?? 'Your session could not be refreshed. Please sign in again.');
+    }
+    final user = data['user'] as Map<String, dynamic>? ?? {};
+    return CustomerAuthResult(userId: user['id']?.toString() ?? fallbackUserId, email: user['email']?.toString() ?? fallbackEmail,
+      name: user['name']?.toString() ?? fallbackName, token: data['token']?.toString() ?? '', refreshToken: data['refresh_token']?.toString() ?? refreshToken);
   }
 
   static Future<CustomerAuthResult> register({
