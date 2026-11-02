@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { resolveRequestedPortalRole } from '@/lib/auth/portal-role';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,21 +36,17 @@ export async function POST(req: NextRequest) {
 
     const roleNames = new Set((roles ?? []).map((row) => row.role));
     const activeMemberships = memberships ?? [];
-    const resolvedRole = roleNames.has('admin')
-      ? 'admin'
-      : activeMemberships.length > 0 || roleNames.has('provider')
-        ? 'provider'
-        : roleNames.has('customer')
-          ? 'customer'
-          : null;
+    const managementMemberships = activeMemberships.filter((membership) => ['owner', 'manager'].includes(membership.role));
+    const requestedRole = body.role;
+    const resolvedRole = resolveRequestedPortalRole(requestedRole, roleNames, managementMemberships.length);
 
-    if (!resolvedRole || (body.role && body.role !== resolvedRole)) {
+    if (!resolvedRole || (requestedRole && !['admin', 'provider', 'customer'].includes(requestedRole))) {
       await supabase.auth.signOut();
       return NextResponse.json({ success: false, error: 'This account is not authorized for that portal.' }, { status: 403 });
     }
 
     const profileResult = await supabase.from('profiles').select('display_name').eq('id', data.user.id).maybeSingle();
-    const providerId = activeMemberships.find((membership) => ['owner', 'manager'].includes(membership.role))?.provider_id;
+    const providerId = managementMemberships[0]?.provider_id;
     const { data: provider } = providerId
       ? await supabase.from('providers').select('id,display_name,status').eq('id', providerId).maybeSingle()
       : { data: null };
