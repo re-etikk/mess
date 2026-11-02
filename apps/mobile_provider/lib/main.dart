@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/provider_api_service.dart';
@@ -146,7 +147,7 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
     try {
       final session = await ProviderApiService.login(
         email: emailText,
-        password: passText.isNotEmpty ? passText : 'MessOwner@2026',
+        password: passText,
       );
       if (!mounted) return;
       showNotice(context, 'Signed in as ${session.businessName}');
@@ -189,20 +190,19 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                 const SizedBox(height: 16),
                 ...providers.map((p) {
                   final name = p['display_name']?.toString() ?? 'Mess';
-                  final phone = p['public_phone']?.toString() ?? '';
+                  final emailAddress = p['public_email']?.toString() ?? '';
                   final city = p['city']?.toString() ?? '';
-                  final pId = p['id']?.toString() ?? '';
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     leading: const CircleAvatar(backgroundColor: Color(0xFFFFF0D8), child: Icon(Icons.storefront_outlined, color: orange)),
                     title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
-                    subtitle: Text([city, phone].where((s) => s.isNotEmpty).join(' • '), style: const TextStyle(fontSize: 12, color: muted)),
+                    subtitle: Text([city, emailAddress].where((s) => s.isNotEmpty).join(' • '), style: const TextStyle(fontSize: 12, color: muted)),
                     trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: muted),
                     onTap: () {
                       Navigator.pop(bottomSheetContext);
-                      email.text = phone.isNotEmpty ? phone : (p['public_email']?.toString() ?? pId);
-                      password.text = 'MessOwner@2026';
-                      _handleSignIn();
+                      email.text = emailAddress;
+                      password.clear();
+                      showNotice(context, 'Mess selected. Enter your account password to continue.');
                     },
                   );
                 }),
@@ -241,11 +241,11 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                 const SizedBox(height: 8),
                 const Text('Sign in to manage your mess menu, daily counter QR, and customer subscriptions.', style: TextStyle(color: muted, fontSize: 14)),
                 const SizedBox(height: 26),
-                const FieldLabel('Provider phone or email'),
+                const FieldLabel('Account email'),
                 TextField(
                   controller: email,
                   keyboardType: TextInputType.text,
-                  decoration: const InputDecoration(hintText: 'e.g. 7250171036 or owner@mess.in', prefixIcon: Icon(Icons.phone_outlined)),
+                  decoration: const InputDecoration(hintText: 'owner@example.com', prefixIcon: Icon(Icons.mail_outline)),
                 ),
                 const SizedBox(height: 16),
                 const FieldLabel('Account password'),
@@ -2023,6 +2023,28 @@ class MoreManagementScreen extends StatelessWidget {
   final ValueChanged<String> onSelect;
   final VoidCallback? onSignOut;
 
+  Future<void> _deleteAccount(BuildContext context) async {
+    final confirmation = TextEditingController();
+    final confirmed = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Delete partner account?'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Your partner access will be removed and mess listings you own will be disabled. Personal profile data will be deleted; transaction records may be retained in anonymized form where required. This cannot be undone.'),
+        const SizedBox(height: 14), TextField(controller: confirmation, decoration: const InputDecoration(labelText: 'Type DELETE to confirm')),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, confirmation.text.trim() == 'DELETE'), child: const Text('Delete account'))],
+    ));
+    confirmation.dispose();
+    if (confirmed != true || !context.mounted) return;
+    try {
+      await ProviderApiService.deleteAccount(session);
+      if (!context.mounted) return;
+      showNotice(context, 'Your Thali partner account has been deleted.');
+      onSignOut?.call();
+    } catch (error) {
+      if (context.mounted) showNotice(context, error.toString().replaceAll('Exception: ', ''), isError: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
@@ -2038,7 +2060,15 @@ class MoreManagementScreen extends StatelessWidget {
           MoreMenuTile(icon: Icons.account_balance_wallet_outlined, title: 'Settlement & Payouts', subtitle: 'Platform scan billing and payout summary', onTap: () => onSelect('Earnings')),
           MoreMenuTile(icon: Icons.support_agent_outlined, title: 'Help & Support Desk', subtitle: 'Submit issues and feedback directly to support', onTap: () => onSelect('Support')),
           MoreMenuTile(icon: Icons.store_mall_directory_outlined, title: 'Mess Profile & Details', subtitle: session.businessName, onTap: () => onSelect('Business profile')),
+          MoreMenuTile(icon: Icons.open_in_new, title: 'Account deletion webpage', subtitle: 'Request deletion if you no longer have this app', onTap: () => launchUrl(Uri.parse('https://thali.store/account-deletion'), mode: LaunchMode.externalApplication)),
           const SizedBox(height: 18),
+          OutlinedButton.icon(
+            onPressed: () => _deleteAccount(context),
+            icon: const Icon(Icons.delete_forever_outlined),
+            label: const Text('Delete partner account'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: const Color(0xFFB83B31), side: const BorderSide(color: Color(0xFFEBCBC6), width: 1)),
+          ),
+          const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: onSignOut,
             icon: const Icon(Icons.logout),

@@ -16,6 +16,7 @@ class AppState extends ChangeNotifier {
   String customerId = '';
   String customerName = 'Student';
   String customerEmail = '';
+  String authToken = '';
   String location = 'Sector 62, Noida';
   String selectedProviderId = '';
   ActiveSubscription? _activeSubscription;
@@ -36,7 +37,9 @@ class AppState extends ChangeNotifier {
         customerName = data['customerName']?.toString() ?? 'Student';
         customerEmail = data['customerEmail']?.toString() ?? '';
         location = data['location']?.toString() ?? 'Sector 62, Noida';
-        isSignedIn = data['isSignedIn'] == true;
+        // Persisted local profile data is not an authenticated Supabase session.
+        authToken = '';
+        isSignedIn = false;
         if (data['selectedProviderId'] != null) {
           selectedProviderId = data['selectedProviderId'].toString();
         }
@@ -137,9 +140,10 @@ class AppState extends ChangeNotifier {
     return provider;
   }
 
-  void signIn({required String emailOrPhone, required String name, String? userId}) {
+  void signIn({required String emailOrPhone, required String name, String? userId, String? token}) {
     customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
     customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
+    if (token != null) authToken = token;
     if (userId != null && userId.isNotEmpty) {
       customerId = userId;
     }
@@ -150,6 +154,7 @@ class AppState extends ChangeNotifier {
 
   void signOut() {
     isSignedIn = false;
+    authToken = '';
     _activeSubscription = null;
     _dailyMeal = null;
     _redeemedSlots.clear();

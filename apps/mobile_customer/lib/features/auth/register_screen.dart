@@ -51,6 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         emailOrPhone: result.email,
         name: result.name,
         userId: result.userId,
+        token: result.token,
       );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Account created for ${result.name}!')));
       Navigator.popUntil(context, (route) => route.isFirst);

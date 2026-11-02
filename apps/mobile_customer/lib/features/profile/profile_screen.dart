@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/customer_auth_service.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -116,6 +118,8 @@ class ProfileScreen extends StatelessWidget {
                     _ProfileRow(icon: Icons.description_outlined, title: 'Terms and conditions', onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: false)))),
                     const Divider(height: 1, indent: 54),
                     _ProfileRow(icon: Icons.privacy_tip_outlined, title: 'Privacy policy', onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: true)))),
+                    const Divider(height: 1, indent: 54),
+                    _ProfileRow(icon: Icons.open_in_new, title: 'Account deletion webpage', subtitle: 'Request deletion if you no longer have this app', onTap: _openAccountDeletion),
                   ]),
                 ),
               ),
@@ -123,7 +127,16 @@ class ProfileScreen extends StatelessWidget {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(18, 20, 18, 28),
               sliver: SliverToBoxAdapter(
-                child: MessActionButton(label: 'Sign out', secondary: true, icon: Icons.logout_rounded, onPressed: () => _confirmSignOut(context, state)),
+                child: Column(children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _confirmDeleteAccount(context, state),
+                    icon: const Icon(Icons.delete_forever_outlined),
+                    label: const Text('Delete account'),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: MessColors.red, side: const BorderSide(color: MessColors.red)),
+                  ),
+                  const SizedBox(height: 10),
+                  MessActionButton(label: 'Sign out', secondary: true, icon: Icons.logout_rounded, onPressed: () => _confirmSignOut(context, state)),
+                ]),
               ),
             ),
           ],
@@ -355,6 +368,32 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
     if (confirm == true) state.signOut();
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context, AppState state) async {
+    final confirmation = TextEditingController();
+    final confirm = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Permanently delete account?'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Your account and personal profile data will be deleted. Active plans are closed. Anonymized payment and meal records may be retained where required. This cannot be undone.'),
+        const SizedBox(height: 14),
+        TextField(controller: confirmation, decoration: const InputDecoration(labelText: 'Type DELETE to confirm')),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(dialogContext, confirmation.text.trim() == 'DELETE'), child: const Text('Continue'))],
+    ));
+    confirmation.dispose();
+    if (confirm != true || !context.mounted) return;
+    try {
+      await CustomerAuthService.deleteAccount(token: state.authToken);
+      state.signOut();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Your Thali account has been deleted.')));
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('Exception: ', '')), backgroundColor: MessColors.red));
+    }
+  }
+
+  void _openAccountDeletion() {
+    launchUrl(Uri.parse('https://thali.store/account-deletion'), mode: LaunchMode.externalApplication);
   }
 }
 

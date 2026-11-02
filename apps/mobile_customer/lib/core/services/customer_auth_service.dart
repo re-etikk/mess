@@ -42,7 +42,7 @@ class CustomerAuthService {
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       return CustomerAuthResult(
-        userId: user['id']?.toString() ?? 'usr-cust',
+        userId: user['id']?.toString() ?? (throw Exception('Authentication response is missing the account ID.')),
         email: user['email']?.toString() ?? email.trim(),
         name: user['name']?.toString() ?? email.split('@')[0],
         token: data['token']?.toString() ?? '',
@@ -76,12 +76,24 @@ class CustomerAuthService {
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       return CustomerAuthResult(
-        userId: user['id']?.toString() ?? 'usr-cust',
+        userId: user['id']?.toString() ?? (throw Exception('Registration response is missing the account ID.')),
         email: user['email']?.toString() ?? email.trim(),
         name: user['name']?.toString() ?? name.trim(),
         token: data['token']?.toString() ?? '',
       );
     }
     throw Exception(data['error'] ?? data['message'] ?? 'Registration failed.');
+  }
+
+  static Future<void> deleteAccount({required String token}) async {
+    if (token.isEmpty) throw Exception('Your login session expired. Sign in again before deleting your account.');
+    final response = await http.delete(
+      Uri.parse('$baseUrl/api/account/deletion'),
+      headers: {'Authorization': 'Bearer $token', 'x-account-deletion-confirmation': 'DELETE'},
+    ).timeout(const Duration(seconds: 20));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
+      throw Exception(data['error'] ?? 'Account deletion could not be completed.');
+    }
   }
 }

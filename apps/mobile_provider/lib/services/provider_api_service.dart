@@ -95,6 +95,19 @@ class ProviderApiService {
     } catch (_) {}
   }
 
+  static Future<void> deleteAccount(ProviderSession session) async {
+    if (session.token.isEmpty) throw Exception('Your login session expired. Sign in again before deleting your account.');
+    final response = await http.delete(
+      Uri.parse('$baseUrl/api/account/deletion'),
+      headers: {'Authorization': 'Bearer ${session.token}', 'x-account-deletion-confirmation': 'DELETE'},
+    ).timeout(const Duration(seconds: 20));
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
+      throw Exception(data['error'] ?? 'Account deletion could not be completed.');
+    }
+    await clearSession();
+  }
+
   static Future<ProviderSession> login({
     required String email,
     required String password,
@@ -125,7 +138,7 @@ class ProviderApiService {
 
       final session = ProviderSession(
         token: data['token'] as String? ?? '',
-        userId: user['id'] as String? ?? 'usr-provider',
+        userId: user['id'] as String? ?? (throw Exception('Authentication response is missing the account ID.')),
         email: email.trim(),
         providerId: providerId.toString(),
         businessName: businessName.toString(),
@@ -167,8 +180,8 @@ class ProviderApiService {
           uri,
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
-            'email': email.trim().isNotEmpty ? email.trim() : '${businessName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}@mess.in',
-            'password': password.isNotEmpty ? password : 'ProviderPass@123',
+            'email': email.trim(),
+            'password': password,
             'role': 'provider',
             'business_name': businessName.trim(),
             'name': ownerName.trim(),
@@ -183,12 +196,15 @@ class ProviderApiService {
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       final provider = data['provider'] as Map<String, dynamic>?;
-      final providerId = user['provider_id'] ?? provider?['id'] ?? 'prov-new';
+      final providerId = user['provider_id'] ?? provider?['id'];
+      if (providerId == null || providerId.toString().isEmpty || user['id'] == null) {
+        throw Exception('The server did not return a valid partner account. Please sign in or contact support.');
+      }
       final name = user['provider_name'] ?? provider?['display_name'] ?? businessName;
 
       final session = ProviderSession(
         token: data['token'] as String? ?? '',
-        userId: user['id'] as String? ?? 'usr-provider',
+        userId: user['id'] as String,
         email: email.trim(),
         providerId: providerId.toString(),
         businessName: name.toString(),

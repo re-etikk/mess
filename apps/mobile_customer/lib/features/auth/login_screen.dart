@@ -41,6 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
         emailOrPhone: result.email,
         name: result.name,
         userId: result.userId,
+        token: result.token,
       );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Welcome, ${result.name}!')));
     } catch (e) {
@@ -54,27 +55,6 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  void _googleSignIn() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Google Sign-In'),
-        content: const Text('Google OAuth is enabled for web and mobile. Tap Continue below or sign in with your email and password.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              final state = AppStateScope.of(context);
-              state.signIn(emailOrPhone: 'google.student@thali.in', name: 'Google Student');
-            },
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -131,9 +111,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 8),
                       MessActionButton(label: 'Sign in', loading: _busy, onPressed: _login),
                       const SizedBox(height: 20),
-                      const _OrDivider(),
-                      const SizedBox(height: 20),
-                      _GoogleButton(onPressed: _googleSignIn),
                       const SizedBox(height: 26),
                       Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [
                         Text('New to MESS? ', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: MessColors.muted)),
@@ -149,29 +126,3 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 }
 
-class _OrDivider extends StatelessWidget {
-  const _OrDivider();
-  @override
-  Widget build(BuildContext context) => Row(children: [
-        const Expanded(child: Divider(color: MessColors.border)),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 14), child: Text('OR', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: MessColors.muted, letterSpacing: 1.2))),
-        const Expanded(child: Divider(color: MessColors.border)),
-      ]);
-}
-
-class _GoogleButton extends StatelessWidget {
-  const _GoogleButton({required this.onPressed});
-  final VoidCallback onPressed;
-  @override
-  Widget build(BuildContext context) => OutlinedButton.icon(
-        onPressed: onPressed,
-        icon: const Text('G', style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF4285F4), fontSize: 20)),
-        label: const Text('Continue with Google', style: TextStyle(color: MessColors.ink, fontWeight: FontWeight.w700)),
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(48),
-          backgroundColor: Colors.white,
-          side: const BorderSide(color: MessColors.border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
-        ),
-      );
-}

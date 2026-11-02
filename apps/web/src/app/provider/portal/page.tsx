@@ -104,6 +104,7 @@ export default function ProviderPortal() {
   const [newPlanDiscount, setNewPlanDiscount] = useState('');
   const [mealSlots, setMealSlots] = useState<ProviderMealSlot[]>([]);
   const [selectedPlanSlots, setSelectedPlanSlots] = useState<string[]>([]);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [slotDrafts, setSlotDrafts] = useState<Record<string, { enabled: boolean; start: string; end: string }>>({});
   const [customSlotName, setCustomSlotName] = useState('');
   const [customSlotStart, setCustomSlotStart] = useState('');
@@ -310,6 +311,7 @@ export default function ProviderPortal() {
             : undefined,
           published: plan.published,
           active: plan.active,
+          mealSlotIds: plan.meal_slot_ids || [],
         })));
       }
       if (slotsRes?.ok) {
@@ -387,6 +389,7 @@ export default function ProviderPortal() {
 
   async function saveProviderPlan() {
     if (!session?.providerId) return;
+    if (selectedPlanSlots.length === 0) return setError('Select at least one enabled serving time to publish this plan.');
     const name = newPlanName.trim();
     const price = Number(newPlanPrice);
     const days = Number(newPlanDays);
@@ -408,10 +411,11 @@ export default function ProviderPortal() {
     setError('');
     try {
       const response = await fetch('/api/provider/plans', {
-        method: 'POST',
+        method: editingPlanId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider_id: session.providerId,
+          ...(editingPlanId ? { plan_id: editingPlanId } : {}),
           name,
           plan_type: newPlanType,
           duration_days: newPlanType === 'fixed_period' ? days : undefined,
@@ -419,13 +423,13 @@ export default function ProviderPortal() {
           price_inr: price,
           discount_percent: newPlanDiscount ? discount : undefined,
           meal_slot_ids: selectedPlanSlots,
-          published: selectedPlanSlots.length > 0,
+          published: true,
         }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Plan could not be saved.');
       const plan = result.plan;
-      setPlans((current) => [{
+      const savedPlan: CustomPlan = {
         id: plan.id,
         name: plan.name,
         days: plan.duration_months ? Number(plan.duration_months) * 30 : 0,
@@ -437,19 +441,42 @@ export default function ProviderPortal() {
           : undefined,
         published: plan.published,
         active: plan.active,
-      }, ...current]);
+        mealSlotIds: plan.meal_slot_ids || selectedPlanSlots,
+      };
+      setPlans((current) => editingPlanId
+        ? current.map((item) => item.id === editingPlanId ? savedPlan : item)
+        : [savedPlan, ...current]);
       setNewPlanName('');
       setNewPlanPrice('');
       setNewPlanCredits('');
       setNewPlanDiscount('');
       setSelectedPlanSlots([]);
+      setEditingPlanId(null);
       setPlanFormOpen(false);
-      setSuccessNotice('Plan saved to your Thali account.');
+      setSuccessNotice('Plan published. It is now linked to the selected serving times.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Plan could not be saved. Try again.');
     } finally {
       setSavingPlan(false);
     }
+  }
+
+  function openNewPlanForm() {
+    setEditingPlanId(null);
+    setNewPlanName(''); setNewPlanDays('30'); setNewPlanPrice('');
+    setNewPlanType('fixed_period'); setNewPlanCredits(''); setNewPlanDiscount('');
+    setSelectedPlanSlots(mealSlots.filter((slot) => slot.active).map((slot) => slot.id));
+    setError(''); setPlanFormOpen(true);
+  }
+
+  function editPlan(plan: CustomPlan) {
+    setEditingPlanId(plan.id || null);
+    setNewPlanName(plan.name); setNewPlanDays(String(plan.days || 30));
+    setNewPlanPrice(String(plan.price)); setNewPlanType(plan.type);
+    setNewPlanCredits(String(plan.credits || '')); setNewPlanDiscount(String(plan.discount || ''));
+    const savedSlots = (plan.mealSlotIds || []).filter((id) => mealSlots.some((slot) => slot.id === id && slot.active));
+    setSelectedPlanSlots(savedSlots.length ? savedSlots : mealSlots.filter((slot) => slot.active).map((slot) => slot.id));
+    setError(''); setPlanFormOpen(true);
   }
 
   async function handleToggleStatus() {
@@ -845,7 +872,7 @@ export default function ProviderPortal() {
                   <h2 className="text-lg font-bold text-slate-950">Plans & Pricing</h2>
                   <p className="mt-1 text-xs text-slate-500">Saved plans are shared with the Thali app. Set real prices and terms for your mess.</p>
                 </div>
-                <button type="button" onClick={() => { setPlanFormOpen((open) => !open); setError(''); }} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-bold text-slate-950 hover:bg-amber-600">
+                <button type="button" disabled={loadingData} onClick={() => planFormOpen ? setPlanFormOpen(false) : openNewPlanForm()} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-bold text-slate-950 hover:bg-amber-600 disabled:opacity-60">
                   <Plus size={16} /> {planFormOpen ? 'Cancel' : 'Add plan'}
                 </button>
               </div>
@@ -869,6 +896,7 @@ export default function ProviderPortal() {
                         {p.type === 'meal_credits' ? `${p.credits} meal credits` : `${p.days} days · fixed period`}
                       </p>
                       <p className="mt-3 text-[11px] font-semibold text-slate-600">{p.active === false ? 'Inactive' : p.published === false ? 'Draft' : 'Published'}</p>
+                      <button type="button" onClick={() => editPlan(p)} className="mt-3 min-h-9 rounded-lg border border-slate-300 px-3 text-xs font-bold text-slate-800 hover:bg-slate-50">{p.published === false ? 'Finish setup & publish' : 'Edit plan'}</button>
                     </div>
                   ))}
                 </div>
@@ -876,7 +904,7 @@ export default function ProviderPortal() {
 
               {planFormOpen && (
                 <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
-                  <h3 className="font-bold text-slate-950">Create a plan</h3>
+                  <h3 className="font-bold text-slate-950">{editingPlanId ? 'Finish and publish this plan' : 'Create and publish a plan'}</h3>
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <label className="text-xs font-semibold text-slate-700">Plan name
                       <input value={newPlanName} onChange={(e) => setNewPlanName(e.target.value)} maxLength={100} placeholder="e.g. Monthly lunch plan" className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" />
@@ -907,7 +935,7 @@ export default function ProviderPortal() {
                   </div>
                   {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
                   <div className="mt-4 flex justify-end">
-                    <button type="button" disabled={savingPlan} onClick={saveProviderPlan} className="min-h-10 rounded-lg bg-slate-950 px-5 text-sm font-bold text-white disabled:opacity-60">{savingPlan ? 'Saving…' : 'Save plan'}</button>
+                    <button type="button" disabled={savingPlan || selectedPlanSlots.length === 0} onClick={saveProviderPlan} className="min-h-10 rounded-lg bg-slate-950 px-5 text-sm font-bold text-white disabled:opacity-60">{savingPlan ? 'Publishing…' : 'Save & publish'}</button>
                   </div>
                   <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
                     <p className="text-xs font-semibold text-slate-800">Meal slots covered by this plan</p>
@@ -920,9 +948,9 @@ export default function ProviderPortal() {
                           </label>
                         ))}
                       </div>
-                    ) : <p className="mt-1 text-xs text-amber-800">No active serving times configured. Save your real meal times in Counter QR Hub first; this plan will be saved as a draft until you select a slot.</p>}
+                    ) : <div className="mt-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-900"><p>First add at least one serving time. Your plan will then publish in one step.</p><button type="button" onClick={() => setActiveTab('qr')} className="mt-2 font-bold underline">Set serving times</button></div>}
                   </div>
-                  <p className="mt-3 text-[11px] text-slate-500">A plan is published only after you associate it with at least one active meal slot. Payment collection stays subject to verified checkout configuration.</p>
+                  <p className="mt-3 text-[11px] text-slate-500">Enabled serving times are selected automatically. Uncheck any slot this plan should not cover. Payment collection remains subject to verified checkout configuration.</p>
                 </div>
               )}
             </div>
@@ -949,6 +977,7 @@ export default function ProviderPortal() {
                 {mealQr ? <div className="mx-auto my-4 w-fit rounded-xl border border-slate-200 bg-white p-3"><img src={mealQr} alt={`${selectedQrSlot} meal redemption QR`} className="h-56 w-56" /></div> : <div className="my-4 grid min-h-40 place-items-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 text-sm text-slate-500">{mealSlots.some((slot) => slot.active) ? 'Generate a fresh QR when a subscriber is ready to redeem.' : 'Configure a real serving time below to enable QR generation.'}</div>}
                 {mealQr && <p className="text-xs font-semibold text-emerald-800">QR expires at {new Date(qrExpiresAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}. Refresh before scanning if expired.</p>}
                 {qrError && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-left text-sm text-red-800">{qrError}</p>}
+                {qrError.toLowerCase().includes('plan') && <button type="button" onClick={() => { setActiveTab('plans'); const draft = plans.find((plan) => plan.published === false && plan.active !== false); if (draft) editPlan(draft); else openNewPlanForm(); }} className="mt-2 min-h-10 rounded-lg bg-amber-500 px-4 text-sm font-bold text-slate-950">Finish plan setup</button>}
                 {!mealSlots.some((slot) => slot.active) && <p className="text-xs font-bold text-amber-800">No active meal slot is configured.</p>}
               </div>
 
