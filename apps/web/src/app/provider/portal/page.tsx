@@ -2,6 +2,7 @@
 
 import { FormEvent, useState, useEffect } from 'react';
 import Link from 'next/link';
+import QRCode from 'qrcode';
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,12 +35,24 @@ interface MenuDish {
 }
 
 interface CustomPlan {
+  id?: string;
   name: string;
   days: number;
   price: number;
   type: 'fixed_period' | 'meal_credits';
   credits?: number;
   discount?: number;
+  published?: boolean;
+  active?: boolean;
+  mealSlotIds?: string[];
+}
+
+interface ProviderMealSlot {
+  id: string;
+  name: string;
+  starts_at_local: string;
+  ends_at_local: string;
+  active: boolean;
 }
 
 export default function ProviderPortal() {
@@ -84,11 +97,30 @@ export default function ProviderPortal() {
   // Step 5: Real Custom Plans (starts completely EMPTY - user must configure their real prices)
   const [plans, setPlans] = useState<CustomPlan[]>([]);
   const [newPlanName, setNewPlanName] = useState('');
-  const [newPlanDays, setNewPlanDays] = useState('');
+  const [newPlanDays, setNewPlanDays] = useState('30');
   const [newPlanPrice, setNewPlanPrice] = useState('');
   const [newPlanType, setNewPlanType] = useState<'fixed_period' | 'meal_credits'>('fixed_period');
   const [newPlanCredits, setNewPlanCredits] = useState('');
   const [newPlanDiscount, setNewPlanDiscount] = useState('');
+  const [mealSlots, setMealSlots] = useState<ProviderMealSlot[]>([]);
+  const [selectedPlanSlots, setSelectedPlanSlots] = useState<string[]>([]);
+  const [slotDrafts, setSlotDrafts] = useState<Record<string, { enabled: boolean; start: string; end: string }>>({});
+  const [savingSlots, setSavingSlots] = useState(false);
+  const [selectedQrSlot, setSelectedQrSlot] = useState('');
+  const [mealQr, setMealQr] = useState('');
+  const [qrExpiresAt, setQrExpiresAt] = useState(0);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState('');
+
+  useEffect(() => {
+    if (!qrExpiresAt || !mealQr) return;
+    const remaining = Math.max(0, qrExpiresAt - Date.now());
+    const timer = window.setTimeout(() => {
+      setMealQr('');
+      setQrError('This QR expired. Generate a fresh one before scanning.');
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [qrExpiresAt, mealQr]);
   const [agreedTerms, setAgreedTerms] = useState(false);
 
   // Exact step validation functions
@@ -204,6 +236,8 @@ export default function ProviderPortal() {
   const [ticketSuccess, setTicketSuccess] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planFormOpen, setPlanFormOpen] = useState(false);
   const [error, setError] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
 
@@ -233,11 +267,13 @@ export default function ProviderPortal() {
   async function loadPortalData(providerId: string) {
     setLoadingData(true);
     try {
-      const [subsRes, redRes, ordRes, statusRes] = await Promise.all([
+      const [subsRes, redRes, ordRes, statusRes, plansRes, slotsRes] = await Promise.all([
         fetch(`/api/provider/subscriptions?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/redemptions?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/orders?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/status?provider_id=${providerId}`).catch(() => null),
+        fetch(`/api/provider/plans?provider_id=${providerId}`, { cache: 'no-store' }).catch(() => null),
+        fetch(`/api/provider/timings?provider_id=${providerId}`, { cache: 'no-store' }).catch(() => null),
       ]);
       if (statusRes?.ok) {
         const sData = await statusRes.json().catch(() => ({}));
@@ -257,8 +293,142 @@ export default function ProviderPortal() {
         const d = await ordRes.json();
         setCounterOrders(d.orders || []);
       }
+      if (plansRes?.ok) {
+        const d = await plansRes.json();
+        setPlans((d.plans || []).map((plan: any) => ({
+          id: plan.id,
+          name: plan.name,
+          days: plan.duration_months ? Number(plan.duration_months) * 30 : 0,
+          price: Number(plan.price_paise || 0) / 100,
+          type: plan.plan_type,
+          credits: plan.meal_credits ?? undefined,
+          discount: plan.promo_price_paise && plan.price_paise
+            ? Math.round((1 - Number(plan.promo_price_paise) / Number(plan.price_paise)) * 100)
+            : undefined,
+          published: plan.published,
+          active: plan.active,
+        })));
+      }
+      if (slotsRes?.ok) {
+        const d = await slotsRes.json();
+        const slots = (d.slots || []) as ProviderMealSlot[];
+        setMealSlots(slots);
+        setSlotDrafts(Object.fromEntries(slots.map((slot) => [slot.name.toLowerCase(), {
+          enabled: slot.active,
+          start: String(slot.starts_at_local).slice(0, 5),
+          end: String(slot.ends_at_local).slice(0, 5),
+        }])));
+        if (!selectedQrSlot && slots.find((slot) => slot.active)) setSelectedQrSlot(slots.find((slot) => slot.active)!.name.toLowerCase());
+      }
     } catch {}
     setLoadingData(false);
+  }
+
+  async function saveMealSlots() {
+    if (!session?.providerId) return;
+    setSavingSlots(true);
+    setError('');
+    try {
+      const slots = ['breakfast', 'lunch', 'dinner'].flatMap((name) => {
+        const timing = slotDrafts[name];
+        if (!timing?.enabled) return [];
+        return [{ name, starts_at_local: `${timing.start}:00`, ends_at_local: `${timing.end}:00`, active: true }];
+      });
+      const response = await fetch('/api/provider/timings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider_id: session.providerId, slots, replace_slots: true }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Meal slots could not be saved.');
+      await loadPortalData(session.providerId);
+      setSuccessNotice('Serving times saved. You can now attach plans to these meal slots.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Meal slots could not be saved.');
+    } finally { setSavingSlots(false); }
+  }
+
+  async function generateMealQr() {
+    if (!session?.providerId || !selectedQrSlot) return;
+    setQrLoading(true); setQrError(''); setMealQr('');
+    try {
+      const response = await fetch('/api/provider/qr/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider_id: session.providerId, slot: selectedQrSlot }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Daily meal QR could not be issued.');
+      setMealQr(await QRCode.toDataURL(result.token, { width: 320, margin: 2, errorCorrectionLevel: 'H' }));
+      setQrExpiresAt(Date.now() + 5 * 60 * 1000);
+    } catch (cause) {
+      setQrError(cause instanceof Error ? cause.message : 'Daily meal QR could not be issued.');
+    } finally { setQrLoading(false); }
+  }
+
+  async function saveProviderPlan() {
+    if (!session?.providerId) return;
+    const name = newPlanName.trim();
+    const price = Number(newPlanPrice);
+    const days = Number(newPlanDays);
+    const credits = Number(newPlanCredits);
+    const discount = Number(newPlanDiscount);
+    if (name.length < 2) return setError('Enter a plan name with at least 2 characters.');
+    if (!Number.isFinite(price) || price <= 0) return setError('Enter a plan price greater than ₹0.');
+    if (newPlanType === 'fixed_period' && ![30, 90, 180, 360].includes(days)) {
+      return setError('Choose a supported duration: 1, 3, 6, or 12 months.');
+    }
+    if (newPlanType === 'meal_credits' && (!Number.isInteger(credits) || credits < 1)) {
+      return setError('Enter at least 1 meal credit.');
+    }
+    if (newPlanDiscount && (!Number.isFinite(discount) || discount < 1 || discount > 90)) {
+      return setError('Discount must be between 1% and 90%.');
+    }
+
+    setSavingPlan(true);
+    setError('');
+    try {
+      const response = await fetch('/api/provider/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: session.providerId,
+          name,
+          plan_type: newPlanType,
+          duration_days: newPlanType === 'fixed_period' ? days : undefined,
+          meal_credits: newPlanType === 'meal_credits' ? credits : undefined,
+          price_inr: price,
+          discount_percent: newPlanDiscount ? discount : undefined,
+          meal_slot_ids: selectedPlanSlots,
+          published: selectedPlanSlots.length > 0,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Plan could not be saved.');
+      const plan = result.plan;
+      setPlans((current) => [{
+        id: plan.id,
+        name: plan.name,
+        days: plan.duration_months ? Number(plan.duration_months) * 30 : 0,
+        price: Number(plan.price_paise) / 100,
+        type: plan.plan_type,
+        credits: plan.meal_credits ?? undefined,
+        discount: plan.promo_price_paise && plan.price_paise
+          ? Math.round((1 - Number(plan.promo_price_paise) / Number(plan.price_paise)) * 100)
+          : undefined,
+        published: plan.published,
+        active: plan.active,
+      }, ...current]);
+      setNewPlanName('');
+      setNewPlanPrice('');
+      setNewPlanCredits('');
+      setNewPlanDiscount('');
+      setSelectedPlanSlots([]);
+      setPlanFormOpen(false);
+      setSuccessNotice('Plan saved to your Thali account.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Plan could not be saved. Try again.');
+    } finally {
+      setSavingPlan(false);
+    }
   }
 
   async function handleToggleStatus() {
@@ -649,22 +819,91 @@ export default function ProviderPortal() {
           {/* TAB 3: PLANS & PRICING */}
           {activeTab === 'plans' && (
             <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-lg font-bold text-slate-950">Active Subscription Plans</h2>
-              <p className="text-xs text-slate-500">Pricing and terms displayed directly to students on their mobile app.</p>
-              <div className="mt-5 grid gap-4 sm:grid-cols-3">
-                {plans.map((p, i) => (
-                  <div key={i} className="rounded-xl border border-slate-200 p-4 relative">
-                    <div className="flex justify-between items-start">
-                      <h3 className="font-extrabold text-slate-950 text-sm">{p.name}</h3>
-                      {p.discount && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">{p.discount}% OFF</span>}
-                    </div>
-                    <p className="mt-3 text-2xl font-black text-slate-950">₹{p.price}</p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      {p.type === 'meal_credits' ? `${p.credits} Meals · Flexi Tracker` : `${p.days} Days · Unlimited Access`}
-                    </p>
-                  </div>
-                ))}
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950">Plans & Pricing</h2>
+                  <p className="mt-1 text-xs text-slate-500">Saved plans are shared with the Thali app. Set real prices and terms for your mess.</p>
+                </div>
+                <button type="button" onClick={() => { setPlanFormOpen((open) => !open); setError(''); }} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-bold text-slate-950 hover:bg-amber-600">
+                  <Plus size={16} /> {planFormOpen ? 'Cancel' : 'Add plan'}
+                </button>
               </div>
+
+              {plans.length === 0 ? (
+                <div className="mt-5 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center">
+                  <DollarSign className="mx-auto text-slate-400" size={24} />
+                  <p className="mt-2 text-sm font-semibold text-slate-800">No plans have been saved yet</p>
+                  <p className="mt-1 text-xs text-slate-500">Add your first plan. Nothing is prefilled or published as sample data.</p>
+                </div>
+              ) : (
+                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {plans.map((p, i) => (
+                    <div key={p.id || `${p.name}-${i}`} className="rounded-xl border border-slate-200 p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-extrabold text-sm text-slate-950">{p.name}</h3>
+                        {p.discount ? <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">{p.discount}% OFF</span> : null}
+                      </div>
+                      <p className="mt-3 text-2xl font-black text-slate-950">₹{p.price.toLocaleString('en-IN')}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {p.type === 'meal_credits' ? `${p.credits} meal credits` : `${p.days} days · fixed period`}
+                      </p>
+                      <p className="mt-3 text-[11px] font-semibold text-slate-600">{p.active === false ? 'Inactive' : p.published === false ? 'Draft' : 'Published'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {planFormOpen && (
+                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+                  <h3 className="font-bold text-slate-950">Create a plan</h3>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="text-xs font-semibold text-slate-700">Plan name
+                      <input value={newPlanName} onChange={(e) => setNewPlanName(e.target.value)} maxLength={100} placeholder="e.g. Monthly lunch plan" className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" />
+                    </label>
+                    <label className="text-xs font-semibold text-slate-700">Plan type
+                      <select value={newPlanType} onChange={(e) => setNewPlanType(e.target.value as CustomPlan['type'])} className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm">
+                        <option value="fixed_period">Fixed period</option>
+                        <option value="meal_credits">Meal credits</option>
+                      </select>
+                    </label>
+                    {newPlanType === 'fixed_period' ? (
+                      <label className="text-xs font-semibold text-slate-700">Plan duration
+                        <select value={newPlanDays} onChange={(e) => setNewPlanDays(e.target.value)} className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm">
+                          <option value="30">1 month (30 days)</option><option value="90">3 months (90 days)</option><option value="180">6 months (180 days)</option><option value="360">12 months (360 days)</option>
+                        </select>
+                      </label>
+                    ) : (
+                      <label className="text-xs font-semibold text-slate-700">Meal credits
+                        <input type="number" min="1" step="1" value={newPlanCredits} onChange={(e) => setNewPlanCredits(e.target.value)} placeholder="e.g. 60" className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" />
+                      </label>
+                    )}
+                    <label className="text-xs font-semibold text-slate-700">Price (₹)
+                      <input type="number" min="1" step="0.01" value={newPlanPrice} onChange={(e) => setNewPlanPrice(e.target.value)} placeholder="Enter your price" className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" />
+                    </label>
+                    <label className="text-xs font-semibold text-slate-700">Discount (optional, 1–90%)
+                      <input type="number" min="1" max="90" step="1" value={newPlanDiscount} onChange={(e) => setNewPlanDiscount(e.target.value)} placeholder="Leave blank for no discount" className="mt-1 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm" />
+                    </label>
+                  </div>
+                  {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+                  <div className="mt-4 flex justify-end">
+                    <button type="button" disabled={savingPlan} onClick={saveProviderPlan} className="min-h-10 rounded-lg bg-slate-950 px-5 text-sm font-bold text-white disabled:opacity-60">{savingPlan ? 'Saving…' : 'Save plan'}</button>
+                  </div>
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold text-slate-800">Meal slots covered by this plan</p>
+                    {mealSlots.filter((slot) => slot.active).length ? (
+                      <div className="mt-2 flex flex-wrap gap-3">
+                        {mealSlots.filter((slot) => slot.active).map((slot) => (
+                          <label key={slot.id} className="flex items-center gap-2 text-xs text-slate-700">
+                            <input type="checkbox" checked={selectedPlanSlots.includes(slot.id)} onChange={(e) => setSelectedPlanSlots((ids) => e.target.checked ? [...ids, slot.id] : ids.filter((id) => id !== slot.id))} />
+                            {slot.name}
+                          </label>
+                        ))}
+                      </div>
+                    ) : <p className="mt-1 text-xs text-amber-800">No active serving times configured. Save your real meal times in Counter QR Hub first; this plan will be saved as a draft until you select a slot.</p>}
+                  </div>
+                  <p className="mt-3 text-[11px] text-slate-500">A plan is published only after you associate it with at least one active meal slot. Payment collection stays subject to verified checkout configuration.</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -675,12 +914,39 @@ export default function ProviderPortal() {
                 <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
                   SECURE REDEMPTION
                 </span>
-                <h3 className="mt-3 text-lg font-bold text-slate-950">Daily meal QR is not active</h3>
-                <p className="mt-1 text-xs text-slate-500">A secure, database-backed QR will appear here after atomic redemption is enabled.</p>
-                <div className="my-6 grid h-48 place-items-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 text-sm text-slate-500">
-                  No redeemable QR has been issued.
+                <h3 className="mt-3 text-lg font-bold text-slate-950">Daily meal redemption QR</h3>
+                <p className="mt-1 text-xs text-slate-500">Generate a signed QR for the selected serving. It expires after five minutes.</p>
+                <div className="my-4 flex flex-wrap justify-center gap-2">
+                  <select aria-label="Meal slot" value={selectedQrSlot} onChange={(e) => { setSelectedQrSlot(e.target.value); setMealQr(''); setQrError(''); }} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm">
+                    {mealSlots.filter((slot) => slot.active).map((slot) => <option key={slot.id} value={slot.name.toLowerCase()}>{slot.name}</option>)}
+                  </select>
+                  <button type="button" onClick={generateMealQr} disabled={qrLoading || !mealSlots.some((slot) => slot.active)} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white disabled:opacity-50">
+                    <RefreshCw size={15} className={qrLoading ? 'animate-spin' : ''} /> {qrLoading ? 'Issuing…' : mealQr ? 'Refresh QR' : 'Generate daily QR'}
+                  </button>
                 </div>
-                <p className="text-xs font-bold text-amber-800">No meal can be checked in yet.</p>
+                {mealQr ? <div className="mx-auto my-4 w-fit rounded-xl border border-slate-200 bg-white p-3"><img src={mealQr} alt={`${selectedQrSlot} meal redemption QR`} className="h-56 w-56" /></div> : <div className="my-4 grid min-h-40 place-items-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-6 text-sm text-slate-500">{mealSlots.some((slot) => slot.active) ? 'Generate a fresh QR when a subscriber is ready to redeem.' : 'Configure a real serving time below to enable QR generation.'}</div>}
+                {mealQr && <p className="text-xs font-semibold text-emerald-800">QR expires at {new Date(qrExpiresAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}. Refresh before scanning if expired.</p>}
+                {qrError && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-left text-sm text-red-800">{qrError}</p>}
+                {!mealSlots.some((slot) => slot.active) && <p className="text-xs font-bold text-amber-800">No active meal slot is configured.</p>}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-950">Serving times</h3>
+                <p className="mt-1 text-xs text-slate-500">Set actual meal windows for your mess. These slots are shared with plans and redemption checks.</p>
+                <div className="mt-4 space-y-3">
+                  {['breakfast', 'lunch', 'dinner'].map((name) => {
+                    const timing = slotDrafts[name] || { enabled: false, start: '08:00', end: '09:00' };
+                    return <div key={name} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2 rounded-lg border border-slate-200 p-3">
+                      <label className="text-xs font-semibold capitalize text-slate-700">{name}<span className="mt-1 block text-sm font-normal text-slate-500">{timing.enabled ? 'Enabled' : 'Disabled'}</span></label>
+                      <label className="text-[11px] font-semibold text-slate-600">Starts<input type="time" value={timing.start} onChange={(e) => setSlotDrafts((all) => ({ ...all, [name]: { ...timing, start: e.target.value } }))} className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-2 text-sm" /></label>
+                      <label className="text-[11px] font-semibold text-slate-600">Ends<input type="time" value={timing.end} onChange={(e) => setSlotDrafts((all) => ({ ...all, [name]: { ...timing, end: e.target.value } }))} className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-2 text-sm" /></label>
+                      <input type="checkbox" aria-label={`Enable ${name}`} checked={timing.enabled} onChange={(e) => setSlotDrafts((all) => ({ ...all, [name]: { ...timing, enabled: e.target.checked } }))} className="mb-3 h-4 w-4" />
+                    </div>;
+                  })}
+                </div>
+                {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+                <button type="button" onClick={saveMealSlots} disabled={savingSlots} className="mt-4 min-h-10 rounded-lg bg-amber-500 px-4 text-sm font-bold text-slate-950 disabled:opacity-60">{savingSlots ? 'Saving…' : 'Save serving times'}</button>
+                <p className="mt-3 text-xs text-slate-500">QR issuance also requires a published plan linked to that slot and the server signing key configured.</p>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-center">

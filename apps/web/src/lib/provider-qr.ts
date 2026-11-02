@@ -14,6 +14,10 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
   try {
     const db = getAdminClient();
     if (!db) throw new Error('QR generation requires server-side Supabase configuration.');
+    const { data: redemptionReady, error: readinessError } = await (db as any).rpc('meal_redemption_is_ready');
+    if (readinessError || redemptionReady !== true) {
+      return NextResponse.json({ success: false, error: 'Secure meal redemption is not enabled on the database yet.' }, { status: 503 });
+    }
     const [{ data: provider, error }, { data: slots, error: slotError }] = await Promise.all([
       db.from('providers').select('id,status').eq('id', providerId).maybeSingle(),
       db.from('meal_slots').select('id,name').eq('provider_id', providerId).eq('active', true).ilike('name', mealSlot).limit(1),
@@ -23,6 +27,17 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
       return NextResponse.json({ success: false, error: 'A QR code is available only after the provider is approved and active.' }, { status: 403 });
     }
     if (!slots?.length) return NextResponse.json({ success: false, error: 'This meal slot is not configured for the provider.' }, { status: 404 });
+    const { data: linkedPlans, error: plansError } = await db.from('plan_meal_slots')
+      .select('plan_id,subscription_plans!inner(id)')
+      .eq('meal_slot_id', slots[0].id)
+      .eq('subscription_plans.provider_id', providerId)
+      .eq('subscription_plans.published', true)
+      .eq('subscription_plans.active', true)
+      .limit(1);
+    if (plansError) throw plansError;
+    if (!linkedPlans?.length) {
+      return NextResponse.json({ success: false, error: 'Add and publish a plan for this meal slot before issuing its redemption QR.' }, { status: 409 });
+    }
     const date = getIndiaDateString();
     const token = generateCounterQRToken({ providerId, date, slot: mealSlot });
     return NextResponse.json({ success: true, token, provider_id: providerId, date, slot: mealSlot }, { headers: { 'Cache-Control': 'private, no-store' } });

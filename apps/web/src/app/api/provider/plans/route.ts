@@ -27,9 +27,11 @@ const CreatePlan = z.object({
   duration_months: z.number().int().refine((value) => [1, 3, 6, 12].includes(value)).optional(),
   duration_days: z.number().int().optional(),
   meal_credits: z.number().int().positive().optional(),
-  price_paise: z.number().int().nonnegative().optional(),
-  price_inr: z.number().nonnegative().optional(),
+  price_paise: z.number().int().positive().optional(),
+  price_inr: z.number().positive().optional(),
+  discount_percent: z.number().int().min(1).max(90).optional(),
   daily_meal_limit: z.number().int().positive().max(10).default(1),
+  meal_slot_ids: z.array(z.string().uuid()).max(10).default([]),
   published: z.boolean().default(true),
 }).superRefine((value, ctx) => {
   if (value.plan_type === 'fixed_period' && !value.duration_months && !([30, 90, 180, 360].includes(value.duration_days || -1))) {
@@ -50,7 +52,23 @@ export async function POST(req: NextRequest) {
   const db = getAdminClient();
   if (!db) return NextResponse.json({ success: false, error: 'Plan data service is not configured.' }, { status: 503 });
 
+  if (input.meal_slot_ids.length > 0) {
+    const { data: slots, error: slotsError } = await db.from('meal_slots')
+      .select('id').eq('provider_id', input.provider_id).eq('active', true).in('id', input.meal_slot_ids);
+    if (slotsError) return NextResponse.json({ success: false, error: 'Meal slots could not be checked.' }, { status: 503 });
+    if ((slots?.length ?? 0) !== input.meal_slot_ids.length) {
+      return NextResponse.json({ success: false, error: 'Choose active meal slots that belong to your mess.' }, { status: 400 });
+    }
+  }
+  if (input.published && input.meal_slot_ids.length === 0) {
+    return NextResponse.json({ success: false, error: 'Choose at least one active meal slot before publishing this plan.' }, { status: 400 });
+  }
+
   const durationMonths = input.duration_months ?? (input.duration_days ? input.duration_days / 30 : null);
+  const pricePaise = input.price_paise ?? Math.round((input.price_inr || 0) * 100);
+  const promoPricePaise = input.discount_percent
+    ? Math.round(pricePaise * (1 - input.discount_percent / 100))
+    : null;
   const { data, error } = await db.from('subscription_plans').insert({
     provider_id: input.provider_id,
     name: input.name,
@@ -58,7 +76,8 @@ export async function POST(req: NextRequest) {
     plan_type: input.plan_type,
     duration_months: input.plan_type === 'fixed_period' ? durationMonths : null,
     meal_credits: input.plan_type === 'meal_credits' ? input.meal_credits : null,
-    price_paise: input.price_paise ?? Math.round((input.price_inr || 0) * 100),
+    price_paise: pricePaise,
+    promo_price_paise: promoPricePaise,
     daily_meal_limit: input.daily_meal_limit,
     allow_pickup: true,
     allow_delivery: false,
@@ -67,10 +86,20 @@ export async function POST(req: NextRequest) {
     terms_version: '1',
     published: input.published,
     active: true,
-  }).select('id,provider_id,name,description,plan_type,duration_months,meal_credits,price_paise,published,active,created_at').single();
+  }).select('id,provider_id,name,description,plan_type,duration_months,meal_credits,price_paise,promo_price_paise,published,active,created_at').single();
   if (error) {
     console.error('Provider plan creation failed:', error.message);
     return NextResponse.json({ success: false, error: 'Plan could not be saved. Confirm the provider is active and the database schema is current.' }, { status: 503 });
+  }
+  if (input.meal_slot_ids.length > 0) {
+    const { error: linkError } = await db.from('plan_meal_slots').insert(
+      input.meal_slot_ids.map((meal_slot_id) => ({ plan_id: data.id, meal_slot_id }))
+    );
+    if (linkError) {
+      await db.from('subscription_plans').delete().eq('id', data.id).eq('provider_id', input.provider_id);
+      console.error('Provider plan slot association failed:', linkError.message);
+      return NextResponse.json({ success: false, error: 'Plan could not be linked to its meal slots. No plan was saved.' }, { status: 503 });
+    }
   }
   return NextResponse.json({ success: true, plan: data }, { status: 201 });
 }
