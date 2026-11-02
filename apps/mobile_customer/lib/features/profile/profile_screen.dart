@@ -277,7 +277,7 @@ class ProfileScreen extends StatelessWidget {
                                 }
                                 setSheetState(() => submitting = true);
                                 try {
-                                  final uri = Uri.parse('https://mess-beta.vercel.app/api/support/ticket');
+                                  final uri = Uri.parse('https://www.thali.store/api/support/ticket');
                                   await http.post(
                                     uri,
                                     headers: {'Content-Type': 'application/json'},

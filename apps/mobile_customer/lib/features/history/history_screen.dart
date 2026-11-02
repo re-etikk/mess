@@ -273,7 +273,7 @@ class HistoryScreen extends StatelessWidget {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
+                          color: MessColors.orangeSoft,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: const Icon(Icons.check_circle_outline_rounded, color: MessColors.green, size: 22),

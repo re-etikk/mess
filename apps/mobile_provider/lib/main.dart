@@ -21,7 +21,7 @@ const Color cream = Color(0xFFFBF6EE);
 const Color card = Color(0xFFFFFFFF);
 const Color muted = Color(0xFF687382);
 const Color line = Color(0xFFE9E0D5);
-const Color green = Color(0xFF1F9D63);
+const Color green = Color(0xFFE94E12);
 
 class MessProviderApp extends StatefulWidget {
   const MessProviderApp({super.key, this.initialSession});
@@ -1057,8 +1057,8 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
   Widget build(BuildContext context) {
     final date = DateTime.now();
     final dateText = '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
-    final joinUrl = 'https://mess-beta.vercel.app/join/${widget.session.providerId}';
-    final standeeUrl = 'https://mess-beta.vercel.app/provider/standee?provider_id=${widget.session.providerId}';
+    final joinUrl = 'https://thali.store/join/${widget.session.providerId}';
+    final standeeUrl = 'https://thali.store/provider/standee?provider_id=${widget.session.providerId}';
 
     return RefreshIndicator(
       onRefresh: _fetchQr,
@@ -2322,7 +2322,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                             leading: Container(
                               width: 36,
                               height: 36,
-                              decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+                              decoration: BoxDecoration(color: orangeSoft, borderRadius: BorderRadius.circular(8)),
                               child: const Icon(Icons.check, color: green, size: 20),
                             ),
                             title: Text('$slot Attendance Verified', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: ink)),
@@ -2622,7 +2622,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   }
 
   void _showSubscriberSuccessDialog(Map<String, dynamic> res, String name, String phone) {
-    final passUrl = res['pass_url']?.toString() ?? 'https://mess-beta.vercel.app/customer/dashboard?phone=$phone';
+          final passUrl = res['pass_url']?.toString() ?? 'https://thali.store/customer/dashboard?phone=$phone';
     final whatsappUrl = res['whatsapp_url']?.toString() ?? '';
 
     showDialog<void>(
@@ -3044,7 +3044,7 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
                     leading: Container(
                       width: 40,
                       height: 40,
-                      decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(10)),
+                      decoration: BoxDecoration(color: orangeSoft, borderRadius: BorderRadius.circular(10)),
                       child: const Icon(Icons.shopping_bag_outlined, color: green, size: 22),
                     ),
                     title: Text(ord['customer_name'] ?? 'Walk-in Customer', style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
