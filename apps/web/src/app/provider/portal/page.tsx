@@ -105,6 +105,9 @@ export default function ProviderPortal() {
   const [mealSlots, setMealSlots] = useState<ProviderMealSlot[]>([]);
   const [selectedPlanSlots, setSelectedPlanSlots] = useState<string[]>([]);
   const [slotDrafts, setSlotDrafts] = useState<Record<string, { enabled: boolean; start: string; end: string }>>({});
+  const [customSlotName, setCustomSlotName] = useState('');
+  const [customSlotStart, setCustomSlotStart] = useState('');
+  const [customSlotEnd, setCustomSlotEnd] = useState('');
   const [savingSlots, setSavingSlots] = useState(false);
   const [selectedQrSlot, setSelectedQrSlot] = useState('');
   const [mealQr, setMealQr] = useState('');
@@ -318,7 +321,10 @@ export default function ProviderPortal() {
           start: String(slot.starts_at_local).slice(0, 5),
           end: String(slot.ends_at_local).slice(0, 5),
         }])));
-        if (!selectedQrSlot && slots.find((slot) => slot.active)) setSelectedQrSlot(slots.find((slot) => slot.active)!.name.toLowerCase());
+        const activeSlots = slots.filter((slot) => slot.active);
+        setSelectedQrSlot((current) => activeSlots.some((slot) => slot.name.toLowerCase() === current)
+          ? current
+          : activeSlots[0]?.name.toLowerCase() || '');
       }
     } catch {}
     setLoadingData(false);
@@ -329,9 +335,11 @@ export default function ProviderPortal() {
     setSavingSlots(true);
     setError('');
     try {
-      const slots = ['breakfast', 'lunch', 'dinner'].flatMap((name) => {
-        const timing = slotDrafts[name];
+      const slots = Object.entries(slotDrafts).flatMap(([name, timing]) => {
         if (!timing?.enabled) return [];
+        if (!timing.start || !timing.end || timing.end <= timing.start) {
+          throw new Error(`Set a valid end time after the start time for ${name}.`);
+        }
         return [{ name, starts_at_local: `${timing.start}:00`, ends_at_local: `${timing.end}:00`, active: true }];
       });
       const response = await fetch('/api/provider/timings', {
@@ -345,6 +353,19 @@ export default function ProviderPortal() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Meal slots could not be saved.');
     } finally { setSavingSlots(false); }
+  }
+
+  function addCustomMealSlot() {
+    const name = customSlotName.trim();
+    const key = name.toLowerCase();
+    if (name.length < 2 || name.length > 40) return setError('Custom meal slot name must be 2–40 characters.');
+    if (!customSlotStart || !customSlotEnd || customSlotEnd <= customSlotStart) return setError('Choose a valid custom serving time; the end must be later than the start.');
+    if (Object.keys(slotDrafts).some((existing) => existing.toLowerCase() === key)) return setError('A meal slot with this name already exists.');
+    setSlotDrafts((current) => ({ ...current, [key]: { enabled: true, start: customSlotStart, end: customSlotEnd } }));
+    setCustomSlotName('');
+    setCustomSlotStart('');
+    setCustomSlotEnd('');
+    setError('');
   }
 
   async function generateMealQr() {
@@ -917,7 +938,8 @@ export default function ProviderPortal() {
                 <h3 className="mt-3 text-lg font-bold text-slate-950">Daily meal redemption QR</h3>
                 <p className="mt-1 text-xs text-slate-500">Generate a signed QR for the selected serving. It expires after five minutes.</p>
                 <div className="my-4 flex flex-wrap justify-center gap-2">
-                  <select aria-label="Meal slot" value={selectedQrSlot} onChange={(e) => { setSelectedQrSlot(e.target.value); setMealQr(''); setQrError(''); }} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm">
+                  <select aria-label="Meal slot" disabled={!mealSlots.some((slot) => slot.active)} value={selectedQrSlot} onChange={(e) => { setSelectedQrSlot(e.target.value); setMealQr(''); setQrError(''); }} className="min-h-10 min-w-48 rounded-lg border border-slate-300 bg-white px-3 text-sm disabled:bg-slate-100">
+                    {!mealSlots.some((slot) => slot.active) && <option value="">No active serving slot</option>}
                     {mealSlots.filter((slot) => slot.active).map((slot) => <option key={slot.id} value={slot.name.toLowerCase()}>{slot.name}</option>)}
                   </select>
                   <button type="button" onClick={generateMealQr} disabled={qrLoading || !mealSlots.some((slot) => slot.active)} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white disabled:opacity-50">
@@ -934,8 +956,8 @@ export default function ProviderPortal() {
                 <h3 className="text-lg font-bold text-slate-950">Serving times</h3>
                 <p className="mt-1 text-xs text-slate-500">Set actual meal windows for your mess. These slots are shared with plans and redemption checks.</p>
                 <div className="mt-4 space-y-3">
-                  {['breakfast', 'lunch', 'dinner'].map((name) => {
-                    const timing = slotDrafts[name] || { enabled: false, start: '08:00', end: '09:00' };
+                  {Array.from(new Set(['breakfast', 'lunch', 'dinner', ...Object.keys(slotDrafts)])).map((name) => {
+                    const timing = slotDrafts[name] || { enabled: false, start: '', end: '' };
                     return <div key={name} className="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2 rounded-lg border border-slate-200 p-3">
                       <label className="text-xs font-semibold capitalize text-slate-700">{name}<span className="mt-1 block text-sm font-normal text-slate-500">{timing.enabled ? 'Enabled' : 'Disabled'}</span></label>
                       <label className="text-[11px] font-semibold text-slate-600">Starts<input type="time" value={timing.start} onChange={(e) => setSlotDrafts((all) => ({ ...all, [name]: { ...timing, start: e.target.value } }))} className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-2 text-sm" /></label>
@@ -944,6 +966,16 @@ export default function ProviderPortal() {
                     </div>;
                   })}
                 </div>
+                <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-3">
+                  <p className="text-xs font-semibold text-slate-800">Add a custom meal slot</p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-[1.3fr_1fr_1fr_auto] sm:items-end">
+                    <label className="text-[11px] font-semibold text-slate-600">Slot name<input value={customSlotName} onChange={(e) => setCustomSlotName(e.target.value)} maxLength={40} placeholder="e.g. Evening snacks" className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-2 text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-600">Starts<input type="time" value={customSlotStart} onChange={(e) => setCustomSlotStart(e.target.value)} className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-2 text-sm" /></label>
+                    <label className="text-[11px] font-semibold text-slate-600">Ends<input type="time" value={customSlotEnd} onChange={(e) => setCustomSlotEnd(e.target.value)} className="mt-1 min-h-9 w-full rounded-md border border-slate-300 px-2 text-sm" /></label>
+                    <button type="button" onClick={addCustomMealSlot} className="min-h-9 rounded-md border border-slate-300 px-3 text-xs font-bold text-slate-800 hover:bg-slate-50">Add slot</button>
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">Times use your provider&apos;s local timezone. End time must be later than the start time. Add breakfast, lunch, dinner, or a custom serving window.</p>
                 {error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
                 <button type="button" onClick={saveMealSlots} disabled={savingSlots} className="mt-4 min-h-10 rounded-lg bg-amber-500 px-4 text-sm font-bold text-slate-950 disabled:opacity-60">{savingSlots ? 'Saving…' : 'Save serving times'}</button>
                 <p className="mt-3 text-xs text-slate-500">QR issuance also requires a published plan linked to that slot and the server signing key configured.</p>
