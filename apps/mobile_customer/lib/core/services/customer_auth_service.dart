@@ -18,8 +18,21 @@ class CustomerAuthResult {
 class CustomerAuthService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://mess-beta.vercel.app',
+    defaultValue: 'https://www.thali.store',
   );
+
+  static Map<String, dynamic> _decodeResponse(http.Response response) {
+    if (response.statusCode >= 300 && response.statusCode < 400) {
+      throw Exception('The sign-in service redirected the request. Update the app and try again.');
+    }
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } on FormatException {
+      // Translate proxy, deployment, and HTML responses into a useful app error.
+    }
+    throw Exception('The server returned an unexpected response. Please try again shortly.');
+  }
 
   static Future<CustomerAuthResult> login({
     required String email,
@@ -38,7 +51,7 @@ class CustomerAuthService {
         )
         .timeout(const Duration(seconds: 12));
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeResponse(response);
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       return CustomerAuthResult(
@@ -72,7 +85,7 @@ class CustomerAuthService {
         )
         .timeout(const Duration(seconds: 12));
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeResponse(response);
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       return CustomerAuthResult(

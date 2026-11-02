@@ -8,7 +8,7 @@ class HttpMessRepository implements MessRepository {
       : baseUrl = baseUrl ??
             const String.fromEnvironment(
               'API_BASE_URL',
-              defaultValue: 'https://mess-beta.vercel.app',
+              defaultValue: 'https://www.thali.store',
             );
 
   final String baseUrl;

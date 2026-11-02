@@ -458,7 +458,7 @@ class _SlotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final (bg, border, text, badge, badgeBg) = switch (state) {
       MealState.available => (const Color(0xFFFFF6E8), MessColors.orange, MessColors.ink, 'LIVE', MessColors.orange),
-      MealState.redeemed => (const Color(0xFFEDF8F1), const Color(0xFF90DDB0), const Color(0xFF14532D), 'DONE', MessColors.green),
+      MealState.redeemed => (MessColors.orangeSoft, const Color(0xFFFFC48D), MessColors.orangeDark, 'DONE', MessColors.orangeDark),
       MealState.upcoming => (Colors.white, MessColors.border, MessColors.ink, 'NEXT', const Color(0xFF6B7280)),
       MealState.ended => (const Color(0xFFF3F4F6), MessColors.border, const Color(0xFF6B7280), 'CLOSED', const Color(0xFF9CA3AF)),
       MealState.unavailable => (Colors.white, MessColors.border, const Color(0xFF9CA3AF), 'OFF', const Color(0xFF9CA3AF)),
@@ -706,8 +706,8 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFE8F5E9),
-                  child: Icon(Icons.my_location_rounded, color: Color(0xFF2E7D32)),
+                  backgroundColor: MessColors.orangeSoft,
+                  child: Icon(Icons.my_location_rounded, color: MessColors.orangeDark),
                 ),
                 title: const Text('Use Live Detected Location', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: MessColors.ink)),
                 subtitle: const Text('Auto-detect your hostel or campus area', style: TextStyle(fontSize: 12, color: MessColors.muted)),

@@ -19,10 +19,11 @@ class MessColors {
   static const orangeSoft = Color(0xFFFFF0E5); // --mess-orange-soft
 
   // Status
-  static const green = Color(0xFF1F9D63); // --mess-success
-  static const success = Color(0xFF1F9D63);
-  static const greenSoft = Color(0xFFE7F7EE); // --mess-success-soft
-  static const successSoft = Color(0xFFE7F7EE);
+  // Keep success feedback within Thali's warm orange and ink palette.
+  static const green = Color(0xFFE94E12);
+  static const success = Color(0xFFE94E12);
+  static const greenSoft = Color(0xFFFFF0E5);
+  static const successSoft = Color(0xFFFFF0E5);
   static const red = Color(0xFFB42318); // --mess-error
   static const error = Color(0xFFB42318);
   static const disabled = Color(0xFF9AA3AC); // --mess-disabled
