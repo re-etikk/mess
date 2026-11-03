@@ -8,8 +8,9 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  Coins,
   MapPin,
-  ShieldAlert,
+  QrCode,
   ShieldCheck,
   Store,
   Wallet,
@@ -52,9 +53,10 @@ export default function JoinMessPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'counter_cash' | 'counter_upi'>('counter_cash');
 
   const [error, setError] = useState('');
-  const [statusNotice, setStatusNotice] = useState('');
+  const [successData, setSuccessData] = useState<any>(null);
 
   useEffect(() => {
     if (!providerId) return;
@@ -101,6 +103,8 @@ export default function JoinMessPage() {
     };
   }, [providerId]);
 
+  const selectedPlan = plans.find((p) => p.id === selectedPlanId);
+
   async function handleCheckoutAttempt(e: React.FormEvent) {
     e.preventDefault();
     if (!phone || phone.replace(/\D/g, '').length < 10) {
@@ -110,10 +114,8 @@ export default function JoinMessPage() {
 
     setSubmitting(true);
     setError('');
-    setStatusNotice('');
 
     try {
-      // Call server subscription creation API to verify configured payment pipeline
       const res = await fetch('/api/subscription/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -123,25 +125,19 @@ export default function JoinMessPage() {
           customer_phone: phone.trim(),
           customer_name: name.trim(),
           customer_email: email.trim(),
+          payment_mode: paymentMode,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
 
-      if (!res.ok) {
-        // Truthful fail-closed notice
-        setStatusNotice(
-          data.error ||
-            'Online payment gateway is being connected for this kitchen. Entitlements are created only upon verified payment confirmation. No payment has been deducted.'
-        );
+      if (!res.ok || !data.success) {
+        setError(data.error || 'Unable to register subscription. Please retry.');
       } else {
-        // If payment gateway returns checkout order
-        setStatusNotice('Payment order created. Redirecting to secure gateway…');
+        setSuccessData(data);
       }
     } catch {
-      setStatusNotice(
-        'Online payment is temporarily unavailable. No meal credits or subscriptions have been deducted.'
-      );
+      setError('Network error registering subscription. Please check your connection.');
     } finally {
       setSubmitting(false);
     }
@@ -153,6 +149,80 @@ export default function JoinMessPage() {
         <div className="text-center">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-amber-600 border-t-transparent mx-auto" />
           <p className="mt-4 text-xs font-bold text-slate-700">Connecting to Kitchen Partner…</p>
+        </div>
+      </main>
+    );
+  }
+
+  // SUCCESS CONFIRMATION VIEW
+  if (successData) {
+    return (
+      <main className="min-h-screen bg-[#fcf8ef] px-4 py-12 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-lg rounded-3xl border border-amber-950/10 bg-white p-7 text-center shadow-lg space-y-6">
+          <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
+            <CheckCircle2 size={36} />
+          </div>
+
+          <div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+              Pass Registered Successfully
+            </span>
+            <h1 className="mt-3 text-2xl font-black text-slate-900">
+              Welcome to {provider?.display_name || 'Kitchen Partner'}!
+            </h1>
+            <p className="mt-2 text-xs text-slate-600">
+              Your meal pass has been registered. Complete the payment at the mess counter to redeem meals seamlessly.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 text-left text-xs space-y-2.5">
+            <div className="flex justify-between items-center text-slate-700">
+              <span className="font-semibold">Selected Plan:</span>
+              <span className="font-bold text-slate-900">{selectedPlan?.name || 'Meal Plan'}</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-700">
+              <span className="font-semibold">Total to Pay at Counter:</span>
+              <span className="text-base font-black text-amber-900">
+                ₹{selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-slate-700">
+              <span className="font-semibold">Payment Mode:</span>
+              <span className="font-bold text-slate-900 uppercase">
+                {paymentMode === 'counter_cash' ? 'Cash at Counter' : 'UPI QR at Counter'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center text-slate-700">
+              <span className="font-semibold">Customer:</span>
+              <span className="font-bold text-slate-900">{name || phone}</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-900 p-4 text-white text-xs text-left space-y-2">
+            <p className="font-bold flex items-center gap-1.5 text-amber-400">
+              <QrCode size={16} /> How to Redeem Meals:
+            </p>
+            <ol className="list-decimal list-inside space-y-1 text-slate-300 text-[11px] leading-5">
+              <li>Visit the mess counter at meal timing (Lunch / Dinner).</li>
+              <li>Pay ₹{selectedPlan ? (selectedPlan.price_paise / 100) : 0} via Cash or Counter UPI.</li>
+              <li>Scan the daily Mess QR on your mobile app or tell your registered number.</li>
+            </ol>
+          </div>
+
+          <div className="pt-2 flex flex-col gap-3">
+            <Link
+              href={`/provider/${provider?.id || providerId}`}
+              className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-orange-600 font-bold text-white text-sm shadow hover:bg-orange-700 transition"
+            >
+              Back to Mess Profile
+            </Link>
+            <Link
+              href="/explore"
+              className="text-xs font-bold text-slate-500 hover:text-slate-800 transition"
+            >
+              Browse Other Messes
+            </Link>
+          </div>
         </div>
       </main>
     );
@@ -331,22 +401,66 @@ export default function JoinMessPage() {
               </div>
             </div>
 
+            {/* STEP 3: PAYMENT METHOD */}
+            <div className="rounded-3xl border border-amber-950/10 bg-white p-6 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600 text-white text-xs font-bold">
+                  3
+                </span>
+                <h3 className="text-base font-bold text-slate-900">Payment Option</h3>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <label
+                  onClick={() => setPaymentMode('counter_cash')}
+                  className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
+                    paymentMode === 'counter_cash'
+                      ? 'border-amber-600 bg-amber-50/50 ring-2 ring-amber-600/20'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMode"
+                    checked={paymentMode === 'counter_cash'}
+                    onChange={() => setPaymentMode('counter_cash')}
+                    className="h-4 w-4 accent-amber-600"
+                  />
+                  <Coins className="h-5 w-5 text-amber-700 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-slate-900">Pay on Counter (Cash)</p>
+                    <p className="text-[11px] text-slate-500">Pay physical cash directly at the mess counter.</p>
+                  </div>
+                </label>
+
+                <label
+                  onClick={() => setPaymentMode('counter_upi')}
+                  className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
+                    paymentMode === 'counter_upi'
+                      ? 'border-amber-600 bg-amber-50/50 ring-2 ring-amber-600/20'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMode"
+                    checked={paymentMode === 'counter_upi'}
+                    onChange={() => setPaymentMode('counter_upi')}
+                    className="h-4 w-4 accent-amber-600"
+                  />
+                  <Wallet className="h-5 w-5 text-emerald-700 shrink-0" />
+                  <div>
+                    <p className="text-xs font-bold text-slate-900">Pay via Counter UPI QR</p>
+                    <p className="text-[11px] text-slate-500">Scan the provider’s UPI QR standee at the counter.</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
             {/* STATUS / NOTICE ALERTS */}
             {error && (
               <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-xs text-red-700">
                 {error}
-              </div>
-            )}
-
-            {statusNotice && (
-              <div
-                role="status"
-                className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 leading-5"
-              >
-                <div className="flex items-start gap-2">
-                  <ShieldAlert className="h-4 w-4 text-amber-700 shrink-0 mt-0.5" />
-                  <p>{statusNotice}</p>
-                </div>
               </div>
             )}
 
@@ -357,12 +471,16 @@ export default function JoinMessPage() {
                 disabled={submitting}
                 className="w-full min-h-12 rounded-2xl bg-orange-600 font-black text-white text-sm shadow-md hover:bg-orange-700 disabled:bg-slate-400 transition flex items-center justify-center gap-2"
               >
-                <Wallet size={16} />
-                <span>{submitting ? 'Connecting...' : 'Proceed to Plan Checkout'}</span>
+                <CheckCircle2 size={18} />
+                <span>
+                  {submitting
+                    ? 'Registering Pass...'
+                    : `Confirm Pass · Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} on Counter`}
+                </span>
               </button>
 
               <p className="text-center text-[11px] text-slate-500">
-                Entitlements are created only upon verified payment confirmation. No payment is taken without verification.
+                Instant registration. You will pay directly to {provider?.display_name || 'the mess'} at the counter.
               </p>
             </div>
           </form>
