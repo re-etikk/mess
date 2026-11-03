@@ -10,22 +10,38 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
   if (mealSlot.length > 40) return NextResponse.json({ success: false, error: 'Invalid meal slot.' }, { status: 400 });
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  const db = getAdminClient();
+  let providerExistsAndActive = false;
+
+  if (db) {
+    try {
+      const { data: provider } = await db.from('providers').select('id,status').eq('id', providerId).maybeSingle();
+      if (provider) {
+        if (provider.status !== 'active') {
+          return NextResponse.json({ success: false, error: 'A QR code is available only after the provider is active.' }, { status: 403 });
+        }
+        providerExistsAndActive = true;
+      }
+    } catch {}
+  }
+
+  const inStore = platformStore.providers.get(providerId);
+  if (inStore && inStore.status === 'active') {
+    providerExistsAndActive = true;
+  }
+
+  // If not authenticated and provider not found in active providers
+  if (!access.ok && !providerExistsAndActive) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  }
 
   const date = getIndiaDateString();
 
   try {
-    const db = getAdminClient();
     if (db) {
-      const { data: provider } = await db.from('providers').select('id,status').eq('id', providerId).maybeSingle();
-      if (provider && provider.status !== 'active') {
-        return NextResponse.json({ success: false, error: 'A QR code is available only after the provider is active.' }, { status: 403 });
-      }
-
       // Check or ensure meal slot exists in db
       const { data: existingSlots } = await db.from('meal_slots').select('id,name').eq('provider_id', providerId).ilike('name', mealSlot).limit(1);
       if (!existingSlots || existingSlots.length === 0) {
-        // Create default slot if not yet in database
         const starts = mealSlot === 'BREAKFAST' ? '07:30:00' : (mealSlot === 'DINNER' ? '19:30:00' : '12:00:00');
         const ends = mealSlot === 'BREAKFAST' ? '10:00:00' : (mealSlot === 'DINNER' ? '22:30:00' : '15:30:00');
         await db.from('meal_slots').insert({

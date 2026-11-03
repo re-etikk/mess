@@ -213,11 +213,22 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ActiveSubscription> purchasePlan(MealPlan plan) async {
+  Future<ActiveSubscription> purchasePlan(
+    MealPlan plan, {
+    String paymentMode = 'counter_cash',
+    String? receiptUrl,
+    String? utrReference,
+  }) async {
     if (plan.type == SubscriptionType.dailyMeal) {
       throw const RepositoryException('Use purchaseDailyMeal for a daily meal pass.', code: 'wrong_plan_type');
     }
-    final subscription = await repository.purchasePlan(plan: plan, customerId: customerId);
+    final subscription = await repository.purchasePlan(
+      plan: plan,
+      customerId: customerId,
+      paymentMode: paymentMode,
+      receiptUrl: receiptUrl,
+      utrReference: utrReference,
+    );
     _activeSubscription = subscription;
     _dailyMeal = null;
     selectedProviderId = plan.providerId;
@@ -226,6 +237,26 @@ class AppState extends ChangeNotifier {
     _persistSession();
     return subscription;
   }
+
+  Future<Map<String, dynamic>> fetchPaymentSettings(String providerId) => repository.fetchPaymentSettings(providerId);
+
+  Future<Map<String, dynamic>> getUpgradeQuote({required String subscriptionId, required String targetPlanId}) =>
+      repository.getUpgradeQuote(subscriptionId: subscriptionId, targetPlanId: targetPlanId);
+
+  Future<Map<String, dynamic>> requestPlanUpgrade({
+    required String subscriptionId,
+    required String targetPlanId,
+    String paymentMode = 'counter_cash',
+    String? receiptUrl,
+    String? utrReference,
+  }) =>
+      repository.requestPlanUpgrade(
+        subscriptionId: subscriptionId,
+        targetPlanId: targetPlanId,
+        paymentMode: paymentMode,
+        receiptUrl: receiptUrl,
+        utrReference: utrReference,
+      );
 
   Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) => purchasePlan(plan);
 

@@ -4,6 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/provider_api_service.dart';
+import 'features/pending_approvals_screen.dart';
+import 'features/payment_settings_screen.dart';
+import 'features/notifications_screen.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -720,6 +723,13 @@ class _ProviderShellState extends State<ProviderShell> {
           ]),
           actions: [
             IconButton(
+              tooltip: 'Pending Approvals & Notifications',
+              onPressed: () => setState(() {
+                detail = 'PendingApprovals';
+              }),
+              icon: const Icon(Icons.notifications_outlined, color: ink),
+            ),
+            IconButton(
               tooltip: 'Live counter QR',
               onPressed: () => setState(() {
                 selectedTab = 3;
@@ -922,6 +932,41 @@ class _ProviderOverviewState extends State<ProviderOverview> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          // PENDING APPROVALS ACTION CARD IN OVERVIEW
+          InkWell(
+            onTap: () => widget.onOpenDetail('PendingApprovals'),
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7ED),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFFED7AA), width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFFFFEDD5), borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.pending_actions_rounded, color: orange, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Pending Payment Approvals', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: ink)),
+                        SizedBox(height: 2),
+                        Text('Verify cash / UPI payments from students to activate passes', style: TextStyle(color: muted, fontSize: 11.5)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios, size: 14, color: orange),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 14),
           Row(children: [
             Expanded(child: MetricCard(title: 'Today’s meals', value: '${metrics?.todayScans ?? 0}', note: 'Redemptions today', icon: Icons.restaurant, tint: const Color(0xFFFFE8C5))),
@@ -1036,7 +1081,11 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
       error = null;
     });
     try {
-      final token = await ProviderApiService.fetchDailyQrToken(widget.session.providerId);
+      ProviderApiService.currentSession ??= widget.session;
+      final token = await ProviderApiService.fetchDailyQrToken(
+        widget.session.providerId,
+        token: widget.session.token,
+      );
       if (mounted) {
         setState(() {
           qrToken = token;
@@ -2031,6 +2080,9 @@ class MoreManagementScreen extends StatelessWidget {
           const SizedBox(height: 5),
           const Text('Manage subscribers, reports, settlements and kitchen profile.', style: TextStyle(color: muted)),
           const SizedBox(height: 18),
+          MoreMenuTile(icon: Icons.pending_actions_outlined, title: 'Pending Payment Approvals', subtitle: 'Confirm counter cash/UPI & plan upgrades', onTap: () => onSelect('PendingApprovals')),
+          MoreMenuTile(icon: Icons.qr_code_scanner_outlined, title: 'UPI & Payment QR Settings', subtitle: 'Configure your mess UPI ID and QR code image', onTap: () => onSelect('PaymentSettings')),
+          MoreMenuTile(icon: Icons.notifications_none_outlined, title: 'Partner Notifications', subtitle: 'Recent alerts, pending orders, and redemptions', onTap: () => onSelect('Notifications')),
           MoreMenuTile(icon: Icons.groups_outlined, title: 'Subscribers & Customers', subtitle: 'View verified student subscription plans & scan logs', onTap: () => onSelect('Subscribers')),
           MoreMenuTile(icon: Icons.point_of_sale_outlined, title: 'Counter Sales & Extras', subtitle: 'Record walk-in thali, extra rotis and paneer orders', onTap: () => onSelect('CounterOrders')),
           MoreMenuTile(icon: Icons.schedule_outlined, title: 'Operating Hours & Timings', subtitle: 'Manage breakfast, lunch and dinner serving slots', onTap: () => onSelect('Timings')),
@@ -2797,6 +2849,16 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   @override
   Widget build(BuildContext context) {
     switch (widget.kind) {
+      case 'PendingApprovals':
+        return PendingApprovalsScreen(session: widget.session, onBack: widget.onBack);
+      case 'PaymentSettings':
+        return PaymentSettingsScreen(session: widget.session, onBack: widget.onBack);
+      case 'Notifications':
+        return NotificationsScreen(
+          session: widget.session,
+          onBack: widget.onBack,
+          onOpenPending: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PendingApprovalsScreen(session: widget.session))),
+        );
       case 'Subscribers':
         final filtered = items.where((sub) {
           if (subFilter == 'Monthly') return (sub['plan_name']?.toString().toLowerCase().contains('monthly') == true) || (sub['plan_name']?.toString().contains('30') == true);
