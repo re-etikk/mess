@@ -1,3 +1,4 @@
+import 'plan_upgrade_sheet.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
@@ -218,6 +219,24 @@ class _PlansScreenState extends State<PlansScreen> {
                     ),
                     const Icon(Icons.check_circle_rounded, color: Color(0xFF45CA83), size: 18),
                   ]),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => PlanUpgradeSheet.show(context, current),
+                      icon: const Icon(Icons.upgrade_rounded, size: 18, color: MessColors.orange),
+                      label: const Text(
+                        'Upgrade / Switch Plan (Instant Pro-Rata Discount)',
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: MessColors.orange, width: 1.2),
+                        backgroundColor: const Color(0x25F97316),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
                 ]),
               ),
             ),

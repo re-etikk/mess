@@ -271,16 +271,138 @@ class ProviderApiService {
     throw Exception(data['error'] ?? 'Failed to load dashboard metrics (HTTP ${response.statusCode}).');
   }
 
-  static Future<String> fetchDailyQrToken(String providerId, {String? slot}) async {
+  static Future<String> fetchDailyQrToken(String providerId, {String? slot, String? token}) async {
     final slotQuery = slot != null ? '&slot=$slot' : '';
     final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
-    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
+    final authToken = (token != null && token.isNotEmpty) ? token : currentSession?.token;
+    final headers = {
+      'Content-Type': 'application/json',
+      if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
+    };
+    final response = await http.get(uri, headers: headers).timeout(const Duration(seconds: 12));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       return (data['token'] as String?) ?? '';
     }
     final data = _decodeResponse(response);
     throw Exception(data['error'] ?? 'Failed to generate daily QR token (HTTP ${response.statusCode}).');
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchPendingSubscriptions(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/subscriptions/pending?provider_id=$providerId');
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['pending'] as List<dynamic>? ?? [])
+            .map((e) => e as Map<String, dynamic>)
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<void> approveSubscription({
+    required String providerId,
+    required String subscriptionId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/subscriptions/approve');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({
+        'provider_id': providerId,
+        'subscription_id': subscriptionId,
+      }),
+    ).timeout(const Duration(seconds: 12));
+
+    final data = _decodeResponse(response);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to approve subscription');
+    }
+  }
+
+  static Future<void> rejectSubscription({
+    required String providerId,
+    required String subscriptionId,
+    String? reason,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/subscriptions/reject');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({
+        'provider_id': providerId,
+        'subscription_id': subscriptionId,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      }),
+    ).timeout(const Duration(seconds: 12));
+
+    final data = _decodeResponse(response);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to reject subscription');
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchPaymentSettings(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/payment-settings?provider_id=$providerId');
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['settings'] as Map<String, dynamic>? ?? {};
+      }
+    } catch (_) {}
+    return {'upi_id': 'thalipay@upi', 'upi_name': 'Mess Counter', 'upi_qr_url': ''};
+  }
+
+  static Future<void> savePaymentSettings({
+    required String providerId,
+    required String upiId,
+    required String upiName,
+    String? upiQrUrl,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/payment-settings');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({
+        'provider_id': providerId,
+        'upi_id': upiId,
+        'upi_name': upiName,
+        'upi_qr_url': upiQrUrl ?? '',
+      }),
+    ).timeout(const Duration(seconds: 12));
+
+    final data = _decodeResponse(response);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to save payment settings');
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchNotifications(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/notifications?provider_id=$providerId');
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {'notifications': [], 'unread_count': 0};
+  }
+
+  static Future<void> markNotificationsRead(String providerId, {String? notificationId}) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/notifications');
+      await http.post(
+        uri,
+        headers: _authHeaders(json: true),
+        body: jsonEncode({
+          'provider_id': providerId,
+          if (notificationId != null) 'notification_id': notificationId,
+        }),
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {}
   }
 
   static Future<List<Map<String, dynamic>>> fetchSubscribers(String providerId) async {
