@@ -7,6 +7,7 @@ import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
 import '../checkout/checkout_screen.dart';
 import '../plans/plans_screen.dart';
+import '../chat/customer_chat_screen.dart';
 
 class MessDetailScreen extends StatefulWidget {
   const MessDetailScreen({super.key, required this.provider});
@@ -52,6 +53,20 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
         leading: IconButton(onPressed: () => Navigator.maybePop(context), icon: const Icon(Icons.arrow_back_rounded)),
         title: Text(provider.name),
         actions: [
+          IconButton(
+            tooltip: 'Chat with Mess',
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CustomerChatScreen(
+                    providerId: provider.id,
+                    providerName: provider.name,
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Share mess',
             onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
@@ -99,6 +114,38 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
                               const Icon(Icons.location_on_outlined, size: 14, color: Colors.white70),
                               Text(provider.distanceLabel, style: const TextStyle(color: Colors.white70, fontSize: 12)),
                             ],
+                          ),
+                          const SizedBox(height: 10),
+                          InkWell(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => CustomerChatScreen(
+                                    providerId: provider.id,
+                                    providerName: provider.name,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E293B),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFF334155)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.chat_bubble_outline_rounded, size: 13, color: Color(0xFF38BDF8)),
+                                  SizedBox(width: 5),
+                                  Text(
+                                    'Chat with Mess',
+                                    style: TextStyle(color: Color(0xFF38BDF8), fontSize: 11, fontWeight: FontWeight.w700),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
                       ),

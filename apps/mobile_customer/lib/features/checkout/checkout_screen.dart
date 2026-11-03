@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/mess_models.dart';
 import '../../core/repositories/mess_repository.dart';
@@ -23,6 +26,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _busy = false;
   String _paymentMethod = 'Pay on Counter (Cash / Counter UPI)';
   Map<String, dynamic>? _paymentSettings;
+  String _receiptImageUri = '';
 
   final _utrCtrl = TextEditingController();
   final _receiptCtrl = TextEditingController();
@@ -46,6 +50,86 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final s = await state.fetchPaymentSettings(widget.provider.id);
       if (mounted) setState(() => _paymentSettings = s);
     } catch (_) {}
+  }
+
+  Future<void> _pickReceiptScreenshot() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 85,
+      );
+      if (picked != null) {
+        final bytes = await picked.readAsBytes();
+        final base64Uri = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+        setState(() {
+          _receiptImageUri = base64Uri;
+          _receiptCtrl.text = base64Uri;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Payment receipt screenshot attached!'), backgroundColor: Color(0xFF16A34A)),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to pick screenshot: $e')));
+      }
+    }
+  }
+
+  Future<void> _launchUpiApp(String upiPayload) async {
+    try {
+      final uri = Uri.parse(upiPayload);
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open UPI app automatically. Please copy the UPI ID below.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch UPI apps: $e. You can copy the UPI ID below.')),
+        );
+      }
+    }
+  }
+
+  Widget _buildProviderQr(String? qrUrl, String upiPayload) {
+    if (qrUrl != null && qrUrl.isNotEmpty) {
+      if (qrUrl.startsWith('data:image')) {
+        try {
+          final base64Part = qrUrl.split(',').last;
+          final bytes = base64Decode(base64Part);
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.memory(
+              bytes,
+              height: 190,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => _buildQrBox(upiPayload),
+            ),
+          );
+        } catch (_) {}
+      } else if (qrUrl.startsWith('http')) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(
+            qrUrl,
+            height: 190,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => _buildQrBox(upiPayload),
+          ),
+        );
+      }
+    }
+    return _buildQrBox(upiPayload);
   }
 
   int get _extrasTotal => widget.addOns.fold<int>(0, (sum, entry) => sum + entry.total);
@@ -206,19 +290,20 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    if (_paymentSettings?['upi_qr_url'] != null && _paymentSettings!['upi_qr_url'].toString().startsWith('http'))
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          _paymentSettings!['upi_qr_url'],
-                          height: 180,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => _buildQrBox(upiPayload),
-                        ),
-                      )
-                    else
-                      _buildQrBox(upiPayload),
-                    const SizedBox(height: 10),
+                    _buildProviderQr(_paymentSettings?['upi_qr_url']?.toString(), upiPayload),
+                    const SizedBox(height: 14),
+                    ElevatedButton.icon(
+                      onPressed: () => _launchUpiApp(upiPayload),
+                      icon: const Icon(Icons.account_balance_wallet, size: 18),
+                      label: const Text('Pay via UPI App (GPay / PhonePe / Paytm)', style: TextStyle(fontWeight: FontWeight.w700)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -232,23 +317,83 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
+                    // UTR Reference (Optional)
                     TextField(
                       controller: _utrCtrl,
                       decoration: const InputDecoration(
-                        hintText: 'UTR / Transaction Reference (12 digits)',
+                        hintText: 'UTR / Transaction Reference (Optional, 12 digits)',
                         prefixIcon: Icon(Icons.receipt_long),
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _receiptCtrl,
-                      decoration: const InputDecoration(
-                        hintText: 'Screenshot Image URL or Receipt Note (Optional)',
-                        prefixIcon: Icon(Icons.link),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      ),
+                    const SizedBox(height: 12),
+                    // Direct Screenshot Picker
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Payment Screenshot / Receipt *',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: MessColors.ink),
+                        ),
+                        const SizedBox(height: 6),
+                        if (_receiptImageUri.isEmpty)
+                          OutlinedButton.icon(
+                            onPressed: _pickReceiptScreenshot,
+                            icon: const Icon(Icons.add_photo_alternate_outlined, color: MessColors.orange),
+                            label: const Text('Attach Payment Receipt Image', style: TextStyle(color: MessColors.ink)),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(44),
+                              side: const BorderSide(color: MessColors.border),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFBBF7D0)),
+                            ),
+                            child: Row(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(
+                                    base64Decode(_receiptImageUri.split(',').last),
+                                    width: 54,
+                                    height: 54,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Receipt Attached', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF15803D), fontSize: 13)),
+                                      Text('Verification in progress', style: TextStyle(color: MessColors.muted, fontSize: 11)),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.edit, size: 20, color: MessColors.orange),
+                                  tooltip: 'Change Photo',
+                                  onPressed: _pickReceiptScreenshot,
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFDC2626)),
+                                  tooltip: 'Remove',
+                                  onPressed: () => setState(() {
+                                    _receiptImageUri = '';
+                                    _receiptCtrl.clear();
+                                  }),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),

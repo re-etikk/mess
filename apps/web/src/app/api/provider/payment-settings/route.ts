@@ -1,21 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
-import { platformStore } from '@/lib/platform-service';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export const dynamic = 'force-dynamic';
-
-// In-memory persistent map across requests for provider payment settings
-const providerPaymentSettingsStore = new Map<
-  string,
-  {
-    provider_id: string;
-    upi_id: string;
-    upi_name: string;
-    upi_qr_url: string;
-    updated_at: string;
-  }
->();
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -25,48 +12,47 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
   }
 
-  // 1. Check in-memory store
-  const stored = providerPaymentSettingsStore.get(providerId);
-
-  // 2. Check Supabase DB
-  let dbSettings: any = null;
   const admin = getAdminClient();
+  let billingAccount: any = null;
+  let providerInfo: any = null;
+
   if (admin) {
     try {
-      const { data: prov } = await admin
-        .from('providers')
-        .select('id,display_name,cover_path,logo_path')
-        .eq('id', providerId)
-        .maybeSingle();
-
-      if (prov) {
-        dbSettings = {
-          provider_id: prov.id,
-          upi_name: prov.display_name,
-        };
-      }
+      const [{ data: bill }, { data: prov }] = await Promise.all([
+        admin
+          .from('provider_billing_accounts')
+          .select('upi_id,upi_name,upi_qr_url,account_number,ifsc_code,bank_name,branch_name,account_holder_name,updated_at')
+          .eq('provider_id', providerId)
+          .maybeSingle(),
+        admin
+          .from('providers')
+          .select('id,display_name,cover_path,public_phone')
+          .eq('id', providerId)
+          .maybeSingle(),
+      ]);
+      billingAccount = bill;
+      providerInfo = prov;
     } catch {}
   }
 
-  // Fallback default demo data if none set yet
-  const result = stored || dbSettings || {
-    provider_id: providerId,
-    upi_id: 'thalipay@upi',
-    upi_name: 'Mess Counter Cashier',
-    upi_qr_url: '',
-    updated_at: new Date().toISOString(),
-  };
+  const defaultName = providerInfo?.display_name || 'Mess Counter';
+  const defaultUpi = providerInfo?.public_phone ? `${providerInfo.public_phone}@paytm` : 'thalipay@upi';
 
   return NextResponse.json({
     success: true,
     settings: {
       provider_id: providerId,
-      upi_id: result.upi_id || 'thalipay@upi',
-      upi_name: result.upi_name || 'Mess Counter',
-      upi_qr_url: result.upi_qr_url || '',
-      updated_at: result.updated_at || new Date().toISOString(),
+      upi_id: billingAccount?.upi_id || defaultUpi,
+      upi_name: billingAccount?.upi_name || defaultName,
+      upi_qr_url: billingAccount?.upi_qr_url || providerInfo?.cover_path || '',
+      account_number: billingAccount?.account_number || '',
+      ifsc_code: billingAccount?.ifsc_code || '',
+      bank_name: billingAccount?.bank_name || '',
+      branch_name: billingAccount?.branch_name || '',
+      account_holder_name: billingAccount?.account_holder_name || defaultName,
+      updated_at: billingAccount?.updated_at || new Date().toISOString(),
     },
-  });
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 export async function POST(req: NextRequest) {
@@ -76,6 +62,11 @@ export async function POST(req: NextRequest) {
     const upiId = (body.upi_id || '').trim();
     const upiName = (body.upi_name || '').trim();
     const upiQrUrl = (body.upi_qr_url || '').trim();
+    const accountNumber = (body.account_number || '').trim();
+    const ifscCode = (body.ifsc_code || '').trim().toUpperCase();
+    const bankName = (body.bank_name || '').trim();
+    const branchName = (body.branch_name || '').trim();
+    const accountHolderName = (body.account_holder_name || '').trim();
 
     if (!providerId) {
       return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
@@ -86,34 +77,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
 
-    const payload = {
+    const admin = getAdminClient();
+    const updatePayload = {
       provider_id: providerId,
       upi_id: upiId,
       upi_name: upiName,
       upi_qr_url: upiQrUrl,
+      account_number: accountNumber,
+      ifsc_code: ifscCode,
+      bank_name: bankName,
+      branch_name: branchName,
+      account_holder_name: accountHolderName,
       updated_at: new Date().toISOString(),
     };
 
-    // Save in in-memory store
-    providerPaymentSettingsStore.set(providerId, payload);
-
-    // Save in Supabase if DB available
-    const admin = getAdminClient();
     if (admin) {
       try {
-        // If providers table has cover_path or custom storage
-        if (upiQrUrl) {
-          await admin.from('providers').update({
-            cover_path: upiQrUrl,
-          }).eq('id', providerId);
+        const { data: existing } = await admin
+          .from('provider_billing_accounts')
+          .select('provider_id')
+          .eq('provider_id', providerId)
+          .maybeSingle();
+
+        if (existing) {
+          await admin
+            .from('provider_billing_accounts')
+            .update(updatePayload)
+            .eq('provider_id', providerId);
+        } else {
+          await admin
+            .from('provider_billing_accounts')
+            .insert(updatePayload);
         }
-      } catch {}
+
+        // Also sync cover_path in providers table if a custom QR is uploaded
+        if (upiQrUrl) {
+          await admin
+            .from('providers')
+            .update({ cover_path: upiQrUrl })
+            .eq('id', providerId);
+        }
+      } catch (err: any) {
+        console.error('Failed to update provider billing account in DB:', err?.message);
+      }
     }
 
     return NextResponse.json({
       success: true,
-      message: 'UPI payment settings updated successfully.',
-      settings: payload,
+      message: 'UPI payment settings and bank account updated successfully.',
+      settings: updatePayload,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || 'Server error updating payment settings.' }, { status: 500 });

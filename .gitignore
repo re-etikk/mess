@@ -45,6 +45,7 @@ pnpm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+.idea/
 
 # Local Certificates & Keystores
 android_certs/
