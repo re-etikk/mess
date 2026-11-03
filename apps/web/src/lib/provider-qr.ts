@@ -9,7 +9,6 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
   const mealSlot = (slot || getCurrentMealSlot() || 'LUNCH').toUpperCase();
   if (mealSlot.length > 40) return NextResponse.json({ success: false, error: 'Invalid meal slot.' }, { status: 400 });
 
-  const access = await requireProviderOwnership(req, providerId);
   const db = getAdminClient();
   let providerExistsAndActive = false;
 
@@ -17,7 +16,7 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
     try {
       const { data: provider } = await db.from('providers').select('id,status').eq('id', providerId).maybeSingle();
       if (provider) {
-        if (provider.status !== 'active') {
+        if (provider.status !== 'active' && provider.status !== 'approved') {
           return NextResponse.json({ success: false, error: 'A QR code is available only after the provider is active.' }, { status: 403 });
         }
         providerExistsAndActive = true;
@@ -30,7 +29,8 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
     providerExistsAndActive = true;
   }
 
-  // If not authenticated and provider not found in active providers
+  const access = await requireProviderOwnership(req, providerId);
+  // Allow if requester is authenticated OR if target mess is a confirmed active/approved mess
   if (!access.ok && !providerExistsAndActive) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }

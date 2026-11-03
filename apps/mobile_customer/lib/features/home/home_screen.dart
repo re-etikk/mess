@@ -10,6 +10,7 @@ import '../../core/widgets/mess_widgets.dart';
 import '../mess/mess_detail_screen.dart';
 import '../plans/plan_upgrade_sheet.dart';
 import '../plans/plans_screen.dart';
+import '../chat/customer_chat_screen.dart';
 import '../scan/scan_screen.dart';
 import '../search/search_screen.dart';
 
@@ -355,26 +356,51 @@ class _SubscriptionCard extends StatelessWidget {
             ]),
           ]),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => PlanUpgradeSheet.show(context, subscription),
-              icon: const Icon(Icons.upgrade_rounded, size: 18, color: MessColors.orange),
-              label: const Text(
-                'Upgrade / Switch Plan (Save Balance)',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => PlanUpgradeSheet.show(context, subscription),
+                  icon: const Icon(Icons.upgrade_rounded, size: 16, color: MessColors.orange),
+                  label: const Text(
+                    'Upgrade Plan',
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: MessColors.orange, width: 1.2),
+                    backgroundColor: const Color(0x25F97316),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 ),
               ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: MessColors.orange, width: 1.2),
-                backgroundColor: const Color(0x25F97316),
-                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => CustomerChatScreen(
+                          providerId: subscription.providerId,
+                          providerName: subscription.providerName,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16, color: Color(0xFF38BDF8)),
+                  label: const Text(
+                    'Chat with Mess',
+                    style: TextStyle(color: Color(0xFF38BDF8), fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF0284C7), width: 1.2),
+                    backgroundColor: const Color(0x200284C7),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ]),
       ),

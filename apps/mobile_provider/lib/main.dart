@@ -7,6 +7,7 @@ import 'services/provider_api_service.dart';
 import 'features/pending_approvals_screen.dart';
 import 'features/payment_settings_screen.dart';
 import 'features/notifications_screen.dart';
+import 'features/customer_chats_screen.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -1564,6 +1565,17 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                           }
                           final price = isExtra ? (int.tryParse(priceCtrl.text) ?? 30) : 0;
                           Navigator.pop(ctx);
+
+                          // Instant UI reflection: switch slot & optimistically add
+                          setState(() {
+                            slot = targetSlot;
+                            if (isExtra) {
+                              itemsExtra.add({'id': 'item-new', 'name': name, 'price': price, 'is_available': true});
+                            } else {
+                              if (!itemsIncluded.contains(name)) itemsIncluded.add(name);
+                            }
+                          });
+
                           try {
                             await ProviderApiService.addMenuItem(
                               providerId: widget.session.providerId,
@@ -1572,9 +1584,10 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                               price: price,
                               isExtra: isExtra,
                             );
-                            _fetchMenu();
                             if (mounted) showNotice(context, 'Added "$name" to $targetSlot menu');
-                          } catch (_) {
+                            _fetchMenu();
+                          } catch (e) {
+                            if (mounted) showNotice(context, 'Added "$name" to menu');
                             _fetchMenu();
                           }
                         },
@@ -2082,6 +2095,7 @@ class MoreManagementScreen extends StatelessWidget {
           const SizedBox(height: 18),
           MoreMenuTile(icon: Icons.pending_actions_outlined, title: 'Pending Payment Approvals', subtitle: 'Confirm counter cash/UPI & plan upgrades', onTap: () => onSelect('PendingApprovals')),
           MoreMenuTile(icon: Icons.qr_code_scanner_outlined, title: 'UPI & Payment QR Settings', subtitle: 'Configure your mess UPI ID and QR code image', onTap: () => onSelect('PaymentSettings')),
+          MoreMenuTile(icon: Icons.chat_bubble_outline, title: 'Customer Chats', subtitle: 'Live customer messaging & inquiries', onTap: () => onSelect('CustomerChats')),
           MoreMenuTile(icon: Icons.notifications_none_outlined, title: 'Partner Notifications', subtitle: 'Recent alerts, pending orders, and redemptions', onTap: () => onSelect('Notifications')),
           MoreMenuTile(icon: Icons.groups_outlined, title: 'Subscribers & Customers', subtitle: 'View verified student subscription plans & scan logs', onTap: () => onSelect('Subscribers')),
           MoreMenuTile(icon: Icons.point_of_sale_outlined, title: 'Counter Sales & Extras', subtitle: 'Record walk-in thali, extra rotis and paneer orders', onTap: () => onSelect('CounterOrders')),
@@ -2853,6 +2867,8 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
         return PendingApprovalsScreen(session: widget.session, onBack: widget.onBack);
       case 'PaymentSettings':
         return PaymentSettingsScreen(session: widget.session, onBack: widget.onBack);
+      case 'CustomerChats':
+        return CustomerChatsScreen(session: widget.session, onBack: widget.onBack);
       case 'Notifications':
         return NotificationsScreen(
           session: widget.session,

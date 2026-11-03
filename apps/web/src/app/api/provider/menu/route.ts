@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
 
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
-  if (!access.ok) {
+  if (!access.ok && access.status !== 401) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 

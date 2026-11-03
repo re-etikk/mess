@@ -119,17 +119,27 @@ class ProviderApiService {
   }
 
   static Future<ProviderSession> refreshSession(String refreshToken) async {
-    final response = await http.post(Uri.parse('$baseUrl/api/auth/refresh'),
-      headers: _authHeaders(json: true), body: jsonEncode({'refresh_token': refreshToken})).timeout(const Duration(seconds: 12));
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/refresh'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'refresh_token': refreshToken}),
+    ).timeout(const Duration(seconds: 12));
     final data = _decodeResponse(response);
     if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
       throw Exception(data['error'] ?? 'Session refresh failed.');
     }
     final previous = currentSession;
     final user = data['user'] as Map<String, dynamic>? ?? {};
-    return ProviderSession(token: data['token']?.toString() ?? '', refreshToken: data['refresh_token']?.toString() ?? refreshToken,
-      userId: user['id']?.toString() ?? previous?.userId ?? '', email: user['email']?.toString() ?? previous?.email ?? '',
-      providerId: previous?.providerId ?? '', businessName: previous?.businessName ?? 'My Mess');
+    final refreshedSession = ProviderSession(
+      token: data['token']?.toString() ?? '',
+      refreshToken: data['refresh_token']?.toString() ?? refreshToken,
+      userId: user['id']?.toString() ?? previous?.userId ?? '',
+      email: user['email']?.toString() ?? previous?.email ?? '',
+      providerId: previous?.providerId ?? '',
+      businessName: previous?.businessName ?? 'My Mess',
+    );
+    await saveSession(refreshedSession);
+    return refreshedSession;
   }
 
   static Future<void> clearSession() async {
@@ -274,12 +284,47 @@ class ProviderApiService {
   static Future<String> fetchDailyQrToken(String providerId, {String? slot, String? token}) async {
     final slotQuery = slot != null ? '&slot=$slot' : '';
     final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
-    final authToken = (token != null && token.isNotEmpty) ? token : currentSession?.token;
-    final headers = {
-      'Content-Type': 'application/json',
-      if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
-    };
-    final response = await http.get(uri, headers: headers).timeout(const Duration(seconds: 12));
+    final fallbackUri = Uri.parse('$baseUrl/api/redemption/provider-qr?provider_id=$providerId$slotQuery');
+    String? authToken = (token != null && token.isNotEmpty) ? token : currentSession?.token;
+
+    http.Response response;
+    try {
+      response = await http.get(uri, headers: {
+        'Content-Type': 'application/json',
+        if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
+      }).timeout(const Duration(seconds: 12));
+    } catch (_) {
+      response = await http.get(fallbackUri, headers: {
+        'Content-Type': 'application/json',
+        if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
+      }).timeout(const Duration(seconds: 12));
+    }
+
+    // Auto-refresh on 401 Unauthorized if refreshToken is available
+    if (response.statusCode == 401 && currentSession != null && currentSession!.refreshToken.isNotEmpty) {
+      try {
+        final refreshed = await refreshSession(currentSession!.refreshToken);
+        authToken = refreshed.token;
+        response = await http.get(uri, headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $authToken',
+        }).timeout(const Duration(seconds: 12));
+      } catch (_) {}
+    }
+
+    // Fallback attempt to alternate endpoint if still not 200
+    if (response.statusCode != 200) {
+      try {
+        final retryRes = await http.get(fallbackUri, headers: {
+          'Content-Type': 'application/json',
+          if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
+        }).timeout(const Duration(seconds: 10));
+        if (retryRes.statusCode == 200) {
+          response = retryRes;
+        }
+      } catch (_) {}
+    }
+
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       return (data['token'] as String?) ?? '';
@@ -361,6 +406,11 @@ class ProviderApiService {
     required String upiId,
     required String upiName,
     String? upiQrUrl,
+    String? accountNumber,
+    String? ifscCode,
+    String? bankName,
+    String? branchName,
+    String? accountHolderName,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/payment-settings');
     final response = await http.post(
@@ -371,6 +421,11 @@ class ProviderApiService {
         'upi_id': upiId,
         'upi_name': upiName,
         'upi_qr_url': upiQrUrl ?? '',
+        'account_number': accountNumber ?? '',
+        'ifsc_code': ifscCode ?? '',
+        'bank_name': bankName ?? '',
+        'branch_name': branchName ?? '',
+        'account_holder_name': accountHolderName ?? '',
       }),
     ).timeout(const Duration(seconds: 12));
 
@@ -378,6 +433,87 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to save payment settings');
     }
+  }
+
+  static Future<Map<String, dynamic>> lookupUpi(String upiId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/upi/lookup?upi_id=${Uri.encodeComponent(upiId.trim())}');
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['success'] == true) return data;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static Future<Map<String, dynamic>> lookupIfsc(String ifsc) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/bank/ifsc?code=${Uri.encodeComponent(ifsc.trim().toUpperCase())}');
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['success'] == true) return data;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchChatMessages({
+    required String providerId,
+    required String customerId,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/chat/messages?provider_id=$providerId&customer_id=$customerId');
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['messages'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<Map<String, dynamic>> sendChatMessage({
+    required String providerId,
+    required String customerId,
+    required String message,
+    required String senderRole,
+    required String senderName,
+    required String senderId,
+    String? attachmentUrl,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/chat/messages');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({
+        'provider_id': providerId,
+        'customer_id': customerId,
+        'message': message,
+        'sender_role': senderRole,
+        'sender_name': senderName,
+        'sender_id': senderId,
+        'attachment_url': attachmentUrl,
+      }),
+    ).timeout(const Duration(seconds: 10));
+    final data = _decodeResponse(response);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to send message');
+    }
+    return data['message'] as Map<String, dynamic>? ?? {};
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchChatConversations(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/chat/conversations?provider_id=$providerId');
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['conversations'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
+      }
+    } catch (_) {}
+    return [];
   }
 
   static Future<Map<String, dynamic>> fetchNotifications(String providerId) async {
@@ -553,12 +689,13 @@ class ProviderApiService {
     bool isExtra = false,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
-    final response = await http.post(
+    final headers = {
+      'Content-Type': 'application/json',
+      if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+    };
+    var response = await http.post(
       uri,
-      headers: {
-        'Content-Type': 'application/json',
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-      },
+      headers: headers,
       body: jsonEncode({
         'provider_id': providerId,
         'action': 'add_item',
@@ -569,6 +706,27 @@ class ProviderApiService {
         'is_extra': isExtra,
       }),
     ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 401 && currentSession != null && currentSession!.refreshToken.isNotEmpty) {
+      try {
+        final refreshed = await refreshSession(currentSession!.refreshToken);
+        headers['Authorization'] = 'Bearer ${refreshed.token}';
+        response = await http.post(
+          uri,
+          headers: headers,
+          body: jsonEncode({
+            'provider_id': providerId,
+            'action': 'add_item',
+            'name': name,
+            'item_name': name,
+            'slot': slot.toLowerCase(),
+            'price': price,
+            'is_extra': isExtra,
+          }),
+        ).timeout(const Duration(seconds: 10));
+      } catch (_) {}
+    }
+
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to add menu item');
@@ -797,19 +955,38 @@ class ProviderApiService {
   }) async {
     try {
       final uri = Uri.parse('$baseUrl/api/provider/status');
-      final response = await http
+      final headers = {
+        'Content-Type': 'application/json',
+        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
+      };
+      var response = await http
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-            },
+            headers: headers,
             body: jsonEncode({
               'provider_id': providerId,
               'is_open': isOpen,
             }),
           )
           .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 401 && currentSession != null && currentSession!.refreshToken.isNotEmpty) {
+        try {
+          final refreshed = await refreshSession(currentSession!.refreshToken);
+          headers['Authorization'] = 'Bearer ${refreshed.token}';
+          response = await http
+              .post(
+                uri,
+                headers: headers,
+                body: jsonEncode({
+                  'provider_id': providerId,
+                  'is_open': isOpen,
+                }),
+              )
+              .timeout(const Duration(seconds: 10));
+        } catch (_) {}
+      }
+
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return data['success'] == true;
