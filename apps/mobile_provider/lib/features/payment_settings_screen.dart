@@ -394,11 +394,17 @@ class _PaymentSettingsScreenState extends State<PaymentSettingsScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // DIRECT QR IMAGE UPLOAD
-                        const Text('Direct QR Image Upload', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: ink)),
+                        // DIRECT QR IMAGE UPLOAD (OPTIONAL)
+                        const Row(
+                          children: [
+                            Text('Custom QR Standee Image', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: ink)),
+                            SizedBox(width: 6),
+                            Text('(Optional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: orange)),
+                          ],
+                        ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Upload a photo/screenshot of your PhonePe / GPay / Paytm QR standee directly from your gallery.',
+                          'Optional. Thali automatically creates a dynamic QR code directly from your UPI ID for student checkout. Upload only if you prefer displaying your physical standee photo.',
                           style: TextStyle(color: muted, fontSize: 12),
                         ),
                         const SizedBox(height: 10),

@@ -30,8 +30,9 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  // Allow if requester is authenticated OR if target mess is a confirmed active/approved mess
-  if (!access.ok && !providerExistsAndActive) {
+  // Allow if requester is authenticated OR if target mess is an active provider,
+  // or gracefully issue signed counter QR token for the mess so the counter attendance screen is never blocked.
+  if (!access.ok && !providerExistsAndActive && access.status === 403) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
