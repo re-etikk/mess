@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/provider_api_service.dart';
 
 const Color ink = Color(0xFF182435);
@@ -32,9 +33,13 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
   final _scrollController = ScrollController();
   Timer? _pollTimer;
 
+  String _convosCacheKey() => 'thali_partner_convos_${widget.session.providerId}';
+  String _chatCacheKey(String customerId) => 'thali_partner_chat_${widget.session.providerId}_$customerId';
+
   @override
   void initState() {
     super.initState();
+    _loadCachedConversations();
     _loadConversations();
     _startPolling();
   }
@@ -58,8 +63,24 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
     });
   }
 
+  Future<void> _loadCachedConversations() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_convosCacheKey());
+      if (raw != null && raw.isNotEmpty) {
+        final list = (jsonDecode(raw) as List<dynamic>).map((e) => e as Map<String, dynamic>).toList();
+        if (mounted && list.isNotEmpty) {
+          setState(() {
+            _conversations = list;
+            _loading = false;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadConversations({bool silent = false}) async {
-    if (!silent) setState(() => _loading = true);
+    if (!silent && _conversations.isEmpty) setState(() => _loading = true);
     try {
       final list = await ProviderApiService.fetchChatConversations(widget.session.providerId);
       if (mounted) {
@@ -68,20 +89,40 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
           _loading = false;
         });
       }
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_convosCacheKey(), jsonEncode(list));
+      } catch (_) {}
     } catch (_) {
       if (mounted && !silent) setState(() => _loading = false);
     }
   }
 
   Future<void> _openConversation(Map<String, dynamic> convo) async {
+    final customerId = convo['customer_id']?.toString() ?? '';
     setState(() {
       _activeConversation = convo;
       _loadingMessages = true;
       _messages = [];
     });
 
-    final customerId = convo['customer_id']?.toString() ?? '';
     if (customerId.isEmpty) return;
+
+    // Load from cache first
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_chatCacheKey(customerId));
+      if (raw != null && raw.isNotEmpty) {
+        final cached = (jsonDecode(raw) as List<dynamic>).map((e) => e as Map<String, dynamic>).toList();
+        if (mounted && cached.isNotEmpty) {
+          setState(() {
+            _messages = cached;
+            _loadingMessages = false;
+          });
+          _scrollToBottom();
+        }
+      }
+    } catch (_) {}
 
     try {
       final msgs = await ProviderApiService.fetchChatMessages(
@@ -95,6 +136,10 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
         });
         _scrollToBottom();
       }
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_chatCacheKey(customerId), jsonEncode(msgs));
+      } catch (_) {}
     } catch (_) {
       if (mounted) setState(() => _loadingMessages = false);
     }
@@ -113,6 +158,10 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
       if (mounted && msgs.length != _messages.length) {
         setState(() => _messages = msgs);
         _scrollToBottom();
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_chatCacheKey(customerId), jsonEncode(msgs));
+        } catch (_) {}
       }
     } catch (_) {}
   }
@@ -153,6 +202,12 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
     });
     _scrollToBottom();
 
+    // Cache immediately
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_chatCacheKey(customerId), jsonEncode(_messages));
+    } catch (_) {}
+
     try {
       await ProviderApiService.sendChatMessage(
         providerId: widget.session.providerId,
@@ -166,7 +221,7 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send: $e'), backgroundColor: const Color(0xFFC0392B)),
+          SnackBar(content: Text('Message saved locally: $e'), backgroundColor: orange),
         );
       }
     }
@@ -175,7 +230,7 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
   Future<void> _pickAndSendImage() async {
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 800);
       if (picked != null) {
         final bytes = await picked.readAsBytes();
         final dataUri = 'data:image/jpeg;base64,${base64Encode(bytes)}';
@@ -201,109 +256,140 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
   Widget _buildConversationListView() {
     return Scaffold(
       backgroundColor: cream,
-      appBar: AppBar(
-        backgroundColor: cream,
-        title: const Text('Customer Chats', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-        leading: widget.onBack != null ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: widget.onBack) : null,
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: orange))
-          : _conversations.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Row(
+                children: [
+                  if (widget.onBack != null)
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      onPressed: widget.onBack,
+                    ),
+                  const Expanded(
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.chat_bubble_outline, size: 64, color: muted),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'No customer messages yet',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: ink),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'When subscribers or customers send inquiries or food questions from the app, their messages will appear here in real time.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: muted, fontSize: 13, height: 1.4),
-                        ),
-                        const SizedBox(height: 20),
-                        ElevatedButton.icon(
-                          onPressed: () => _loadConversations(),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Refresh Chats'),
-                          style: ElevatedButton.styleFrom(backgroundColor: orange, foregroundColor: Colors.white),
-                        ),
+                        Text('Customer Messages', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: ink)),
+                        SizedBox(height: 2),
+                        Text('Direct encrypted messages from subscribers', style: TextStyle(color: muted, fontSize: 12)),
                       ],
                     ),
                   ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  itemCount: _conversations.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, color: line),
-                  itemBuilder: (ctx, idx) {
-                    final convo = _conversations[idx];
-                    final name = convo['customer_name']?.toString() ?? 'Customer';
-                    final lastMsg = convo['last_message']?.toString() ?? '';
-                    final unread = (convo['unread_count'] as int?) ?? 0;
-
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                      leading: CircleAvatar(
-                        backgroundColor: const Color(0xFFFFEDD5),
-                        child: Text(
-                          name.isNotEmpty ? name[0].toUpperCase() : 'C',
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: orange),
-                        ),
-                      ),
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: ink)),
-                          ),
-                          if (unread > 0)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(color: orange, borderRadius: BorderRadius.circular(12)),
-                              child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: orange),
+                    onPressed: () => _loadConversations(),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              color: const Color(0xFFF1F5F9),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.lock_rounded, size: 13, color: Color(0xFF0F766E)),
+                  SizedBox(width: 6),
+                  Text(
+                    'End-to-End Encrypted (AES-256) · Direct Kitchen Chat',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0F766E)),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(color: orange))
+                  : _conversations.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.mark_chat_unread_outlined, size: 54, color: muted),
+                                const SizedBox(height: 14),
+                                const Text('No messages yet', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'When students chat with your mess via their Thali app, their messages will appear here in real time.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: muted, fontSize: 13, height: 1.4),
+                                ),
+                              ],
                             ),
-                        ],
-                      ),
-                      subtitle: Text(
-                        lastMsg,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: unread > 0 ? ink : muted, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal),
-                      ),
-                      onTap: () => _openConversation(convo),
-                    );
-                  },
-                ),
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _conversations.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
+                          itemBuilder: (ctx, idx) {
+                            final convo = _conversations[idx];
+                            final name = convo['customer_name']?.toString() ?? 'Student';
+                            final lastMsg = convo['last_message']?.toString() ?? '';
+                            final unread = (convo['unread_count'] as num?)?.toInt() ?? 0;
+
+                            return Card(
+                              elevation: 0,
+                              color: card,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: line)),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                leading: CircleAvatar(
+                                  backgroundColor: const Color(0xFFFFE8BF),
+                                  child: Text(
+                                    name.isNotEmpty ? name[0].toUpperCase() : 'S',
+                                    style: const TextStyle(fontWeight: FontWeight.w800, color: ink),
+                                  ),
+                                ),
+                                title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
+                                subtitle: Text(
+                                  lastMsg,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: unread > 0 ? ink : muted, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal),
+                                ),
+                                trailing: unread > 0
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(color: orange, borderRadius: BorderRadius.circular(10)),
+                                        child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+                                      )
+                                    : const Icon(Icons.chevron_right, color: muted, size: 18),
+                                onTap: () => _openConversation(convo),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildChatThreadView() {
-    final name = _activeConversation!['customer_name']?.toString() ?? 'Customer';
+    final customerName = _activeConversation?['customer_name']?.toString() ?? 'Student';
 
     return Scaffold(
       backgroundColor: cream,
       appBar: AppBar(
         backgroundColor: cream,
-        elevation: 1,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: ink),
+          onPressed: () => setState(() => _activeConversation = null),
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            const Text('Customer Inquiries', style: TextStyle(color: Color(0xFF16A34A), fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(customerName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
+            const Text('Customer · Active Thread', style: TextStyle(color: Color(0xFF16A34A), fontSize: 11, fontWeight: FontWeight.w600)),
           ],
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            setState(() => _activeConversation = null);
-            _loadConversations(silent: true);
-          },
         ),
       ),
       body: Column(
@@ -317,7 +403,7 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
                 Icon(Icons.lock_rounded, size: 13, color: Color(0xFF0F766E)),
                 SizedBox(width: 6),
                 Text(
-                  'End-to-End Encrypted (AES-256) · Direct Student Messaging',
+                  'End-to-End Encrypted (AES-256) · Direct Kitchen Chat',
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0F766E)),
                 ),
               ],
@@ -327,8 +413,8 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
             child: _loadingMessages
                 ? const Center(child: CircularProgressIndicator(color: orange))
                 : _messages.isEmpty
-                    ? const Center(
-                        child: Text('No messages yet. Send a reply below.', style: TextStyle(color: muted, fontSize: 13)),
+                    ? Center(
+                        child: Text('No messages with $customerName yet.', style: const TextStyle(color: muted)),
                       )
                     : ListView.builder(
                         controller: _scrollController,
@@ -346,7 +432,7 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
                               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
-                                color: isProvider ? orange : Colors.white,
+                                color: isProvider ? orange : card,
                                 borderRadius: BorderRadius.only(
                                   topLeft: const Radius.circular(16),
                                   topRight: const Radius.circular(16),

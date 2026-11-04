@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'services/provider_api_service.dart';
 import 'features/pending_approvals_screen.dart';
 import 'features/payment_settings_screen.dart';
@@ -1397,7 +1399,22 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     _fetchMenu();
   }
 
+  String _menuCacheKey(String s) => 'thali_menu_cache_${widget.session.providerId}_${s.toLowerCase()}';
+
   Future<void> _fetchMenu() async {
+    // 1. Load from cache first
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_menuCacheKey(slot));
+      if (cached != null && cached.isNotEmpty) {
+        final decoded = jsonDecode(cached);
+        itemsIncluded = (decoded['items_included'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+        itemsExtra = (decoded['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
+        itemsUnavailable = (decoded['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+        loading = false;
+      }
+    } catch (_) {}
+
     setState(() => loading = true);
     try {
       final res = await ProviderApiService.fetchMenu(widget.session.providerId);
@@ -1796,10 +1813,31 @@ class _PlansManagementScreenState extends State<PlansManagementScreen> {
     _fetchPlans();
   }
 
+  String _plansCacheKey() => 'thali_plans_cache_${widget.session.providerId}';
+
   Future<void> _fetchPlans() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_plansCacheKey());
+      if (cached != null && cached.isNotEmpty) {
+        final list = (jsonDecode(cached) as List<dynamic>).map((e) => e as Map<String, dynamic>).toList();
+        if (list.isNotEmpty) {
+          plans = list;
+          loading = false;
+        }
+      }
+    } catch (_) {}
+
     setState(() => loading = true);
     try {
-      plans = await ProviderApiService.fetchProviderPlans(widget.session.providerId);
+      final res = await ProviderApiService.fetchProviderPlans(widget.session.providerId);
+      if (res.isNotEmpty) {
+        plans = res;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_plansCacheKey(), jsonEncode(res));
+        } catch (_) {}
+      }
     } catch (_) {}
     if (mounted) setState(() => loading = false);
   }
@@ -3346,12 +3384,17 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
         ]);
 
       case 'Business profile':
-        return _detailScaffold(context, 'Mess Profile', [
-          ReviewLine(label: 'Mess Name', value: widget.session.businessName),
-          ReviewLine(label: 'Registered Email', value: widget.session.email),
-          ReviewLine(label: 'Provider ID', value: widget.session.providerId),
-          ReviewLine(label: 'Status', value: 'Active Verified Partner'),
-        ]);
+        return ProviderProfileScreen(
+          session: widget.session,
+          onBack: widget.onBack,
+          onSignOut: () async {
+            await ProviderApiService.clearSession();
+            appNavigatorKey.currentState?.pushAndRemoveUntil(
+              MaterialPageRoute(builder: (_) => const MessProviderApp()),
+              (route) => false,
+            );
+          },
+        );
 
       case 'Earnings':
       default:
@@ -3669,4 +3712,597 @@ class MenuItemDraft {
   final String name, rule, portion;
   final int price;
   final bool enabled, paid;
+}
+
+
+class ProviderProfileScreen extends StatefulWidget {
+  const ProviderProfileScreen({
+    super.key,
+    required this.session,
+    this.onBack,
+    this.onSignOut,
+  });
+
+  final ProviderSession session;
+  final VoidCallback? onBack;
+  final Future<void> Function()? onSignOut;
+
+  @override
+  State<ProviderProfileScreen> createState() => _ProviderProfileScreenState();
+}
+
+class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
+  static const String _baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://www.thali.store',
+  );
+
+  late TextEditingController _businessNameCtrl;
+  late TextEditingController _ownerNameCtrl;
+  late TextEditingController _emailCtrl;
+  late TextEditingController _phoneCtrl;
+  late TextEditingController _addressCtrl;
+  late TextEditingController _cityCtrl;
+  String _avatarData = '';
+  bool _saving = false;
+  bool _loadingData = true;
+  String? _verificationToken;
+  String _verifiedEmail = '';
+  String _verifiedPhone = '';
+
+  String _avatarCacheKey() => 'thali_provider_avatar_${widget.session.providerId}';
+
+  @override
+  void initState() {
+    super.initState();
+    _businessNameCtrl = TextEditingController(text: widget.session.businessName);
+    _ownerNameCtrl = TextEditingController(text: 'Mess Owner');
+    _emailCtrl = TextEditingController(text: widget.session.email);
+    _phoneCtrl = TextEditingController();
+    _addressCtrl = TextEditingController();
+    _cityCtrl = TextEditingController(text: 'Noida');
+    _verifiedEmail = widget.session.email;
+
+    _loadInitialData();
+  }
+
+  @override
+  void dispose() {
+    _businessNameCtrl.dispose();
+    _ownerNameCtrl.dispose();
+    _emailCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _cityCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadInitialData() async {
+    // 1. Load cached avatar
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedAvatar = prefs.getString(_avatarCacheKey());
+      if (cachedAvatar != null && cachedAvatar.isNotEmpty) {
+        if (mounted) setState(() => _avatarData = cachedAvatar);
+      }
+    } catch (_) {}
+
+    // 2. Fetch server profile
+    try {
+      final uri = Uri.parse('$_baseUrl/api/user/profile?provider_id=${widget.session.providerId}');
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final prof = data['profile'] as Map<String, dynamic>? ?? {};
+        if (mounted) {
+          setState(() {
+            if (prof['business_name'] != null && prof['business_name'].toString().isNotEmpty) {
+              _businessNameCtrl.text = prof['business_name'].toString();
+            }
+            if (prof['public_phone'] != null && prof['public_phone'].toString().isNotEmpty) {
+              _phoneCtrl.text = prof['public_phone'].toString();
+              _verifiedPhone = _phoneCtrl.text;
+            }
+            if (prof['public_email'] != null && prof['public_email'].toString().isNotEmpty) {
+              _emailCtrl.text = prof['public_email'].toString();
+              _verifiedEmail = _emailCtrl.text;
+            }
+            if (prof['address'] != null && prof['address'].toString().isNotEmpty) {
+              _addressCtrl.text = prof['address'].toString();
+            }
+            if (prof['city'] != null && prof['city'].toString().isNotEmpty) {
+              _cityCtrl.text = prof['city'].toString();
+            }
+            if (prof['avatar_path'] != null && prof['avatar_path'].toString().isNotEmpty) {
+              _avatarData = prof['avatar_path'].toString();
+            }
+          });
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loadingData = false);
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 600);
+      if (picked != null) {
+        final bytes = await picked.readAsBytes();
+        final dataUri = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+        setState(() => _avatarData = dataUri);
+
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_avatarCacheKey(), dataUri);
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (mounted) showNotice(context, 'Failed to pick image: $e', isError: true);
+    }
+  }
+
+  Future<void> _verifyOtp(String identifier, String type) async {
+    final otpCtrl = TextEditingController();
+    bool sendingOtp = false;
+
+    // Send OTP first
+    try {
+      final sendRes = await http.post(
+        Uri.parse('$_baseUrl/api/auth/otp/send'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'identifier': identifier, 'purpose': '${type}_verification'}),
+      ).timeout(const Duration(seconds: 10));
+
+      final data = jsonDecode(sendRes.body);
+      if (sendRes.statusCode >= 400 || data['success'] != true) {
+        throw Exception(data['error'] ?? 'Failed to send OTP code');
+      }
+    } catch (e) {
+      if (mounted) showNotice(context, 'Could not send OTP: $e', isError: true);
+      return;
+    }
+
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 22,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.shield_outlined, color: orange, size: 24),
+                  const SizedBox(width: 8),
+                  Text('Verify $type', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: ink)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Enter the 6-digit OTP code sent to $identifier.',
+                style: const TextStyle(color: muted, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: otpCtrl,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                maxLength: 6,
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 8),
+                decoration: InputDecoration(
+                  hintText: '• • • • • •',
+                  counterText: '',
+                  fillColor: cream,
+                  filled: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: line)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: sendingOtp
+                    ? null
+                    : () async {
+                        final code = otpCtrl.text.trim();
+                        if (code.length != 6) {
+                          showNotice(context, 'Please enter full 6-digit code.', isError: true);
+                          return;
+                        }
+                        setSheetState(() => sendingOtp = true);
+                        try {
+                          final vRes = await http.post(
+                            Uri.parse('$_baseUrl/api/auth/otp/verify'),
+                            headers: {'Content-Type': 'application/json'},
+                            body: jsonEncode({'identifier': identifier, 'otp': code}),
+                          ).timeout(const Duration(seconds: 10));
+
+                          final vData = jsonDecode(vRes.body);
+                          if (vRes.statusCode >= 400 || vData['verified'] != true) {
+                            throw Exception(vData['error'] ?? 'Incorrect or expired code.');
+                          }
+
+                          if (mounted) {
+                            setState(() {
+                              _verificationToken = vData['verification_token']?.toString();
+                              if (type == 'email') _verifiedEmail = identifier;
+                              if (type == 'phone') _verifiedPhone = identifier;
+                            });
+                            Navigator.pop(ctx);
+                            showNotice(context, '✅ $type verified successfully!');
+                          }
+                        } catch (err) {
+                          setSheetState(() => sendingOtp = false);
+                          if (context.mounted) {
+                            showNotice(context, err.toString().replaceAll('Exception: ', ''), isError: true);
+                          }
+                        }
+                      },
+                style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                child: sendingOtp
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: ink))
+                    : const Text('Verify & Confirm', style: TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleSave() async {
+    final businessName = _businessNameCtrl.text.trim();
+    final email = _emailCtrl.text.trim().toLowerCase();
+    final phone = _phoneCtrl.text.trim();
+    final address = _addressCtrl.text.trim();
+    final city = _cityCtrl.text.trim();
+
+    if (businessName.isEmpty) {
+      showNotice(context, 'Mess business name cannot be empty.', isError: true);
+      return;
+    }
+
+    if (email.isNotEmpty && email != widget.session.email && email != _verifiedEmail) {
+      showNotice(context, 'Please verify your new email address with OTP before saving.', isError: true);
+      return;
+    }
+
+    if (phone.isNotEmpty && phone != _verifiedPhone) {
+      showNotice(context, 'Please verify your new phone number with OTP before saving.', isError: true);
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final res = await http.post(
+        Uri.parse('$_baseUrl/api/user/profile'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (widget.session.token.isNotEmpty) 'Authorization': 'Bearer ${widget.session.token}',
+        },
+        body: jsonEncode({
+          'provider_id': widget.session.providerId,
+          'user_id': widget.session.userId,
+          'business_name': businessName,
+          'display_name': businessName,
+          'email': email,
+          'phone': phone,
+          'address': address,
+          'city': city,
+          'avatar_path': _avatarData,
+          'verification_token': _verificationToken,
+        }),
+      ).timeout(const Duration(seconds: 12));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode >= 400 || data['success'] != true) {
+        throw Exception(data['error'] ?? 'Failed to update profile.');
+      }
+
+      // Update current session
+      final updatedSession = ProviderSession(
+        token: widget.session.token,
+        refreshToken: widget.session.refreshToken,
+        userId: widget.session.userId,
+        email: email.isNotEmpty ? email : widget.session.email,
+        providerId: widget.session.providerId,
+        businessName: businessName,
+      );
+      await ProviderApiService.saveSession(updatedSession);
+
+      if (mounted) {
+        showNotice(context, '🎉 Mess profile updated successfully!');
+      }
+    } catch (e) {
+      // Local fallback save
+      final updatedSession = ProviderSession(
+        token: widget.session.token,
+        refreshToken: widget.session.refreshToken,
+        userId: widget.session.userId,
+        email: email.isNotEmpty ? email : widget.session.email,
+        providerId: widget.session.providerId,
+        businessName: businessName,
+      );
+      await ProviderApiService.saveSession(updatedSession);
+      if (mounted) showNotice(context, 'Profile updated on device.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Permanent Mess Closure & Account Deletion'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Under Google Play Data Safety policies, deleting your account is permanent:',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+            SizedBox(height: 10),
+            Text('• Your mess will be permanently unlisted from Thali.', style: TextStyle(fontSize: 12, color: muted)),
+            Text('• All published subscription plans and menus will be deactivated.', style: TextStyle(fontSize: 12, color: muted)),
+            Text('• All partner login credentials and scan records will be cleared.', style: TextStyle(fontSize: 12, color: muted)),
+            SizedBox(height: 12),
+            Text('Are you sure you want to permanently delete this account?', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFDC2626))),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            child: const Text('Permanently Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await http.post(
+          Uri.parse('$_baseUrl/api/account/delete'),
+          headers: {
+            'Content-Type': 'application/json',
+            if (widget.session.token.isNotEmpty) 'Authorization': 'Bearer ${widget.session.token}',
+          },
+          body: jsonEncode({
+            'provider_id': widget.session.providerId,
+            'confirmation': 'DELETE',
+          }),
+        ).timeout(const Duration(seconds: 10));
+      } catch (_) {}
+
+      await ProviderApiService.clearSession();
+      if (widget.onSignOut != null) {
+        await widget.onSignOut!();
+      }
+    }
+  }
+
+  static Widget _buildAvatar(String avatarData, {double size = 72}) {
+    if (avatarData.startsWith('data:image')) {
+      try {
+        final commaIdx = avatarData.indexOf(',');
+        final base64Str = commaIdx != -1 ? avatarData.substring(commaIdx + 1) : avatarData;
+        final bytes = base64Decode(base64Str);
+        return ClipOval(child: Image.memory(bytes, width: size, height: size, fit: BoxFit.cover));
+      } catch (_) {}
+    } else if (avatarData.startsWith('http')) {
+      return ClipOval(child: Image.network(avatarData, width: size, height: size, fit: BoxFit.cover));
+    }
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(color: Color(0xFFFFE8BF), shape: BoxShape.circle),
+      child: Icon(Icons.storefront_rounded, color: orange, size: size * 0.5),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final emailChanged = _emailCtrl.text.trim().isNotEmpty && _emailCtrl.text.trim().toLowerCase() != widget.session.email.toLowerCase();
+    final phoneChanged = _phoneCtrl.text.trim().isNotEmpty && _phoneCtrl.text.trim() != _verifiedPhone;
+
+    return Scaffold(
+      backgroundColor: cream,
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 30),
+          children: [
+            Row(
+              children: [
+                if (widget.onBack != null)
+                  IconButton(onPressed: widget.onBack, icon: const Icon(Icons.arrow_back)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Mess Profile & Branding', style: Theme.of(context).textTheme.headlineMedium),
+                      const SizedBox(height: 2),
+                      const Text('Update kitchen details, logo, contact & address.', style: TextStyle(color: muted, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (_loadingData) ...[
+              const SizedBox(height: 12),
+              const ClipRRect(
+                borderRadius: BorderRadius.all(Radius.circular(6)),
+                child: LinearProgressIndicator(color: orange, backgroundColor: orangeSoft),
+              ),
+            ],
+            const SizedBox(height: 16),
+
+            // LOGO / PHOTO CARD
+            Card(
+              elevation: 0,
+              color: card,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: line)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Stack(
+                      children: [
+                        _buildAvatar(_avatarData, size: 72),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: InkWell(
+                            onTap: _pickImage,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(color: orange, shape: BoxShape.circle),
+                              child: const Icon(Icons.camera_alt, color: ink, size: 16),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(widget.session.businessName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
+                          const SizedBox(height: 4),
+                          const Text('Upload your kitchen photo or brand logo for student discovery.', style: TextStyle(color: muted, fontSize: 12)),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: _pickImage,
+                            icon: const Icon(Icons.photo_library_outlined, size: 16),
+                            label: const Text('Change Logo / Photo'),
+                            style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // DETAILS CARD
+            Card(
+              elevation: 0,
+              color: card,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: line)),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const FieldLabel('Mess Business Name'),
+                    TextField(controller: _businessNameCtrl, decoration: const InputDecoration(hintText: 'e.g. Annapurna Mess')),
+                    const SizedBox(height: 14),
+
+                    const FieldLabel('Contact Email'),
+                    TextField(
+                      controller: _emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'mess@example.com',
+                        suffixIcon: emailChanged && _emailCtrl.text.trim().toLowerCase() != _verifiedEmail
+                            ? TextButton(
+                                onPressed: () => _verifyOtp(_emailCtrl.text.trim().toLowerCase(), 'email'),
+                                child: const Text('Verify OTP', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: orange)),
+                              )
+                            : (_emailCtrl.text.trim().toLowerCase() == _verifiedEmail && _verifiedEmail.isNotEmpty
+                                ? const Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 20)
+                                : null),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    const FieldLabel('Contact Phone / WhatsApp'),
+                    TextField(
+                      controller: _phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: '10-digit mobile number',
+                        suffixIcon: phoneChanged && _phoneCtrl.text.trim() != _verifiedPhone
+                            ? TextButton(
+                                onPressed: () => _verifyOtp(_phoneCtrl.text.trim(), 'phone'),
+                                child: const Text('Verify OTP', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: orange)),
+                              )
+                            : (_phoneCtrl.text.trim() == _verifiedPhone && _verifiedPhone.isNotEmpty
+                                ? const Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 20)
+                                : null),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    const FieldLabel('Physical Address / Landmark'),
+                    TextField(controller: _addressCtrl, decoration: const InputDecoration(hintText: 'Hostel road, near campus gate')),
+                    const SizedBox(height: 14),
+
+                    const FieldLabel('City'),
+                    TextField(controller: _cityCtrl, decoration: const InputDecoration(hintText: 'e.g. Noida, Kota, Pune')),
+                    const SizedBox(height: 20),
+
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: FilledButton(
+                        onPressed: _saving ? null : _handleSave,
+                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
+                        child: _saving
+                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: ink))
+                            : const Text('Save Mess Profile', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // PLAY STORE COMPLIANT ACCOUNT DELETION
+            InkWell(
+              onTap: _confirmDeleteAccount,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626), size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Delete Account & Close Mess Permanently',
+                      style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w700, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

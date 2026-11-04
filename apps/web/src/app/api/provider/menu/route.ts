@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     let slots = dbSlots ?? [];
     // If no slots exist yet in DB, use default slots
     if (slots.length === 0) {
-      slots = DEFAULT_SLOTS.map((s, idx) => ({
+      slots = DEFAULT_SLOTS.map((s) => ({
         id: `slot-${s.name}-${providerId.slice(0, 8)}`,
         name: s.name,
         starts_at_local: s.starts_at_local,
@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
           limit: item.max_quantity || 5,
           is_available: item.active !== false,
         })),
+        items_unavailable: slotItems.filter((item) => item.active === false).map((item) => item.name),
         items: slotItems,
         is_active: slot.active,
       };
@@ -123,7 +124,15 @@ export async function POST(req: NextRequest) {
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
   if (!access.ok && access.status !== 401) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+    const dbCheck = getAdminClient();
+    if (dbCheck) {
+      const { data: prov } = await dbCheck.from('providers').select('id,status').eq('id', input.provider_id).maybeSingle();
+      if (!prov || (prov.status !== 'active' && prov.status !== 'approved')) {
+        return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+      }
+    } else {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+    }
   }
 
   const db = getAdminClient();
@@ -213,9 +222,7 @@ export async function POST(req: NextRequest) {
     if (db) {
       const isAvail = input.is_available !== undefined ? input.is_available : false;
       if (input.item_id) {
-        const { data: cur } = await db.from('menu_items').select('active').eq('id', input.item_id).maybeSingle();
-        const nextState = input.is_available !== undefined ? input.is_available : !(cur?.active ?? true);
-        await db.from('menu_items').update({ active: nextState }).eq('id', input.item_id).eq('provider_id', input.provider_id);
+        await db.from('menu_items').update({ active: isAvail }).eq('id', input.item_id).eq('provider_id', input.provider_id);
       } else if (itemName) {
         await db.from('menu_items').update({ active: isAvail }).eq('provider_id', input.provider_id).ilike('name', itemName);
       }

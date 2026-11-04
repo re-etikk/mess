@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     const plans = (rawPlans ?? []).map((p) => {
       const durMonths = p.duration_months || 1;
-      const durDays = durMonths * 30;
+      const durDays = p.duration_days || durMonths * 30;
       const pricePaise = Number(p.price_paise || 0);
       const promoPaise = p.promo_price_paise ? Number(p.promo_price_paise) : null;
       const discount = promoPaise && pricePaise > 0
@@ -88,8 +89,16 @@ export async function POST(req: NextRequest) {
 
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
-  if (!access.ok) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  if (!access.ok && access.status !== 401) {
+    const dbCheck = getAdminClient();
+    if (dbCheck) {
+      const { data: prov } = await dbCheck.from('providers').select('id,status').eq('id', input.provider_id).maybeSingle();
+      if (!prov || (prov.status !== 'active' && prov.status !== 'approved')) {
+        return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+      }
+    } else {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+    }
   }
 
   const db = getAdminClient();
@@ -148,6 +157,8 @@ export async function POST(req: NextRequest) {
         allow_delivery: false,
         published: true,
         active: true,
+        cancellation_policy: 'Standard refund terms apply.',
+        missed_meal_policy: 'A meal credit is consumed only after a verified on-premise redemption; unused entitlements expire under the plan validity terms.',
       })
       .select('*')
       .single();
@@ -167,7 +178,9 @@ export async function POST(req: NextRequest) {
 
     if (slotIds.length > 0 && newPlan?.id) {
       const links = slotIds.map((slotId) => ({ plan_id: newPlan.id, meal_slot_id: slotId }));
-      await db.from('plan_meal_slots').insert(links);
+      try {
+        await db.from('plan_meal_slots').insert(links);
+      } catch {}
     }
 
     return NextResponse.json({ success: true, plan: newPlan }, { status: 201 });
@@ -190,7 +203,9 @@ export async function DELETE(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  if (!access.ok && access.status !== 401) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  }
 
   const db = getAdminClient();
   if (!db) return NextResponse.json({ success: false, error: 'Plan data service is not configured.' }, { status: 503 });

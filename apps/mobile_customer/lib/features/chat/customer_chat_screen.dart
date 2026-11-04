@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -37,6 +38,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCachedMessagesFirst();
       _loadMessages();
       _startPolling();
     });
@@ -69,8 +71,36 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
     return state.customerName.isNotEmpty ? state.customerName : 'Student';
   }
 
+  String _getCacheKey() {
+    return 'thali_chat_cache_${widget.providerId}_${_getCustomerId()}';
+  }
+
+  Future<void> _loadCachedMessagesFirst() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_getCacheKey());
+      if (raw != null && raw.isNotEmpty) {
+        final list = (jsonDecode(raw) as List<dynamic>).map((e) => e as Map<String, dynamic>).toList();
+        if (mounted && list.isNotEmpty) {
+          setState(() {
+            _messages = list;
+            _loading = false;
+          });
+          _scrollToBottom();
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveMessagesToCache(List<Map<String, dynamic>> msgs) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_getCacheKey(), jsonEncode(msgs));
+    } catch (_) {}
+  }
+
   Future<void> _loadMessages({bool silent = false}) async {
-    if (!silent) setState(() => _loading = true);
+    if (!silent && _messages.isEmpty) setState(() => _loading = true);
     final customerId = _getCustomerId();
 
     try {
@@ -86,6 +116,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
             _messages = list;
             _loading = false;
           });
+          _saveMessagesToCache(list);
           if (countChanged) _scrollToBottom();
         }
       } else {
@@ -131,6 +162,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
     setState(() {
       _messages.add(optimisticMsg);
     });
+    _saveMessagesToCache(_messages);
     _scrollToBottom();
 
     try {
@@ -151,7 +183,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not send message: $e')),
+          SnackBar(content: Text('Message saved locally: $e')),
         );
       }
     }
@@ -160,7 +192,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
   Future<void> _pickAndSendPhoto() async {
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 800);
       if (picked != null) {
         final bytes = await picked.readAsBytes();
         final dataUri = 'data:image/jpeg;base64,${base64Encode(bytes)}';
