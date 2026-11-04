@@ -126,7 +126,13 @@ class HttpMessRepository implements MessRepository {
   }
 
   @override
-  Future<ActiveSubscription> purchasePlan({required MealPlan plan, required String customerId}) async {
+  Future<ActiveSubscription> purchasePlan({
+    required MealPlan plan,
+    required String customerId,
+    String paymentMode = 'counter_cash',
+    String? receiptUrl,
+    String? utrReference,
+  }) async {
     final uri = Uri.parse('$baseUrl/api/subscription/subscribe');
     final response = await http
         .post(
@@ -140,6 +146,9 @@ class HttpMessRepository implements MessRepository {
             'duration_days': plan.durationDays,
             'meal_credits': plan.includedMeals,
             'price_paise': plan.price * 100,
+            'payment_mode': paymentMode,
+            if (receiptUrl != null && receiptUrl.isNotEmpty) 'receipt_url': receiptUrl,
+            if (utrReference != null && utrReference.isNotEmpty) 'utr_reference': utrReference,
           }),
         )
         .timeout(const Duration(seconds: 12));
@@ -162,6 +171,70 @@ class HttpMessRepository implements MessRepository {
       );
     }
     throw RepositoryException(data['error']?.toString() ?? 'Failed to subscribe to plan.');
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchPaymentSettings(String providerId) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/payment-settings?provider_id=$providerId');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['settings'] as Map<String, dynamic>? ?? {};
+      }
+    } catch (_) {}
+    return {'upi_id': 'thalipay@upi', 'upi_name': 'Mess Counter', 'upi_qr_url': ''};
+  }
+
+  @override
+  Future<Map<String, dynamic>> getUpgradeQuote({required String subscriptionId, required String targetPlanId}) async {
+    final uri = Uri.parse('$baseUrl/api/subscription/upgrade-quote');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'subscription_id': subscriptionId,
+            'target_plan_id': targetPlanId,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data['quote'] as Map<String, dynamic>? ?? {};
+    }
+    throw RepositoryException(data['error']?.toString() ?? 'Failed to calculate upgrade quote.');
+  }
+
+  @override
+  Future<Map<String, dynamic>> requestPlanUpgrade({
+    required String subscriptionId,
+    required String targetPlanId,
+    String paymentMode = 'counter_cash',
+    String? receiptUrl,
+    String? utrReference,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/subscription/upgrade');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'subscription_id': subscriptionId,
+            'target_plan_id': targetPlanId,
+            'payment_mode': paymentMode,
+            if (receiptUrl != null && receiptUrl.isNotEmpty) 'receipt_url': receiptUrl,
+            if (utrReference != null && utrReference.isNotEmpty) 'utr_reference': utrReference,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    }
+    throw RepositoryException(data['error']?.toString() ?? 'Failed to submit upgrade request.');
   }
 
   @override

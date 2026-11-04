@@ -57,7 +57,7 @@ interface ProviderMealSlot {
 
 export default function ProviderPortal() {
   const [activeStep, setActiveStep] = useState(1);
-  const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'plans' | 'qr' | 'subscribers' | 'orders' | 'support'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'pending' | 'payments' | 'menu' | 'plans' | 'qr' | 'subscribers' | 'orders' | 'support'>('overview');
 
   // Session state if provider is already registered/signed in
   const [session, setSession] = useState<{
@@ -243,6 +243,16 @@ export default function ProviderPortal() {
   const [planFormOpen, setPlanFormOpen] = useState(false);
   const [error, setError] = useState('');
   const [successNotice, setSuccessNotice] = useState('');
+  const [pendingList, setPendingList] = useState<any[]>([]);
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [previewReceiptUrl, setPreviewReceiptUrl] = useState<string | null>(null);
+
+  const [upiId, setUpiId] = useState('');
+  const [upiName, setUpiName] = useState('');
+  const [upiQrUrl, setUpiQrUrl] = useState('');
+  const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
+  const [paymentSettingsNotice, setPaymentSettingsNotice] = useState('');
 
   // Resolve the signed Supabase session and provider membership; never trust browser storage for authorization.
   useEffect(() => {
@@ -268,6 +278,8 @@ export default function ProviderPortal() {
   }, []);
 
   async function loadPortalData(providerId: string) {
+    loadPending(providerId);
+    loadPaymentSettings(providerId);
     setLoadingData(true);
     try {
       const [subsRes, redRes, ordRes, statusRes, plansRes, slotsRes] = await Promise.all([
@@ -449,6 +461,96 @@ export default function ProviderPortal() {
       setError(cause instanceof Error ? cause.message : 'Plan could not be saved. Try again.');
     } finally {
       setSavingPlan(false);
+    }
+  }
+
+    async function loadPending(providerId: string) {
+    try {
+      setLoadingPending(true);
+      const res = await fetch(`/api/provider/subscriptions/pending?provider_id=${providerId}`, { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        setPendingList(d.pending || []);
+      }
+    } catch {} finally {
+      setLoadingPending(false);
+    }
+  }
+
+  async function loadPaymentSettings(providerId: string) {
+    try {
+      const res = await fetch(`/api/provider/payment-settings?provider_id=${providerId}`, { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.settings) {
+          setUpiId(d.settings.upi_id || '');
+          setUpiName(d.settings.upi_name || '');
+          setUpiQrUrl(d.settings.upi_qr_url || '');
+        }
+      }
+    } catch {}
+  }
+
+  async function handleApprove(subId: string) {
+    if (!session) return;
+    try {
+      setApprovingId(subId);
+      const res = await fetch('/api/provider/subscriptions/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription_id: subId, provider_id: session.providerId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to approve');
+      alert('Subscription confirmed and activated!');
+      await loadPortalData(session.providerId);
+      await loadPending(session.providerId);
+    } catch (e: any) {
+      alert(e.message || 'Error approving payment');
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
+  async function handleReject(subId: string) {
+    if (!session || !confirm('Are you sure you want to decline this request?')) return;
+    try {
+      const res = await fetch('/api/provider/subscriptions/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription_id: subId, provider_id: session.providerId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to decline');
+      alert('Request declined.');
+      await loadPending(session.providerId);
+    } catch (e: any) {
+      alert(e.message || 'Error declining payment');
+    }
+  }
+
+  async function handleSavePaymentSettings() {
+    if (!session) return;
+    try {
+      setSavingPaymentSettings(true);
+      setPaymentSettingsNotice('');
+      const res = await fetch('/api/provider/payment-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: session.providerId,
+          upi_id: upiId.trim(),
+          upi_name: upiName.trim(),
+          upi_qr_url: upiQrUrl.trim(),
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to save settings');
+      setPaymentSettingsNotice('UPI & QR settings updated successfully! Customers can now scan and pay.');
+    } catch (e: any) {
+      alert(e.message || 'Failed to update payment settings');
+    } finally {
+      setSavingPaymentSettings(false);
     }
   }
 
@@ -731,6 +833,249 @@ export default function ProviderPortal() {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: PENDING APPROVALS */}
+          {activeTab === 'pending' && (
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950 flex items-center gap-2">
+                    <Clock className="text-amber-600" size={20} />
+                    Pending Payment & Plan Upgrade Approvals
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Verify cash or direct UPI receipts from students. Confirming activates their subscription and unlocks counter attendance.
+                  </p>
+                </div>
+                <button
+                  onClick={() => session && loadPending(session.providerId)}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 hover:underline"
+                >
+                  <RefreshCw size={13} className={loadingPending ? 'animate-spin' : ''} /> Refresh List
+                </button>
+              </div>
+
+              {pendingList.length === 0 ? (
+                <div className="py-12 text-center">
+                  <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+                    <CheckCircle2 size={24} />
+                  </div>
+                  <h3 className="mt-3 text-sm font-bold text-slate-900">No Pending Approvals</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    When customers pay via Counter Cash, Counter UPI, or Direct UPI with receipt proof, requests will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-5 space-y-4">
+                  {pendingList.map((item) => {
+                    const isUpgrade = item.is_upgrade || Boolean(item.metadata?.original_subscription_id);
+                    const isDirectUpi = item.payment_mode === 'direct_upi';
+                    return (
+                      <div
+                        key={item.id}
+                        className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:bg-slate-50"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-base font-extrabold text-slate-900">{item.customer_name}</h3>
+                              {isUpgrade && (
+                                <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-[10px] font-black tracking-wide text-purple-800">
+                                  PLAN UPGRADE
+                                </span>
+                              )}
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 uppercase">
+                                {item.payment_mode === 'counter_cash' ? '💵 Counter Cash' : item.payment_mode === 'counter_upi' ? '📱 Counter UPI' : '📲 Direct UPI'}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-600">
+                              Phone: <strong className="font-mono text-slate-900">{item.customer_phone}</strong> · Plan: <strong>{item.plan_name}</strong>
+                            </p>
+                            {isUpgrade && item.metadata?.residual_credit_paise && (
+                              <p className="mt-1 text-xs text-purple-700">
+                                🔄 Old Pass Credited: <strong>₹{(item.metadata.residual_credit_paise / 100).toFixed(0)}</strong> · Net Upgrade Paid: <strong>₹{((item.price_paise || 0) / 100).toFixed(0)}</strong>
+                              </p>
+                            )}
+                            {item.utr_reference && (
+                              <p className="mt-1 text-xs text-slate-600 font-mono">
+                                UTR / Transaction Ref: <strong className="text-slate-900">{item.utr_reference}</strong>
+                              </p>
+                            )}
+                            {item.receipt_url && (
+                              <div className="mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewReceiptUrl(item.receipt_url)}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:underline"
+                                >
+                                  📷 View Payment Receipt Screenshot
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500">Amount Due / Paid</p>
+                            <p className="text-xl font-black text-slate-900">
+                              ₹{((item.price_paise || 0) / 100).toLocaleString('en-IN')}
+                            </p>
+                            <p className="text-[10px] text-slate-400">
+                              {new Date(item.created_at).toLocaleDateString('en-IN')}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-end gap-2 border-t border-slate-200/80 pt-3">
+                          <button
+                            type="button"
+                            onClick={() => handleReject(item.id)}
+                            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 transition"
+                          >
+                            Decline
+                          </button>
+                          <button
+                            type="button"
+                            disabled={approvingId === item.id}
+                            onClick={() => handleApprove(item.id)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition disabled:bg-slate-400"
+                          >
+                            <CheckCircle2 size={14} />
+                            {approvingId === item.id ? 'Activating...' : 'Confirm Payment & Activate'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Receipt Preview Modal */}
+              {previewReceiptUrl && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                  <div className="max-w-md w-full rounded-2xl bg-white p-5 shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between border-b pb-2">
+                      <h4 className="text-sm font-bold text-slate-900">Payment Receipt Preview</h4>
+                      <button
+                        onClick={() => setPreviewReceiptUrl(null)}
+                        className="text-slate-400 hover:text-slate-700 text-sm font-bold"
+                      >
+                        ✕ Close
+                      </button>
+                    </div>
+                    <div className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-2 flex items-center justify-center">
+                      <img
+                        src={previewReceiptUrl}
+                        alt="Payment Receipt"
+                        className="max-h-72 object-contain rounded"
+                      />
+                    </div>
+                    <div className="text-right">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewReceiptUrl(null)}
+                        className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-800"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: UPI & QR SETTINGS */}
+          {activeTab === 'payments' && (
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="border-b border-slate-100 pb-4">
+                <h2 className="text-lg font-bold text-slate-950 flex items-center gap-2">
+                  <DollarSign className="text-emerald-600" size={20} />
+                  Kitchen Direct UPI & QR Configuration
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Configure your business UPI ID and QR code image. When customers select Direct UPI (Scan & Pay) on the app or website, this exact QR code and UPI ID will be shown for payment.
+                </p>
+              </div>
+
+              {paymentSettingsNotice && (
+                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-800">
+                  {paymentSettingsNotice}
+                </div>
+              )}
+
+              <div className="mt-6 grid gap-6 md:grid-cols-2">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700">UPI ID / VPA</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. ritikmess@oksbi or 9876543210@paytm"
+                      value={upiId}
+                      onChange={(e) => setUpiId(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-amber-600 font-mono"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-500">Students can copy this UPI ID to pay in PhonePe, GPay, or Paytm.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700">Payee / Account Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Ritik Mess & Tiffin Service"
+                      value={upiName}
+                      onChange={(e) => setUpiName(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-amber-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700">UPI QR Code Screenshot / Image URL</label>
+                    <input
+                      type="url"
+                      placeholder="https://... (Direct image link of your QR standee)"
+                      value={upiQrUrl}
+                      onChange={(e) => setUpiQrUrl(e.target.value)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none focus:border-amber-600"
+                    />
+                    <p className="mt-1 text-[11px] text-slate-500">Upload your QR screenshot or paste an image URL to show your exact branded QR code to customers.</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={savingPaymentSettings}
+                    onClick={handleSavePaymentSettings}
+                    className="rounded-xl bg-orange-600 px-6 py-2.5 text-xs font-extrabold text-white shadow hover:bg-orange-700 disabled:bg-slate-400 transition"
+                  >
+                    {savingPaymentSettings ? 'Saving Settings...' : 'Save UPI & QR Settings'}
+                  </button>
+                </div>
+
+                {/* Live Customer Preview */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5 text-center">
+                  <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-[10px] font-bold text-slate-700 uppercase tracking-wide">
+                    Live Customer Scan Preview
+                  </span>
+                  <div className="mt-4 mx-auto w-48 h-48 rounded-2xl border-2 border-dashed border-amber-300 bg-white p-3 flex items-center justify-center shadow-inner">
+                    {upiQrUrl ? (
+                      <img src={upiQrUrl} alt="Provider QR" className="max-h-full max-w-full object-contain rounded-lg" />
+                    ) : upiId ? (
+                      <div className="text-center p-2">
+                        <QrCode size={64} className="mx-auto text-amber-600 mb-1" />
+                        <span className="text-[10px] font-mono text-slate-600 break-all">{upiId}</span>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-400">
+                        Enter UPI ID or QR Image URL to preview
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3">
+                    <p className="text-xs font-bold text-slate-900">{upiName || session.businessName}</p>
+                    <p className="text-[11px] font-mono text-slate-500">{upiId || 'No UPI ID configured yet'}</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}

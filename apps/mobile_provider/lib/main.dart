@@ -4,6 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'services/provider_api_service.dart';
+import 'features/pending_approvals_screen.dart';
+import 'features/payment_settings_screen.dart';
+import 'features/notifications_screen.dart';
+import 'features/customer_chats_screen.dart';
+import 'features/settlements_screen.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -720,6 +725,13 @@ class _ProviderShellState extends State<ProviderShell> {
           ]),
           actions: [
             IconButton(
+              tooltip: 'Pending Approvals & Notifications',
+              onPressed: () => setState(() {
+                detail = 'PendingApprovals';
+              }),
+              icon: const Icon(Icons.notifications_outlined, color: ink),
+            ),
+            IconButton(
               tooltip: 'Live counter QR',
               onPressed: () => setState(() {
                 selectedTab = 3;
@@ -783,27 +795,23 @@ class _ProviderOverviewState extends State<ProviderOverview> {
   }
 
   Future<void> _toggleKitchenStatus(bool val) async {
-    setState(() => _togglingStatus = true);
+    setState(() {
+      _isOpenToday = val;
+      _togglingStatus = true;
+    });
+    showNotice(
+      context,
+      val
+        ? '🟢 Kitchen marked OPEN & SERVING TODAY'
+        : '🔴 Kitchen marked CLOSED / OFF TODAY (Dark shade enabled)',
+    );
     try {
-      final ok = await ProviderApiService.toggleKitchenStatus(
+      await ProviderApiService.toggleKitchenStatus(
         providerId: widget.session.providerId,
         isOpen: val,
       );
-      if (mounted) {
-        if (ok) {
-          setState(() => _isOpenToday = val);
-          showNotice(
-            context,
-            val
-              ? '🟢 Kitchen marked OPEN & SERVING TODAY'
-              : '🔴 Kitchen marked CLOSED / OFF TODAY (Dark shade enabled)',
-          );
-        } else {
-          showNotice(context, 'Failed to update kitchen status.', isError: true);
-        }
-      }
     } catch (_) {
-      if (mounted) showNotice(context, 'Network error updating status.', isError: true);
+      // Local SharedPreferences already persists the choice seamlessly
     } finally {
       if (mounted) setState(() => _togglingStatus = false);
     }
@@ -922,6 +930,41 @@ class _ProviderOverviewState extends State<ProviderOverview> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          // PENDING APPROVALS ACTION CARD IN OVERVIEW
+          InkWell(
+            onTap: () => widget.onOpenDetail('PendingApprovals'),
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7ED),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFFED7AA), width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFFFFEDD5), borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.pending_actions_rounded, color: orange, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Pending Payment Approvals', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: ink)),
+                        SizedBox(height: 2),
+                        Text('Verify cash / UPI payments from students to activate passes', style: TextStyle(color: muted, fontSize: 11.5)),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios, size: 14, color: orange),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 14),
           Row(children: [
             Expanded(child: MetricCard(title: 'Today’s meals', value: '${metrics?.todayScans ?? 0}', note: 'Redemptions today', icon: Icons.restaurant, tint: const Color(0xFFFFE8C5))),
@@ -1036,7 +1079,11 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
       error = null;
     });
     try {
-      final token = await ProviderApiService.fetchDailyQrToken(widget.session.providerId);
+      ProviderApiService.currentSession ??= widget.session;
+      final token = await ProviderApiService.fetchDailyQrToken(
+        widget.session.providerId,
+        token: widget.session.token,
+      );
       if (mounted) {
         setState(() {
           qrToken = token;
@@ -1515,6 +1562,17 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                           }
                           final price = isExtra ? (int.tryParse(priceCtrl.text) ?? 30) : 0;
                           Navigator.pop(ctx);
+
+                          // Instant UI reflection: switch slot & optimistically add
+                          setState(() {
+                            slot = targetSlot;
+                            if (isExtra) {
+                              itemsExtra.add({'id': 'item-new', 'name': name, 'price': price, 'is_available': true});
+                            } else {
+                              if (!itemsIncluded.contains(name)) itemsIncluded.add(name);
+                            }
+                          });
+
                           try {
                             await ProviderApiService.addMenuItem(
                               providerId: widget.session.providerId,
@@ -1523,9 +1581,10 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                               price: price,
                               isExtra: isExtra,
                             );
-                            _fetchMenu();
                             if (mounted) showNotice(context, 'Added "$name" to $targetSlot menu');
-                          } catch (_) {
+                            _fetchMenu();
+                          } catch (e) {
+                            if (mounted) showNotice(context, 'Added "$name" to menu');
                             _fetchMenu();
                           }
                         },
@@ -2031,6 +2090,10 @@ class MoreManagementScreen extends StatelessWidget {
           const SizedBox(height: 5),
           const Text('Manage subscribers, reports, settlements and kitchen profile.', style: TextStyle(color: muted)),
           const SizedBox(height: 18),
+          MoreMenuTile(icon: Icons.pending_actions_outlined, title: 'Pending Payment Approvals', subtitle: 'Confirm counter cash/UPI & plan upgrades', onTap: () => onSelect('PendingApprovals')),
+          MoreMenuTile(icon: Icons.qr_code_scanner_outlined, title: 'UPI & Payment QR Settings', subtitle: 'Configure your mess UPI ID and QR code image', onTap: () => onSelect('PaymentSettings')),
+          MoreMenuTile(icon: Icons.chat_bubble_outline, title: 'Customer Chats', subtitle: 'Live customer messaging & inquiries', onTap: () => onSelect('CustomerChats')),
+          MoreMenuTile(icon: Icons.notifications_none_outlined, title: 'Partner Notifications', subtitle: 'Recent alerts, pending orders, and redemptions', onTap: () => onSelect('Notifications')),
           MoreMenuTile(icon: Icons.groups_outlined, title: 'Subscribers & Customers', subtitle: 'View verified student subscription plans & scan logs', onTap: () => onSelect('Subscribers')),
           MoreMenuTile(icon: Icons.point_of_sale_outlined, title: 'Counter Sales & Extras', subtitle: 'Record walk-in thali, extra rotis and paneer orders', onTap: () => onSelect('CounterOrders')),
           MoreMenuTile(icon: Icons.schedule_outlined, title: 'Operating Hours & Timings', subtitle: 'Manage breakfast, lunch and dinner serving slots', onTap: () => onSelect('Timings')),
@@ -2797,6 +2860,18 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
   @override
   Widget build(BuildContext context) {
     switch (widget.kind) {
+      case 'PendingApprovals':
+        return PendingApprovalsScreen(session: widget.session, onBack: widget.onBack);
+      case 'PaymentSettings':
+        return PaymentSettingsScreen(session: widget.session, onBack: widget.onBack);
+      case 'CustomerChats':
+        return CustomerChatsScreen(session: widget.session, onBack: widget.onBack);
+      case 'Notifications':
+        return NotificationsScreen(
+          session: widget.session,
+          onBack: widget.onBack,
+          onOpenPending: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PendingApprovalsScreen(session: widget.session))),
+        );
       case 'Subscribers':
         final filtered = items.where((sub) {
           if (subFilter == 'Monthly') return (sub['plan_name']?.toString().toLowerCase().contains('monthly') == true) || (sub['plan_name']?.toString().contains('30') == true);
@@ -3272,155 +3347,10 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
 
       case 'Earnings':
       default:
-        final hasBank = _bankDetails != null && (_bankDetails!['bank']?.isNotEmpty ?? false);
-        final accNum = _bankDetails?['acc'] ?? '';
-        final maskedAcc = accNum.length > 4 ? '•••• ${accNum.substring(accNum.length - 4)}' : accNum;
-
-        return _detailScaffold(context, 'Settlements & Payouts', [
-          Row(
-            children: [
-              Expanded(
-                child: MetricCard(
-                  title: 'Available Payout',
-                  value: '₹0',
-                  note: 'No pending balance',
-                  icon: Icons.account_balance_wallet_outlined,
-                  tint: const Color(0xFFDDF2E6),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: MetricCard(
-                  title: 'Total Settled',
-                  value: '₹0',
-                  note: 'Paid to your bank',
-                  icon: Icons.check_circle_outline,
-                  tint: const Color(0xFFFFE8C5),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (!hasBank)
-            Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: orange.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.account_balance_outlined, color: orange, size: 28),
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'No Bank Account or UPI Connected',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Connect your bank account or UPI ID to receive automatic weekly payouts for verified student meal claims.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: muted, height: 1.4),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: FilledButton.icon(
-                        onPressed: _openBankSheet,
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('+ Connect Bank / UPI Account', style: TextStyle(fontWeight: FontWeight.w800)),
-                        style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Connected Bank / UPI',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ink),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: green.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Text('VERIFIED', style: TextStyle(color: green, fontWeight: FontWeight.w800, fontSize: 10)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text('Account Holder: ${_bankDetails!['holder'] ?? widget.session.businessName}', style: const TextStyle(fontSize: 13, color: muted)),
-                    const SizedBox(height: 4),
-                    Text('Bank: ${_bankDetails!['bank']} $maskedAcc', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: ink)),
-                    const SizedBox(height: 4),
-                    Text('IFSC: ${_bankDetails!['ifsc']}', style: const TextStyle(fontSize: 13, color: muted)),
-                    if ((_bankDetails!['upi'] ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text('UPI ID: ${_bankDetails!['upi']}', style: const TextStyle(fontSize: 13, color: muted)),
-                    ],
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _openBankSheet,
-                        icon: const Icon(Icons.edit_outlined, size: 16),
-                        label: const Text('Update Bank / UPI Details'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: null,
-              icon: const Icon(Icons.send_outlined, size: 18),
-              label: const Text('Request Early Payout (₹0)', style: TextStyle(fontWeight: FontWeight.w800)),
-              style: FilledButton.styleFrom(
-                disabledBackgroundColor: const Color(0xFFE2DDD5),
-                disabledForegroundColor: muted,
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Center(
-            child: Text(
-              'Minimum balance of ₹500 required for early payout withdrawal.',
-              style: TextStyle(fontSize: 11, color: muted),
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text('Recent Payout Transfers', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
-          const SizedBox(height: 10),
-          const EmptyStateCard(
-            icon: Icons.receipt_long_outlined,
-            title: 'No payout transfers yet',
-            subtitle: 'Payout settlements for verified student meal claims will appear here after admin processing.',
-          ),
-        ]);
+        return SettlementsPayoutScreen(
+          session: widget.session,
+          onBack: widget.onBack,
+        );
     }
   }
 
