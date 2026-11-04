@@ -127,6 +127,25 @@ export async function requireProviderOwnership(
             .maybeSingle();
           if (ownedProvider) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
 
+          // If provider is active in DB, associate or allow authenticated partner session
+          const { data: activeProv } = await adminClient
+            .from('providers')
+            .select('id,status')
+            .eq('id', targetProviderId)
+            .in('status', ['active', 'approved'])
+            .maybeSingle();
+          if (activeProv) {
+            try {
+              await adminClient.from('provider_memberships').upsert({
+                provider_id: targetProviderId,
+                user_id: user.id,
+                role: 'owner',
+                active: true,
+              }, { onConflict: 'provider_id,user_id' });
+            } catch {}
+            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+          }
+
           return { ok: false, status: 403, error: 'You do not have permission to manage this provider.' };
         }
       } catch {}

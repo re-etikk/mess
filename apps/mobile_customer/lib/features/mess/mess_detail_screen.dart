@@ -21,18 +21,115 @@ class MessDetailScreen extends StatefulWidget {
 class _MessDetailScreenState extends State<MessDetailScreen> {
   int _selectedSlot = 0;
   final Map<String, int> _extras = <String, int>{};
+  late MessProvider _currentProvider;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentProvider = widget.provider;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchLive());
+  }
+
+  Future<void> _fetchLive() async {
+    if (!mounted) return;
+    try {
+      final repo = AppStateScope.of(context, listen: false).repository;
+      final live = await repo.fetchLiveProvider(widget.provider.id);
+      if (live != null && mounted) {
+        setState(() {
+          _currentProvider = live;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
-    final provider = widget.provider;
+    final provider = _currentProvider;
     if (provider.mealSlots.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: Text(provider.name)),
-        body: const EmptyState(
-          icon: Icons.restaurant_menu_rounded,
-          title: 'Menu not available',
-          message: 'This provider has not published meal slots yet.',
+        appBar: AppBar(
+          leading: IconButton(onPressed: () => Navigator.maybePop(context), icon: const Icon(Icons.arrow_back_rounded)),
+          title: Text(provider.name),
+          actions: [
+            IconButton(
+              tooltip: 'Chat with Mess',
+              icon: const Icon(Icons.chat_bubble_outline_rounded),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => CustomerChatScreen(
+                      providerId: provider.id,
+                      providerName: provider.name,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: _fetchLive,
+          color: MessColors.orange,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.all(24),
+            children: [
+              const SizedBox(height: 40),
+              const Center(
+                child: Icon(Icons.restaurant_menu_rounded, size: 64, color: MessColors.orangeDark),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: Text('Menu Updating Soon', style: Theme.of(context).textTheme.headlineMedium),
+              ),
+              const SizedBox(height: 8),
+              const Center(
+                child: Text(
+                  'The mess owner is preparing today’s meal items. Pull down to refresh.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: MessColors.muted),
+                ),
+              ),
+              const SizedBox(height: 24),
+              if (provider.plans.isNotEmpty) ...[
+                const SectionHeading(title: 'Available Subscription Plans', subtitle: 'View pricing & subscribe in advance'),
+                const SizedBox(height: 12),
+                for (final plan in provider.plans) ...[
+                  CardSurface(
+                    padding: const EdgeInsets.all(14),
+                    onTap: () => Navigator.push(
+                      context,
+                      messRoute(CheckoutScreen(
+                        provider: provider,
+                        plan: plan,
+                        slotId: 'lunch',
+                        addOns: const [],
+                      )),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.sell_outlined, color: MessColors.orangeDark),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(plan.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                              Text('${plan.durationDays} days · ₹${plan.price}', style: const TextStyle(color: MessColors.muted, fontSize: 13)),
+                            ],
+                          ),
+                        ),
+                        Text('₹${plan.price}', style: const TextStyle(fontWeight: FontWeight.w900, color: MessColors.orangeDark, fontSize: 16)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ],
+            ],
+          ),
         ),
       );
     }
@@ -76,9 +173,12 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
           ),
         ],
       ),
-      body: CustomScrollView(
-        physics: const BouncingScrollPhysics(),
-        slivers: [
+      body: RefreshIndicator(
+        onRefresh: _fetchLive,
+        color: MessColors.orange,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          slivers: [
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
             sliver: SliverToBoxAdapter(
@@ -169,7 +269,7 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
                 runSpacing: 8,
                 children: provider.mealSlots.asMap().entries.map((entry) {
                   return ChoiceChip(
-                    label: Text(entry.value.name),
+                    label: Text('${entry.value.name} (${entry.value.timeLabel})'),
                     selected: slotIndex == entry.key,
                     onSelected: (_) => setState(() {
                       _selectedSlot = entry.key;
@@ -194,7 +294,22 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
                         const SizedBox(width: 8),
                         Text(slot.name, style: Theme.of(context).textTheme.titleLarge),
                         const Spacer(),
-                        Text(slot.timeLabel, style: Theme.of(context).textTheme.bodySmall),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFEDE0),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFFD4B2)),
+                          ),
+                          child: Text(
+                            slot.timeLabel,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: MessColors.orangeDark,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -267,7 +382,10 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(18, 23, 18, 9),
             sliver: SliverToBoxAdapter(
-              child: SectionHeading(title: 'Choose how to eat', subtitle: 'Options depend on this provider’s setup'),
+              child: SectionHeading(
+                title: 'Plans & Pricing',
+                subtitle: 'Subscribe to start enjoying hot daily meals',
+              ),
             ),
           ),
           SliverPadding(
@@ -275,66 +393,151 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
             sliver: SliverToBoxAdapter(
               child: Column(
                 children: [
-                  CardSurface(
-                    padding: const EdgeInsets.all(14),
-                    onTap: dailyPlans.isEmpty
-                        ? null
-                        : () => Navigator.push(
-                              context,
-                              messRoute(CheckoutScreen(provider: provider, plan: dailyPlans.first, slotId: slot.id, addOns: selectedAddOns)),
+                  for (final plan in subscriptionPlans) ...[
+                    CardSurface(
+                      padding: const EdgeInsets.all(15),
+                      onTap: () => Navigator.push(
+                        context,
+                        messRoute(CheckoutScreen(
+                          provider: provider,
+                          plan: plan,
+                          slotId: slot.id,
+                          addOns: selectedAddOns,
+                        )),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: plan.type == SubscriptionType.mealTracker
+                                  ? const Color(0xFFE0F2FE)
+                                  : const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(color: const Color(0xFFFFE8BF), borderRadius: BorderRadius.circular(11)),
-                          child: const Icon(Icons.today_rounded, color: MessColors.orangeDark),
-                        ),
-                        const SizedBox(width: 11),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Daily meal', style: Theme.of(context).textTheme.titleMedium),
-                              const SizedBox(height: 3),
-                              Text('Pay for this meal only.', style: Theme.of(context).textTheme.bodySmall),
-                            ],
+                            child: Icon(
+                              plan.type == SubscriptionType.mealTracker
+                                  ? Icons.confirmation_number_outlined
+                                  : Icons.calendar_month_outlined,
+                              color: plan.type == SubscriptionType.mealTracker
+                                  ? const Color(0xFF0284C7)
+                                  : const Color(0xFFD97706),
+                            ),
                           ),
-                        ),
-                        Text(
-                          dailyPlans.isEmpty ? 'Not offered' : 'From ₹${dailyPlans.map((p) => p.price).reduce((a, b) => a < b ? a : b)}',
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: MessColors.orangeDark),
-                        ),
-                        const SizedBox(width: 5),
-                        const Icon(Icons.chevron_right_rounded, color: MessColors.muted),
-                      ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        plan.name,
+                                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: MessColors.ink),
+                                      ),
+                                    ),
+                                    Text(
+                                      '₹${plan.price}',
+                                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: MessColors.orangeDark),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: plan.type == SubscriptionType.mealTracker
+                                            ? const Color(0xFFE0F2FE)
+                                            : const Color(0xFFFEF3C7),
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                      child: Text(
+                                        plan.type == SubscriptionType.mealTracker ? 'COUNTING PLAN' : 'FIXED PLAN',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w800,
+                                          color: plan.type == SubscriptionType.mealTracker
+                                              ? const Color(0xFF0369A1)
+                                              : const Color(0xFFB45309),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      plan.type == SubscriptionType.mealTracker
+                                          ? '${plan.includedMeals ?? 30} meals · ${plan.durationDays} days validity'
+                                          : '${plan.durationDays} days · Lunch & Dinner',
+                                      style: const TextStyle(fontSize: 12, color: MessColors.muted),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: MessColors.muted),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 9),
+                    const SizedBox(height: 9),
+                  ],
+                  if (dailyPlans.isNotEmpty) ...[
+                    CardSurface(
+                      padding: const EdgeInsets.all(15),
+                      onTap: () => Navigator.push(
+                        context,
+                        messRoute(CheckoutScreen(
+                          provider: provider,
+                          plan: dailyPlans.first,
+                          slotId: slot.id,
+                          addOns: selectedAddOns,
+                        )),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(color: const Color(0xFFFFE8BF), borderRadius: BorderRadius.circular(12)),
+                            child: const Icon(Icons.today_rounded, color: MessColors.orangeDark),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Daily Single Meal', style: Theme.of(context).textTheme.titleMedium),
+                                const SizedBox(height: 3),
+                                const Text('Pay for one meal only.', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+                              ],
+                            ),
+                          ),
+                          Text('₹${dailyPlans.first.price}', style: const TextStyle(fontWeight: FontWeight.w800, color: MessColors.orangeDark, fontSize: 16)),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: MessColors.muted),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                  ],
                   CardSurface(
-                    padding: const EdgeInsets.all(14),
+                    padding: const EdgeInsets.all(13),
                     onTap: () => Navigator.push(context, messRoute(PlansScreen(provider: provider))),
-                    child: Row(
+                    child: const Row(
                       children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(color: const Color(0xFFE9EEF1), borderRadius: BorderRadius.circular(11)),
-                          child: const Icon(Icons.calendar_month_rounded, color: MessColors.navy),
-                        ),
-                        const SizedBox(width: 11),
+                        Icon(Icons.tune_rounded, color: MessColors.navy, size: 18),
+                        SizedBox(width: 10),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Subscription plans', style: Theme.of(context).textTheme.titleMedium),
-                              const SizedBox(height: 3),
-                              Text('${subscriptionPlans.length} provider-configured options', style: Theme.of(context).textTheme.bodySmall),
-                            ],
+                          child: Text(
+                            'Compare all plans & upgrade rules',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: MessColors.navy),
                           ),
                         ),
-                        const Icon(Icons.chevron_right_rounded, color: MessColors.muted),
+                        Icon(Icons.chevron_right_rounded, color: MessColors.muted),
                       ],
                     ),
                   ),
@@ -345,6 +548,7 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
           const SliverToBoxAdapter(child: SizedBox(height: 22)),
         ],
       ),
+    ),
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(

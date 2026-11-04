@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mess_models.dart';
@@ -17,6 +18,8 @@ class AppState extends ChangeNotifier {
   String customerId = '';
   String customerName = 'Student';
   String customerEmail = '';
+  String customerPhone = '';
+  String customerAvatar = '';
   String authToken = '';
   String refreshToken = '';
   String location = 'Sector 62, Noida';
@@ -38,13 +41,20 @@ class AppState extends ChangeNotifier {
         customerId = data['customerId']?.toString() ?? '';
         customerName = data['customerName']?.toString() ?? 'Student';
         customerEmail = data['customerEmail']?.toString() ?? '';
+        customerPhone = data['customerPhone']?.toString() ?? '';
+        customerAvatar = data['customerAvatar']?.toString() ?? '';
         location = data['location']?.toString() ?? 'Sector 62, Noida';
         authToken = data['authToken']?.toString() ?? '';
         refreshToken = data['refreshToken']?.toString() ?? '';
         isSignedIn = data['isSignedIn'] == true && customerId.isNotEmpty && authToken.isNotEmpty;
         if (isSignedIn && refreshToken.isNotEmpty) {
           try {
-            final refreshed = await CustomerAuthService.refreshSession(refreshToken: refreshToken, fallbackUserId: customerId, fallbackEmail: customerEmail, fallbackName: customerName);
+            final refreshed = await CustomerAuthService.refreshSession(
+              refreshToken: refreshToken,
+              fallbackUserId: customerId,
+              fallbackEmail: customerEmail,
+              fallbackName: customerName,
+            );
             customerId = refreshed.userId;
             customerEmail = refreshed.email;
             customerName = refreshed.name;
@@ -91,6 +101,8 @@ class AppState extends ChangeNotifier {
         'customerId': customerId,
         'customerName': customerName,
         'customerEmail': customerEmail,
+        'customerPhone': customerPhone,
+        'customerAvatar': customerAvatar,
         'location': location,
         'isSignedIn': isSignedIn,
         'authToken': authToken,
@@ -157,6 +169,30 @@ class AppState extends ChangeNotifier {
     return provider;
   }
 
+  void updateProfile({String? name, String? email, String? phone, String? avatar}) {
+    if (name != null && name.trim().isNotEmpty) customerName = name.trim();
+    if (email != null && email.trim().isNotEmpty) customerEmail = email.trim();
+    if (phone != null) customerPhone = phone.trim();
+    if (avatar != null) customerAvatar = avatar;
+    notifyListeners();
+    _persistSession();
+  }
+
+  Future<void> deleteAccount() async {
+    try {
+      const baseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'https://www.thali.store');
+      await http.post(
+        Uri.parse('$baseUrl/api/account/delete'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
+        },
+        body: jsonEncode({'user_id': customerId, 'confirmation': 'DELETE'}),
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {}
+    signOut();
+  }
+
   void signIn({required String emailOrPhone, required String name, String? userId, String? token, String? refreshToken}) {
     customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
     customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
@@ -174,6 +210,8 @@ class AppState extends ChangeNotifier {
     isSignedIn = false;
     authToken = '';
     refreshToken = '';
+    customerPhone = '';
+    customerAvatar = '';
     _activeSubscription = null;
     _dailyMeal = null;
     _redeemedSlots.clear();

@@ -48,29 +48,42 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, total: 0, providers: [] });
     }
 
-    const providerIds = allProviders.map((p) => p.id);
+    // Filter providers first by query before querying children
+    const matchedProviders = allProviders.filter((provider) => {
+      if (!query) return true;
+      const q = query.toLowerCase();
+      return (
+        (provider.display_name && provider.display_name.toLowerCase().includes(q)) ||
+        (provider.description && provider.description.toLowerCase().includes(q)) ||
+        (provider.locality && provider.locality.toLowerCase().includes(q)) ||
+        (provider.city && provider.city.toLowerCase().includes(q))
+      );
+    });
 
-    // Fetch related records in parallel for all providers
+    const targetProviders = matchedProviders.length > 0 ? matchedProviders.slice(0, 50) : allProviders.slice(0, 50);
+    const targetIds = targetProviders.map((p) => p.id);
+
+    // Fetch related records in parallel for target providers
     const [plansRes, slotsRes, itemsRes, hoursRes] = await Promise.all([
       supabase
         .from('subscription_plans')
         .select('*')
-        .in('provider_id', providerIds)
+        .in('provider_id', targetIds)
         .eq('active', true),
       supabase
         .from('meal_slots')
         .select('*')
-        .in('provider_id', providerIds)
+        .in('provider_id', targetIds)
         .eq('active', true),
       supabase
         .from('menu_items')
         .select('*')
-        .in('provider_id', providerIds)
+        .in('provider_id', targetIds)
         .eq('active', true),
       supabase
         .from('provider_operating_hours')
         .select('*')
-        .in('provider_id', providerIds),
+        .in('provider_id', targetIds),
     ]);
 
     const allPlans = plansRes.data ?? [];
@@ -79,7 +92,7 @@ export async function GET(req: NextRequest) {
     const allHours = hoursRes.data ?? [];
 
     // Filter providers based on search query or dietary filter
-    const filtered = allProviders.filter((provider) => {
+    const filtered = targetProviders.filter((provider) => {
       const pItems = allItems.filter((i) => i.provider_id === provider.id);
 
       if (dietary) {
@@ -121,7 +134,7 @@ export async function GET(req: NextRequest) {
         .filter((plan) => plan.provider_id === pId)
         .map((plan) => {
           const durMonths = plan.duration_months || 1;
-          const durDays = durMonths * 30;
+          const durDays = plan.duration_days || durMonths * 30;
           const pricePaise = Number(plan.price_paise || 0);
           return {
             ...plan,

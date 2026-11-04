@@ -69,6 +69,173 @@ class HttpMessRepository implements MessRepository {
   }
 
   @override
+  Future<MessProvider?> fetchLiveProvider(String providerId) async {
+    try {
+      final menuUri = Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
+      final plansUri = Uri.parse('$baseUrl/api/provider/plans?provider_id=$providerId');
+      final results = await Future.wait([
+        http.get(menuUri).timeout(const Duration(seconds: 10)),
+        http.get(plansUri).timeout(const Duration(seconds: 10)),
+      ]);
+
+      final menuRes = results[0];
+      final plansRes = results[1];
+
+      MessProvider? base;
+      for (final p in _cachedProviders) {
+        if (p.id == providerId) {
+          base = p;
+          break;
+        }
+      }
+      if (base == null) {
+        await getProviders();
+        for (final p in _cachedProviders) {
+          if (p.id == providerId) {
+            base = p;
+            break;
+          }
+        }
+      }
+      if (base == null) return null;
+
+      List<MealPlan> updatedPlans = List.from(base.plans);
+      if (plansRes.statusCode == 200) {
+        final plansData = jsonDecode(plansRes.body);
+        if (plansData is Map && plansData['plans'] is List) {
+          final parsed = <MealPlan>[];
+          for (final p in plansData['plans'] as List) {
+            final pMap = p as Map<String, dynamic>;
+            final planTypeStr = pMap['plan_type']?.toString() ?? 'fixed_period';
+            final pType = planTypeStr == 'daily'
+                ? SubscriptionType.dailyMeal
+                : (planTypeStr == 'meal_credits' ? SubscriptionType.mealTracker : SubscriptionType.fixedPeriod);
+            final pricePaise = (pMap['price_paise'] as num?)?.toInt() ?? 150000;
+            final durDays = (pMap['duration_days'] as num?)?.toInt() ?? 30;
+
+            parsed.add(MealPlan(
+              id: pMap['id']?.toString() ?? 'plan-$durDays',
+              providerId: providerId,
+              name: pMap['name']?.toString() ?? 'Plan',
+              type: pType,
+              durationDays: durDays,
+              durationMonths: durDays >= 30 ? (durDays ~/ 30) : null,
+              price: (pricePaise / 100).round(),
+              slotIds: const ['lunch', 'dinner'],
+              includedMeals: (pMap['meal_credits'] as num?)?.toInt(),
+              description: pMap['description']?.toString() ?? '',
+            ));
+          }
+          if (parsed.isNotEmpty) updatedPlans = parsed;
+        }
+      }
+
+      List<MealSlot> updatedSlots = List.from(base.mealSlots);
+      if (menuRes.statusCode == 200) {
+        final menuData = jsonDecode(menuRes.body);
+        final rawMenus = (menuData is Map && menuData['menus'] is List) ? menuData['menus'] as List : [];
+        if (rawMenus.isNotEmpty) {
+          final parsedSlots = <MealSlot>[];
+          for (final m in rawMenus) {
+            final mMap = m as Map<String, dynamic>;
+            final slotStr = (mMap['slot']?.toString() ?? 'LUNCH').toUpperCase();
+            final slotId = slotStr.toLowerCase();
+            final slotName = slotStr.substring(0, 1) + slotStr.substring(1).toLowerCase();
+
+            final itemsIncluded = (mMap['items_included'] as List<dynamic>? ?? [])
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+
+            final itemsExtraRaw = (mMap['items_extra'] as List<dynamic>? ?? []);
+            final List<MenuItem> items = [];
+            for (final inc in itemsIncluded) {
+              items.add(MenuItem(
+                id: 'inc-$slotId-${inc.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+                name: inc,
+                kind: FoodItemKind.included,
+                price: 0,
+                portion: 'Standard',
+              ));
+            }
+            for (final ext in itemsExtraRaw) {
+              if (ext is Map) {
+                final extName = ext['name']?.toString() ?? 'Add-on';
+                final extPrice = (ext['price'] as num?)?.round() ??
+                    (((ext['price_paise'] as num?)?.toInt() ?? 3000) ~/ 100);
+                items.add(MenuItem(
+                  id: ext['id']?.toString() ??
+                      'ext-$slotId-${extName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+                  name: extName,
+                  kind: FoodItemKind.addOn,
+                  price: extPrice,
+                  portion: 'Add-on',
+                ));
+              }
+            }
+
+            final startsAt = mMap['starts_at_local']?.toString() ?? '';
+            final endsAt = mMap['ends_at_local']?.toString() ?? '';
+            int sH, sM, eH, eM;
+            if (startsAt.isNotEmpty && endsAt.isNotEmpty) {
+              final sParsed = _parseTimeString(startsAt);
+              final eParsed = _parseTimeString(endsAt);
+              sH = sParsed.$1;
+              sM = sParsed.$2;
+              eH = eParsed.$1;
+              eM = eParsed.$2;
+            } else {
+              final defT = _defaultTiming(slotStr);
+              sH = defT.$1;
+              sM = defT.$2;
+              eH = defT.$3;
+              eM = defT.$4;
+            }
+
+            parsedSlots.add(MealSlot(
+              id: slotId,
+              name: slotName,
+              startHour: sH,
+              startMinute: sM,
+              endHour: eH,
+              endMinute: eM,
+              menuSummary: itemsIncluded.isNotEmpty
+                  ? itemsIncluded.join(', ')
+                  : (items.isNotEmpty ? '${items.length} items' : 'No items listed'),
+              items: items,
+              enabled: mMap['is_active'] as bool? ?? true,
+            ));
+          }
+          if (parsedSlots.isNotEmpty) updatedSlots = parsedSlots;
+        }
+      }
+
+      final updatedProvider = MessProvider(
+        id: base.id,
+        name: base.name,
+        area: base.area,
+        distanceMeters: base.distanceMeters,
+        description: base.description,
+        mealSlots: updatedSlots,
+        plans: updatedPlans,
+        isOpen: base.isOpen,
+        menuUpdatedAt: DateTime.now(),
+        address: base.address,
+      );
+
+      final idx = _cachedProviders.indexWhere((p) => p.id == providerId);
+      if (idx != -1) {
+        _cachedProviders[idx] = updatedProvider;
+      } else {
+        _cachedProviders.add(updatedProvider);
+      }
+      return updatedProvider;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<MealRedemption> redeemMeal({required String qrPayload, required String customerId}) async {
     final uri = Uri.parse('$baseUrl/api/scan');
     http.Response response;
