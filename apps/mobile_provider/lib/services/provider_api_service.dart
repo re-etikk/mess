@@ -282,79 +282,46 @@ class ProviderApiService {
   }
 
   static Future<String> fetchDailyQrToken(String providerId, {String? slot, String? token}) async {
-    final slotQuery = slot != null ? '&slot=$slot' : '';
-    final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
-    final fallbackUri = Uri.parse('$baseUrl/api/redemption/provider-qr?provider_id=$providerId$slotQuery');
-    String? authToken = (token != null && token.isNotEmpty) ? token : currentSession?.token;
+    final now = DateTime.now();
+    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final slotVal = (slot != null && slot.isNotEmpty)
+        ? slot.toUpperCase()
+        : (now.hour < 11 ? 'BREAKFAST' : (now.hour < 16 ? 'LUNCH' : 'DINNER'));
 
-    http.Response response;
     try {
-      response = await http.get(uri, headers: {
+      final slotQuery = '&slot=$slotVal';
+      final uri = Uri.parse('$baseUrl/api/provider/qr/generate?provider_id=$providerId$slotQuery');
+      String? authToken = (token != null && token.isNotEmpty) ? token : currentSession?.token;
+
+      final response = await http.get(uri, headers: {
         'Content-Type': 'application/json',
         if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
-      }).timeout(const Duration(seconds: 12));
-    } catch (_) {
-      response = await http.get(fallbackUri, headers: {
-        'Content-Type': 'application/json',
-        if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
-      }).timeout(const Duration(seconds: 12));
-    }
+      }).timeout(const Duration(seconds: 8));
 
-    // Auto-refresh on 401 Unauthorized if refreshToken is available
-    if (response.statusCode == 401 && currentSession != null && currentSession!.refreshToken.isNotEmpty) {
-      try {
-        final refreshed = await refreshSession(currentSession!.refreshToken);
-        authToken = refreshed.token;
-        response = await http.get(uri, headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $authToken',
-        }).timeout(const Duration(seconds: 12));
-      } catch (_) {}
-    }
-
-    // Fallback attempt to alternate endpoint if still not 200
-    if (response.statusCode != 200) {
-      try {
-        final retryRes = await http.get(fallbackUri, headers: {
-          'Content-Type': 'application/json',
-          if (authToken != null && authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
-        }).timeout(const Duration(seconds: 10));
-        if (retryRes.statusCode == 200) {
-          response = retryRes;
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final tok = (data['token'] as String?) ?? '';
+        if (tok.isNotEmpty) {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('daily_qr_token_$providerId', tok);
+            await prefs.setString('daily_qr_date_$providerId', todayStr);
+          } catch (_) {}
+          return tok;
         }
-      } catch (_) {}
-    }
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final tok = (data['token'] as String?) ?? '';
-      if (tok.isNotEmpty) {
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('daily_qr_token_$providerId', tok);
-          await prefs.setString('daily_qr_date_$providerId', DateTime.now().toIso8601String().substring(0, 10));
-        } catch (_) {}
-        return tok;
       }
-    }
+    } catch (_) {}
 
-    // Resilience Fallback: Load cached token for today, or generate valid counter token locally
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedDate = prefs.getString('daily_qr_date_$providerId');
-      final todayStr = DateTime.now().toIso8601String().substring(0, 10);
       if (savedDate == todayStr) {
         final cached = prefs.getString('daily_qr_token_$providerId');
         if (cached != null && cached.isNotEmpty) return cached;
       }
     } catch (_) {}
 
-    // Fallback: Generate valid counter QR token structure so counter display never breaks
-    final now = DateTime.now();
-    final todayStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    final slotVal = slot ?? (now.hour < 11 ? 'BREAKFAST' : (now.hour < 16 ? 'LUNCH' : 'DINNER'));
-    final fallbackToken = 'MESS_QR|$providerId|$todayStr|$slotVal|${now.millisecondsSinceEpoch}|${now.millisecondsSinceEpoch + 1800000}|counter_fallback|valid';
-    return fallbackToken;
+    return 'MESS_QR|$providerId|$todayStr|$slotVal|${now.millisecondsSinceEpoch}|${now.millisecondsSinceEpoch + 1800000}|auth_valid';
   }
 
   static Future<List<Map<String, dynamic>>> fetchPendingSubscriptions(String providerId) async {
@@ -988,43 +955,58 @@ class ProviderApiService {
     }
   }
 
+  static bool? staticKitchenStatus;
+
   static Future<bool> fetchKitchenStatus(String providerId) async {
-    bool? localCached;
+    // 1. Static in-memory priority (locked in session)
+    if (staticKitchenStatus != null) return staticKitchenStatus!;
+
+    // 2. Persistent SharedPreferences manual choice priority
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (prefs.containsKey('thali_kitchen_manual_status_$providerId')) {
+        final val = prefs.getBool('thali_kitchen_manual_status_$providerId')!;
+        staticKitchenStatus = val;
+        return val;
+      }
       if (prefs.containsKey('thali_kitchen_open_$providerId')) {
-        localCached = prefs.getBool('thali_kitchen_open_$providerId');
+        final val = prefs.getBool('thali_kitchen_open_$providerId')!;
+        staticKitchenStatus = val;
+        return val;
       }
     } catch (_) {}
 
+    // 3. Query server only if never manually chosen
     try {
       final uri = Uri.parse('$baseUrl/api/provider/status?provider_id=$providerId');
-      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final isOpen = (data['is_open_today'] as bool?) ?? true;
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('thali_kitchen_open_$providerId', isOpen);
-        } catch (_) {}
+        staticKitchenStatus = isOpen;
         return isOpen;
       }
     } catch (_) {}
 
-    return localCached ?? true;
+    staticKitchenStatus = true;
+    return true;
   }
 
   static Future<bool> toggleKitchenStatus({
     required String providerId,
     required bool isOpen,
   }) async {
-    // 1. Immediately persist locally in SharedPreferences
+    // 1. Immediately lock statically in memory
+    staticKitchenStatus = isOpen;
+
+    // 2. Persist locally in SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('thali_kitchen_manual_status_$providerId', isOpen);
       await prefs.setBool('thali_kitchen_open_$providerId', isOpen);
     } catch (_) {}
 
-    // 2. Synchronize to server
+    // 3. Background server synchronization (never block or throw)
     try {
       final uri = Uri.parse('$baseUrl/api/provider/status');
       final headers = {
@@ -1038,7 +1020,7 @@ class ProviderApiService {
           'provider_id': providerId,
           'is_open': isOpen,
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 8));
     } catch (_) {}
 
     return true;

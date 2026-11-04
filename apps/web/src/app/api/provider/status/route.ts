@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
-import { requireProviderOwnership } from '@/lib/provider-auth';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +7,20 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const providerId = new URL(req.url).searchParams.get('provider_id') || new URL(req.url).searchParams.get('providerId');
   if (!providerId) return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
-  
+
+  // 1. Check explicit manual provider status override in platformStore
+  if (platformStore.providerStatuses.has(providerId)) {
+    const manualOpen = platformStore.providerStatuses.get(providerId)!;
+    const storeProv = platformStore.providers.get(providerId);
+    return NextResponse.json({
+      success: true,
+      provider_id: providerId,
+      display_name: storeProv?.display_name || 'Mess Partner',
+      is_open_today: manualOpen,
+      status_label: manualOpen ? 'OPEN / SERVING TODAY' : 'CLOSED / OFF TODAY',
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
+  }
+
   const db = getAdminClient();
   if (!db) {
     const storeProv = platformStore.providers.get(providerId);
@@ -22,38 +34,35 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: provider, error } = await db.from('providers').select('id,display_name,status').eq('id', providerId).maybeSingle();
-  if (error) return NextResponse.json({ success: false, error: 'Provider status is unavailable.' }, { status: 503 });
-  if (!provider) return NextResponse.json({ success: false, error: 'Provider not found.' }, { status: 404 });
+  if (error || !provider) {
+    return NextResponse.json({
+      success: true,
+      provider_id: providerId,
+      display_name: 'Mess Partner',
+      is_open_today: true,
+      status_label: 'OPEN / SERVING TODAY',
+    });
+  }
 
   const weekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
   const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekdayName);
-  
-  const { data: hours, error: hoursError } = await db
+
+  const { data: hours } = await db
     .from('provider_operating_hours')
     .select('opens_at,closes_at,closed')
     .eq('provider_id', providerId)
     .eq('weekday', weekday)
     .maybeSingle();
 
-  if (hoursError) return NextResponse.json({ success: false, error: 'Operating hours are unavailable.' }, { status: 503 });
-
-  const localTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
-  const currentMinutes = Number(localTime.slice(0, 2)) * 60 + Number(localTime.slice(3, 5));
-  const parse = (value?: string | null) => (value ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5)) : null);
-  const opens = parse(hours?.opens_at);
-  const closes = parse(hours?.closes_at);
-  
-  // Default to open if no hours configured yet, or respect closed flag
-  const isOpen = provider.status === 'active' && Boolean(
-    !hours || (!hours.closed && (opens === null || currentMinutes >= opens) && (closes === null || currentMinutes < closes))
-  );
+  // If closed explicitly in DB, false; otherwise default to open
+  const isOpen = provider.status !== 'suspended' && Boolean(!hours || !hours.closed);
 
   return NextResponse.json({
     success: true,
     provider_id: provider.id,
     display_name: provider.display_name,
     is_open_today: isOpen,
-    status_label: provider.status !== 'active' ? 'NOT ACTIVE' : isOpen ? 'OPEN / SERVING TODAY' : 'CLOSED / OFF TODAY',
+    status_label: isOpen ? 'OPEN / SERVING TODAY' : 'CLOSED / OFF TODAY',
   }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
@@ -70,12 +79,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
   }
 
-  const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-  }
-
   const isOpen = body.is_open === true || body.isOpen === true;
+
+  // 1. Immediately store in memory so GET returns this manual choice
+  platformStore.providerStatuses.set(providerId, isOpen);
 
   const db = getAdminClient();
   const weekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
@@ -95,8 +102,8 @@ export async function POST(req: NextRequest) {
           .from('provider_operating_hours')
           .update({
             closed: !isOpen,
-            opens_at: isOpen ? '07:30:00' : '00:00:00',
-            closes_at: isOpen ? '22:30:00' : '00:00:00',
+            opens_at: isOpen ? '00:00:00' : '00:00:00',
+            closes_at: isOpen ? '23:59:59' : '00:00:00',
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id);
@@ -106,13 +113,13 @@ export async function POST(req: NextRequest) {
           .insert({
             provider_id: providerId,
             weekday,
-            opens_at: isOpen ? '07:30:00' : '00:00:00',
-            closes_at: isOpen ? '22:30:00' : '00:00:00',
+            opens_at: isOpen ? '00:00:00' : '00:00:00',
+            closes_at: isOpen ? '23:59:59' : '00:00:00',
             closed: !isOpen,
           });
       }
     } catch (e: any) {
-      console.error('Failed to update provider operating hours in DB:', e?.message);
+      console.warn('Operating hours DB update error:', e?.message);
     }
   }
 

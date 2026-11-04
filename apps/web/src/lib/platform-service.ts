@@ -143,6 +143,7 @@ class PlatformStore {
   promos: Map<string, PromoCode> = new Map();
   announcements: Map<string, Announcement> = new Map();
   notifications: Map<string, CustomerNotification> = new Map();
+  chatMessages: any[] = [];
 
   constructor() {
     if (process.env.NODE_ENV === 'test') {

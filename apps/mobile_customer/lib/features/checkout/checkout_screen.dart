@@ -101,6 +101,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
+  Future<void> _launchSpecificUpi(String appName, String customScheme, String genericUpi) async {
+    try {
+      final customUri = Uri.parse(customScheme);
+      final launched = await launchUrl(customUri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        final genericUri = Uri.parse(genericUpi);
+        await launchUrl(genericUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      try {
+        final genericUri = Uri.parse(genericUpi);
+        await launchUrl(genericUri, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not open $appName. Please copy UPI ID.')),
+          );
+        }
+      }
+    }
+  }
+
   Widget _buildProviderQr(String? qrUrl, String upiPayload) {
     if (qrUrl != null && qrUrl.isNotEmpty) {
       if (qrUrl.startsWith('data:image')) {
@@ -290,12 +312,83 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    _buildProviderQr(_paymentSettings?['upi_qr_url']?.toString(), upiPayload),
+                    InkWell(
+                      onTap: () => _launchUpiApp(upiPayload),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Column(
+                        children: [
+                          Stack(
+                            alignment: Alignment.bottomCenter,
+                            children: [
+                              _buildProviderQr(_paymentSettings?['upi_qr_url']?.toString(), upiPayload),
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.75),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.touch_app_rounded, color: Colors.white, size: 14),
+                                    SizedBox(width: 4),
+                                    Text('Tap QR to Pay with Any UPI App', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 14),
+                    const Text('Choose Your UPI App for 1-Tap Payment:', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: MessColors.ink)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _launchSpecificUpi('Google Pay', 'tez://upi/pay?pa=$upiId&pn=${Uri.encodeComponent(upiName)}&am=$_total&cu=INR', upiPayload),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              side: const BorderSide(color: Color(0xFF4285F4), width: 1.2),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: const Text('Google Pay', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF1A73E8), fontSize: 11.5)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _launchSpecificUpi('PhonePe', 'phonepe://pay?pa=$upiId&pn=${Uri.encodeComponent(upiName)}&am=$_total&cu=INR', upiPayload),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              side: const BorderSide(color: Color(0xFF5F259F), width: 1.2),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: const Text('PhonePe', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF5F259F), fontSize: 11.5)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _launchSpecificUpi('Paytm', 'paytmmp://pay?pa=$upiId&pn=${Uri.encodeComponent(upiName)}&am=$_total&cu=INR', upiPayload),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              side: const BorderSide(color: Color(0xFF00B9F1), width: 1.2),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: const Text('Paytm', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF002970), fontSize: 11.5)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
                     ElevatedButton.icon(
                       onPressed: () => _launchUpiApp(upiPayload),
-                      icon: const Icon(Icons.account_balance_wallet, size: 18),
-                      label: const Text('Pay via UPI App (GPay / PhonePe / Paytm)', style: TextStyle(fontWeight: FontWeight.w700)),
+                      icon: const Icon(Icons.account_balance_wallet_rounded, size: 18),
+                      label: const Text('Open Any UPI App (BHIM / CRED / Others)', style: TextStyle(fontWeight: FontWeight.w700)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0F766E),
                         foregroundColor: Colors.white,
@@ -303,6 +396,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
+
                     const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
