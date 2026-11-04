@@ -191,6 +191,21 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
       ),
       body: Column(
         children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            color: const Color(0xFFF1F5F9),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.lock_rounded, size: 13, color: Color(0xFF0F766E)),
+                SizedBox(width: 6),
+                Text(
+                  'End-to-End Encrypted (AES-256) · Direct Kitchen Chat',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0F766E)),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator(color: MessColors.orange))

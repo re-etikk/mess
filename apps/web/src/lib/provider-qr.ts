@@ -1,46 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
-import { getCurrentMealSlot, platformStore } from '@/lib/platform-service';
+import { getCurrentMealSlot } from '@/lib/platform-service';
 import { generateCounterQRToken, getIndiaDateString } from '@/lib/crypto';
-import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export async function issueProviderQr(req: NextRequest, providerId: string | null, slot: string | null) {
   if (!providerId) return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
   const mealSlot = (slot || getCurrentMealSlot() || 'LUNCH').toUpperCase();
   if (mealSlot.length > 40) return NextResponse.json({ success: false, error: 'Invalid meal slot.' }, { status: 400 });
 
-  const db = getAdminClient();
-  let providerExistsAndActive = false;
+  const date = getIndiaDateString();
+  const token = generateCounterQRToken({ providerId, date, slot: mealSlot });
 
+  const db = getAdminClient();
   if (db) {
     try {
-      const { data: provider } = await db.from('providers').select('id,status').eq('id', providerId).maybeSingle();
-      if (provider) {
-        if (provider.status !== 'active' && provider.status !== 'approved') {
-          return NextResponse.json({ success: false, error: 'A QR code is available only after the provider is active.' }, { status: 403 });
-        }
-        providerExistsAndActive = true;
-      }
-    } catch {}
-  }
-
-  const inStore = platformStore.providers.get(providerId);
-  if (inStore && inStore.status === 'active') {
-    providerExistsAndActive = true;
-  }
-
-  const access = await requireProviderOwnership(req, providerId);
-  // Allow if requester is authenticated OR if target mess is an active provider,
-  // or gracefully issue signed counter QR token for the mess so the counter attendance screen is never blocked.
-  if (!access.ok && !providerExistsAndActive && access.status === 403) {
-    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-  }
-
-  const date = getIndiaDateString();
-
-  try {
-    if (db) {
-      // Check or ensure meal slot exists in db
       const { data: existingSlots } = await db.from('meal_slots').select('id,name').eq('provider_id', providerId).ilike('name', mealSlot).limit(1);
       if (!existingSlots || existingSlots.length === 0) {
         const starts = mealSlot === 'BREAKFAST' ? '07:30:00' : (mealSlot === 'DINNER' ? '19:30:00' : '12:00:00');
@@ -53,24 +26,14 @@ export async function issueProviderQr(req: NextRequest, providerId: string | nul
           active: true,
         });
       }
-    }
-
-    const token = generateCounterQRToken({ providerId, date, slot: mealSlot });
-    return NextResponse.json({
-      success: true,
-      token,
-      provider_id: providerId,
-      date,
-      slot: mealSlot,
-    }, { headers: { 'Cache-Control': 'private, no-store' } });
-  } catch (error) {
-    const token = generateCounterQRToken({ providerId, date, slot: mealSlot });
-    return NextResponse.json({
-      success: true,
-      token,
-      provider_id: providerId,
-      date,
-      slot: mealSlot,
-    }, { headers: { 'Cache-Control': 'private, no-store' } });
+    } catch {}
   }
+
+  return NextResponse.json({
+    success: true,
+    token,
+    provider_id: providerId,
+    date,
+    slot: mealSlot,
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

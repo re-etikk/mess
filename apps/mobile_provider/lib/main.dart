@@ -664,10 +664,12 @@ class ProviderShell extends StatefulWidget {
 class _ProviderShellState extends State<ProviderShell> {
   int selectedTab = 0;
   String? detail;
+  late final List<Widget> _pages;
 
   @override
-  Widget build(BuildContext context) {
-    final pages = <Widget>[
+  void initState() {
+    super.initState();
+    _pages = [
       ProviderOverview(
         session: widget.session,
         onNavigate: (index) => setState(() {
@@ -685,14 +687,20 @@ class _ProviderShellState extends State<ProviderShell> {
         onSignOut: widget.onSignOut,
       ),
     ];
+  }
 
+  @override
+  Widget build(BuildContext context) {
     Widget content = detail != null
         ? MoreDetailScreen(
             session: widget.session,
             kind: detail!,
             onBack: () => setState(() => detail = null),
           )
-        : pages[selectedTab];
+        : IndexedStack(
+            index: selectedTab,
+            children: _pages,
+          );
 
     return PopScope(
       canPop: detail == null && selectedTab == 0,
@@ -784,7 +792,7 @@ class _ProviderOverviewState extends State<ProviderOverview> {
   DashboardMetrics? _metrics;
   bool _loading = true;
   String? _error;
-  bool _isOpenToday = true;
+  bool _isOpenToday = ProviderApiService.staticKitchenStatus ?? true;
   bool _togglingStatus = false;
 
   Future<void> _loadKitchenStatus() async {
