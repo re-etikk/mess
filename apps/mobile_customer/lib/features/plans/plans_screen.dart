@@ -27,11 +27,21 @@ class _PlansScreenState extends State<PlansScreen> {
   }
 
   Future<void> _resolveProvider() async {
+    final appState = AppStateScope.of(context, listen: false);
+    final targetId = widget.provider?.id ?? appState.activeProvider?.id;
+    if (targetId != null) {
+      try {
+        final live = await appState.repository.fetchLiveProvider(targetId);
+        if (live != null && mounted) {
+          setState(() => _resolvedProvider = live);
+          return;
+        }
+      } catch (_) {}
+    }
     if (widget.provider != null) {
       setState(() => _resolvedProvider = widget.provider);
       return;
     }
-    final appState = AppStateScope.of(context, listen: false);
     if (appState.activeProvider != null) {
       setState(() => _resolvedProvider = appState.activeProvider);
       return;

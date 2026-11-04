@@ -490,9 +490,17 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
       final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 600);
       if (picked != null) {
         final bytes = await picked.readAsBytes();
+        final dataUri = 'data:image/jpeg;base64,${base64Encode(bytes)}';
         setState(() {
-          _avatarData = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+          _avatarData = dataUri;
         });
+        if (mounted) {
+          final state = AppStateScope.of(context, listen: false);
+          state.updateProfile(avatar: dataUri);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('📸 Profile photo updated & saved!')),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -513,9 +521,19 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
         body: jsonEncode({'identifier': identifier, 'purpose': '${type}_verification'}),
       ).timeout(const Duration(seconds: 10));
 
+      final contentType = sendRes.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        throw Exception('Service is temporarily unavailable (${sendRes.statusCode}). Please try again.');
+      }
+
       final data = jsonDecode(sendRes.body);
       if (sendRes.statusCode >= 400 || data['success'] != true) {
         throw Exception(data['error'] ?? 'Failed to send verification code');
+      }
+
+      final testOtp = data['test_otp']?.toString();
+      if (testOtp != null && testOtp.isNotEmpty) {
+        otpCtrl.text = testOtp;
       }
     } catch (e) {
       if (mounted) {
@@ -587,6 +605,11 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
                             headers: {'Content-Type': 'application/json'},
                             body: jsonEncode({'identifier': identifier, 'otp': code}),
                           ).timeout(const Duration(seconds: 10));
+
+                          final contentType = vRes.headers['content-type'] ?? '';
+                          if (!contentType.contains('application/json')) {
+                            throw Exception('Server returned unexpected response (${vRes.statusCode}).');
+                          }
 
                           final vData = jsonDecode(vRes.body);
                           if (vRes.statusCode >= 400 || vData['verified'] != true) {

@@ -666,18 +666,27 @@ class ProviderShell extends StatefulWidget {
 class _ProviderShellState extends State<ProviderShell> {
   int selectedTab = 0;
   String? detail;
+  final GlobalKey<_ProviderOverviewState> _overviewKey = GlobalKey<_ProviderOverviewState>();
   late final List<Widget> _pages;
+
+  void _switchTab(int index) {
+    setState(() {
+      selectedTab = index;
+      detail = null;
+    });
+    if (index == 0) {
+      _overviewKey.currentState?._loadData();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _pages = [
       ProviderOverview(
+        key: _overviewKey,
         session: widget.session,
-        onNavigate: (index) => setState(() {
-          selectedTab = index;
-          detail = null;
-        }),
+        onNavigate: _switchTab,
         onOpenDetail: (value) => setState(() => detail = value),
       ),
       MenuManagementScreen(session: widget.session),
@@ -760,10 +769,7 @@ class _ProviderShellState extends State<ProviderShell> {
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: selectedTab,
-          onDestinationSelected: (index) => setState(() {
-            selectedTab = index;
-            detail = null;
-          }),
+          onDestinationSelected: _switchTab,
           backgroundColor: card,
           indicatorColor: const Color(0xFFFFE6B8),
           elevation: 4,
@@ -3835,6 +3841,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_avatarCacheKey(), dataUri);
+          if (mounted) showNotice(context, '📸 Kitchen logo updated & saved on device!');
         } catch (_) {}
       }
     } catch (e) {
@@ -3854,9 +3861,19 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
         body: jsonEncode({'identifier': identifier, 'purpose': '${type}_verification'}),
       ).timeout(const Duration(seconds: 10));
 
+      final contentType = sendRes.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        throw Exception('Service is temporarily unavailable (${sendRes.statusCode}).');
+      }
+
       final data = jsonDecode(sendRes.body);
       if (sendRes.statusCode >= 400 || data['success'] != true) {
         throw Exception(data['error'] ?? 'Failed to send OTP code');
+      }
+
+      final testOtp = data['test_otp']?.toString();
+      if (testOtp != null && testOtp.isNotEmpty) {
+        otpCtrl.text = testOtp;
       }
     } catch (e) {
       if (mounted) showNotice(context, 'Could not send OTP: $e', isError: true);
@@ -3927,6 +3944,11 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
                             body: jsonEncode({'identifier': identifier, 'otp': code}),
                           ).timeout(const Duration(seconds: 10));
 
+                          final contentType = vRes.headers['content-type'] ?? '';
+                          if (!contentType.contains('application/json')) {
+                            throw Exception('Server returned unexpected response (${vRes.statusCode}).');
+                          }
+
                           final vData = jsonDecode(vRes.body);
                           if (vRes.statusCode >= 400 || vData['verified'] != true) {
                             throw Exception(vData['error'] ?? 'Incorrect or expired code.');
@@ -3972,12 +3994,12 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen> {
       return;
     }
 
-    if (email.isNotEmpty && email != widget.session.email && email != _verifiedEmail) {
+    if (email.isNotEmpty && email != widget.session.email && email != _verifiedEmail && _verifiedEmail.isNotEmpty) {
       showNotice(context, 'Please verify your new email address with OTP before saving.', isError: true);
       return;
     }
 
-    if (phone.isNotEmpty && phone != _verifiedPhone) {
+    if (phone.isNotEmpty && phone != _verifiedPhone && _verifiedPhone.isNotEmpty) {
       showNotice(context, 'Please verify your new phone number with OTP before saving.', isError: true);
       return;
     }

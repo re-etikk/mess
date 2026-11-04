@@ -4,6 +4,7 @@ abstract interface class MessRepository {
   Future<List<MessProvider>> getProviders();
   Future<List<MessProvider>> searchProviders({String query = ''});
   Future<MessProvider?> getProvider(String providerId);
+  Future<MessProvider?> fetchLiveProvider(String providerId);
   Future<MealRedemption> redeemMeal({required String qrPayload, required String customerId});
   Future<ActiveSubscription> purchasePlan({
     required MealPlan plan,

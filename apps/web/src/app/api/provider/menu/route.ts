@@ -49,8 +49,7 @@ export async function GET(req: NextRequest) {
     if (slotFilter) {
       itemsQuery = itemsQuery.eq('meal_slot_id', slotFilter);
     }
-    const { data: dbItems } = await itemsQuery.order('name');
-    const items = dbItems ?? [];
+    const { data: dbItems, error: itemsError } = await itemsQuery.order('name'); if (itemsError) console.error('Menu items query error:', itemsError.message); let items = dbItems ?? []; if (items.length === 0) { const { data: fb } = await client.from('menu_items').select('*').eq('provider_id', providerId); if (fb && fb.length > 0) items = fb; }
 
     const menus = slots.filter((slot) => !slotFilter || slot.id === slotFilter).map((slot) => {
       const slotItems = items.filter((item) =>

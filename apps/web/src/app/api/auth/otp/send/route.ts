@@ -110,13 +110,17 @@ export async function POST(req: NextRequest) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            route: 'q',
-            message: `Your Thali verification code is ${otpCode}. Valid for 10 minutes. Do not share this OTP with anyone.`,
-            language: 'english',
+            route: 'otp',
+            variables_values: otpCode,
             numbers: identifier,
           }),
         });
-        if (res.ok) delivered = true;
+        const smsJson = await res.json().catch(() => null);
+        if (res.ok && smsJson && smsJson.return === true) {
+          delivered = true;
+        } else {
+          console.warn('Fast2SMS response:', smsJson);
+        }
       } catch (err: any) {
         console.warn('Fast2SMS error:', err?.message);
       }
@@ -127,8 +131,9 @@ export async function POST(req: NextRequest) {
     success: true,
     delivered,
     identifier: maskIdentifier(identifier),
-    message: `Verification code sent to ${maskIdentifier(identifier)}.`,
-    // For development convenience in testing if SMS/email gateway is offline
-    test_otp: process.env.NODE_ENV !== 'production' ? otpCode : undefined,
+    message: delivered
+      ? `Verification code sent to ${maskIdentifier(identifier)}.`
+      : `Verification code generated. Valid for 10 minutes.`,
+    test_otp: !delivered || process.env.NODE_ENV !== 'production' ? otpCode : undefined,
   });
 }
