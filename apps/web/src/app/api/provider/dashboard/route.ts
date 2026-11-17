@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
@@ -6,14 +7,19 @@ import { generateCounterQRToken, getIndiaDateString } from '@/lib/crypto';
 
 export const dynamic = 'force-dynamic';
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
+const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+
 function getClientSafe() {
   const db = getAdminClient();
   if (db) return db;
   try {
-    return createClient();
-  } catch {
-    return null;
-  }
+    const sClient = createClient();
+    if (sClient) return sClient;
+  } catch {}
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }
 
 export async function GET(req: NextRequest) {

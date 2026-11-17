@@ -4,6 +4,7 @@ import '../../core/services/customer_auth_service.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
+import '../home/home_shell.dart';
 import '../../mess_app.dart';
 import 'login_screen.dart';
 
@@ -57,7 +58,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Account created for ${result.name}!')));
       Navigator.of(context).pushAndRemoveUntil(
-        messRoute(const MessRootGate()),
+        messRoute(const HomeShell(key: ValueKey('home-shell'))),
         (route) => false,
       );
     } catch (e) {

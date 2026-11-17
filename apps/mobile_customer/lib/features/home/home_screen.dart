@@ -42,6 +42,17 @@ class _HomeScreenState extends State<HomeScreen> {
         _providers = list;
         _loaded = true;
       });
+      final active = state.activeProvider ?? (_providers.isNotEmpty ? _providers.first : null);
+      if (active != null) {
+        state.repository.fetchLiveProvider(active.id).then((live) {
+          if (mounted && live != null) {
+            setState(() {
+              final idx = _providers.indexWhere((p) => p.id == live.id);
+              if (idx != -1) _providers[idx] = live;
+            });
+          }
+        });
+      }
     }
   }
 

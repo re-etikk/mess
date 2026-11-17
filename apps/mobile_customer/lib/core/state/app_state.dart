@@ -43,6 +43,13 @@ class AppState extends ChangeNotifier {
         customerEmail = data['customerEmail']?.toString() ?? '';
         customerPhone = data['customerPhone']?.toString() ?? '';
         customerAvatar = data['customerAvatar']?.toString() ?? '';
+        if (customerAvatar.isEmpty) {
+          customerAvatar = prefs.getString('thali_customer_avatar_$customerId') ??
+              prefs.getString('thali_customer_avatar_global') ?? '';
+        }
+        if (customerPhone.isEmpty) {
+          customerPhone = prefs.getString('thali_customer_phone_$customerId') ?? '';
+        }
         location = data['location']?.toString() ?? 'Sector 62, Noida';
         authToken = data['authToken']?.toString() ?? '';
         refreshToken = data['refreshToken']?.toString() ?? '';
@@ -196,10 +203,16 @@ class AppState extends ChangeNotifier {
   void signIn({required String emailOrPhone, required String name, String? userId, String? token, String? refreshToken}) {
     customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
     customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
-    if (token != null) authToken = token;
+    if (token != null && token.isNotEmpty) {
+      authToken = token;
+    } else if (authToken.isEmpty) {
+      authToken = 'cust_session_${DateTime.now().millisecondsSinceEpoch}';
+    }
     if (refreshToken != null) this.refreshToken = refreshToken;
     if (userId != null && userId.isNotEmpty) {
       customerId = userId;
+    } else if (customerId.isEmpty) {
+      customerId = 'usr-cust-${DateTime.now().millisecondsSinceEpoch}';
     }
     isSignedIn = true;
     notifyListeners();

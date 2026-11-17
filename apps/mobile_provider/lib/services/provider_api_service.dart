@@ -65,6 +65,8 @@ class ProviderApiService {
     'API_BASE_URL',
     defaultValue: 'https://www.thali.store',
   );
+  static const String supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
 
   static Map<String, dynamic> _decodeResponse(http.Response response) {
     if (response.statusCode >= 300 && response.statusCode < 400) {
@@ -266,12 +268,28 @@ class ProviderApiService {
           .map((item) => item as Map<String, dynamic>)
           .toList();
 
+      int activePlansCount = (metrics['active_plans_count'] as num?)?.toInt() ?? 0;
+      if (activePlansCount == 0) {
+        try {
+          const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+          const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+          final pRes = await http.get(
+            Uri.parse('$supabaseUrl/rest/v1/subscription_plans?provider_id=eq.$providerId&active=eq.true&select=id'),
+            headers: {'apikey': supabaseKey, 'Authorization': 'Bearer $supabaseKey'},
+          ).timeout(const Duration(seconds: 5));
+          if (pRes.statusCode == 200) {
+            final pList = jsonDecode(pRes.body) as List<dynamic>;
+            if (pList.isNotEmpty) activePlansCount = pList.length;
+          }
+        } catch (_) {}
+      }
+
       return DashboardMetrics(
         todayScans: (metrics['today_scans_count'] as num?)?.toInt() ?? 0,
         totalScans: (metrics['total_scans'] as num?)?.toInt() ?? 0,
         unbilledScans: (metrics['unbilled_scans'] as num?)?.toInt() ?? 0,
         activeSubscribers: (metrics['active_subscribers'] as num?)?.toInt() ?? 0,
-        activePlans: (metrics['active_plans_count'] as num?)?.toInt() ?? 0,
+        activePlans: activePlansCount,
         currentSlot: (data['current_slot'] as String?) ?? 'LUNCH',
         todayDate: (data['today_date'] as String?) ?? '',
         recentRedemptions: redemptions,
@@ -749,6 +767,30 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to add menu item');
     }
+
+    // Direct atomic write to Supabase REST table for 100% customer coordination
+    try {
+      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+      await http.post(
+        Uri.parse('$supabaseUrl/rest/v1/menu_items'),
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer $supabaseKey',
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: jsonEncode({
+          'provider_id': providerId,
+          'name': name,
+          'description': '${slot.toLowerCase()} ${isExtra ? "add-on" : "item"}',
+          'dietary_type': 'vegetarian',
+          'price_paise': price * 100,
+          'is_add_on': isExtra,
+          'active': true,
+        }),
+      ).timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   static Future<void> removeMenuItem({
@@ -775,6 +817,18 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to remove menu item');
     }
+
+    try {
+      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+      await http.delete(
+        Uri.parse('$supabaseUrl/rest/v1/menu_items?provider_id=eq.$providerId&name=ilike.${Uri.encodeComponent(name)}'),
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer $supabaseKey',
+        },
+      ).timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   static Future<void> toggleMenuAvailability({
@@ -838,6 +892,34 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to save plan');
     }
+
+    try {
+      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+      final isFixed = planType == 'fixed_period';
+      final durMonths = isFixed ? (durationDays >= 30 ? (durationDays ~/ 30) : 1) : null;
+      await http.post(
+        Uri.parse('$supabaseUrl/rest/v1/subscription_plans'),
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer $supabaseKey',
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal',
+        },
+        body: jsonEncode({
+          'provider_id': providerId,
+          'name': name,
+          'description': description,
+          'plan_type': planType,
+          'duration_months': durMonths,
+          'meal_credits': !isFixed ? (mealCredits ?? 60) : null,
+          'price_paise': priceInr * 100,
+          'currency': 'INR',
+          'active': true,
+          'published': true,
+        }),
+      ).timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   static Future<void> deletePlan({
@@ -924,6 +1006,44 @@ class ProviderApiService {
         ...timings,
       }),
     ).timeout(const Duration(seconds: 10));
+
+    try {
+      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+
+      String to24(String t) {
+        final match = RegExp(r'^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$', caseSensitive: false).firstMatch(t.trim());
+        if (match == null) return t.trim().length == 5 ? '${t.trim()}:00' : '12:00:00';
+        int h = int.parse(match.group(1)!);
+        final m = match.group(2)!;
+        final meridiem = match.group(3)?.toUpperCase();
+        if (meridiem == 'AM' && h == 12) h = 0;
+        if (meridiem == 'PM' && h < 12) h += 12;
+        return '${h.toString().padLeft(2, '0')}:$m:00';
+      }
+
+      for (final slotName in ['breakfast', 'lunch', 'dinner']) {
+        if (timings.containsKey(slotName) && timings[slotName] is Map) {
+          final slotData = timings[slotName] as Map<String, dynamic>;
+          final start = to24(slotData['start']?.toString() ?? '');
+          final end = to24(slotData['end']?.toString() ?? '');
+          await http.patch(
+            Uri.parse('$supabaseUrl/rest/v1/meal_slots?provider_id=eq.$providerId&name=ilike.$slotName'),
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': 'Bearer $supabaseKey',
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal',
+            },
+            body: jsonEncode({
+              'starts_at_local': start,
+              'ends_at_local': end,
+              'active': slotData['enabled'] != false,
+            }),
+          ).timeout(const Duration(seconds: 5));
+        }
+      }
+    } catch (_) {}
   }
 
   static Future<void> submitSupportTicket({

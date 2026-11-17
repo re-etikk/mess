@@ -223,6 +223,69 @@ class HttpMessRepository implements MessRepository {
         }
       }
 
+      // RESILIENT DIRECT SUPABASE FALLBACK: If slots have no items listed, fetch from Supabase REST
+      final bool hasItems = updatedSlots.any((s) => s.items.isNotEmpty);
+      if (!hasItems) {
+        try {
+          const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
+          const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+          final sRes = await http.get(
+            Uri.parse('$supabaseUrl/rest/v1/menu_items?provider_id=eq.$providerId&active=eq.true&select=*'),
+            headers: {'apikey': supabaseKey, 'Authorization': 'Bearer $supabaseKey'},
+          ).timeout(const Duration(seconds: 8));
+
+          if (sRes.statusCode == 200) {
+            final sData = jsonDecode(sRes.body) as List<dynamic>;
+            if (sData.isNotEmpty) {
+              final slotMap = <String, List<MenuItem>>{'breakfast': [], 'lunch': [], 'dinner': []};
+              for (final row in sData) {
+                final r = row as Map<String, dynamic>;
+                final name = r['name']?.toString() ?? '';
+                final desc = (r['description']?.toString() ?? '').toLowerCase();
+                final isExtra = r['is_add_on'] == true;
+                final pricePaise = (r['price_paise'] as num?)?.toInt() ?? 0;
+                final price = (pricePaise / 100).round();
+
+                String targetSlot = 'lunch';
+                if (desc.contains('breakfast') || desc.contains('morning')) {
+                  targetSlot = 'breakfast';
+                } else if (desc.contains('dinner') || desc.contains('night')) {
+                  targetSlot = 'dinner';
+                }
+
+                slotMap[targetSlot]!.add(MenuItem(
+                  id: r['id']?.toString() ?? 'item-$name',
+                  name: name,
+                  kind: isExtra ? FoodItemKind.addOn : FoodItemKind.included,
+                  price: price,
+                  portion: isExtra ? 'Add-on' : 'Standard',
+                ));
+              }
+
+              updatedSlots = updatedSlots.map((s) {
+                final key = s.name.toLowerCase();
+                final extraItems = slotMap[key] ?? [];
+                if (extraItems.isNotEmpty) {
+                  final includedNames = extraItems.where((i) => i.kind == FoodItemKind.included).map((i) => i.name).toList();
+                  return MealSlot(
+                    id: s.id,
+                    name: s.name,
+                    startHour: s.startHour,
+                    startMinute: s.startMinute,
+                    endHour: s.endHour,
+                    endMinute: s.endMinute,
+                    menuSummary: includedNames.isNotEmpty ? includedNames.join(', ') : '${extraItems.length} items',
+                    items: extraItems,
+                    enabled: s.enabled,
+                  );
+                }
+                return s;
+              }).toList();
+            }
+          }
+        } catch (_) {}
+      }
+
       final updatedProvider = MessProvider(
         id: base.id,
         name: base.name,
@@ -595,11 +658,39 @@ class HttpMessRepository implements MessRepository {
           }
         }
 
+        final fullItems = (mMap['items'] as List<dynamic>? ?? []);
+        if (fullItems.isNotEmpty && items.isEmpty) {
+          for (final it in fullItems) {
+            if (it is Map) {
+              final itName = it['name']?.toString() ?? '';
+              final itExtra = it['is_add_on'] == true;
+              final itPrice = ((it['price_paise'] as num?)?.toInt() ?? 0) ~/ 100;
+              items.add(MenuItem(
+                id: it['id']?.toString() ?? 'it-${itName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}',
+                name: itName,
+                kind: itExtra ? FoodItemKind.addOn : FoodItemKind.included,
+                price: itPrice,
+                portion: itExtra ? 'Add-on' : 'Standard',
+              ));
+              if (!itExtra && itName.isNotEmpty) itemsIncluded.add(itName);
+            }
+          }
+        }
+
         // Parse actual timing from provider's saved timings (fallback to slot defaults)
         int startHour, startMinute, endHour, endMinute;
         bool slotEnabled = true;
 
-        if (rawTimings != null) {
+        final startsAt = mMap['starts_at_local']?.toString() ?? '';
+        final endsAt = mMap['ends_at_local']?.toString() ?? '';
+        if (startsAt.isNotEmpty && endsAt.isNotEmpty) {
+          final startParsed = _parseTimeString(startsAt);
+          final endParsed = _parseTimeString(endsAt);
+          startHour = startParsed.$1;
+          startMinute = startParsed.$2;
+          endHour = endParsed.$1;
+          endMinute = endParsed.$2;
+        } else if (rawTimings != null) {
           final key = slotStr == 'BREAKFAST' ? 'breakfast' : (slotStr == 'DINNER' ? 'dinner' : 'lunch');
           final slotTiming = rawTimings[key] as Map<String, dynamic>?;
           if (slotTiming != null) {

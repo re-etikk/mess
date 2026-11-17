@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 import { platformStore, PlanData } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
+const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+
+function getFallbackClient() {
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 export async function GET(req: NextRequest) {
   const params = new URL(req.url).searchParams;
@@ -16,7 +26,13 @@ export async function GET(req: NextRequest) {
   const db = getAdminClient();
 
   try {
-    const client = db || (await createClient());
+    let client = db;
+    if (!client) {
+      try {
+        client = await createClient();
+      } catch (_) {}
+    }
+    client = client || getFallbackClient();
     let query = client
       .from('subscription_plans')
       .select('*')
@@ -136,7 +152,7 @@ export async function POST(req: NextRequest) {
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
   if (!access.ok && access.status !== 401) {
-    const dbCheck = getAdminClient();
+    const dbCheck = getAdminClient() || getFallbackClient();
     if (dbCheck) {
       const { data: prov } = await dbCheck.from('providers').select('id,status').eq('id', input.provider_id).maybeSingle();
       if (!prov || (prov.status !== 'active' && prov.status !== 'approved')) {
@@ -147,7 +163,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const db = getAdminClient();
+  const db = getAdminClient() || getFallbackClient();
 
   const planType = input.plan_type === 'meal_credits' ? 'meal_credits' : 'fixed_period';
   const durationDays = input.duration_days || (input.duration_months ? input.duration_months * 30 : 30);

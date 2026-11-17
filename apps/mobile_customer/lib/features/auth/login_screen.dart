@@ -4,6 +4,7 @@ import '../../core/services/customer_auth_service.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
+import '../home/home_shell.dart';
 import '../../mess_app.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
@@ -47,7 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Welcome, ${result.name}!')));
       Navigator.of(context).pushAndRemoveUntil(
-        messRoute(const MessRootGate()),
+        messRoute(const HomeShell(key: ValueKey('home-shell'))),
         (route) => false,
       );
     } catch (e) {
@@ -77,7 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
               final state = AppStateScope.of(context);
               state.signIn(emailOrPhone: 'google.student@thali.in', name: 'Google Student');
               Navigator.of(context).pushAndRemoveUntil(
-                messRoute(const MessRootGate()),
+                messRoute(const HomeShell(key: ValueKey('home-shell'))),
                 (route) => false,
               );
             },
