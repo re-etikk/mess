@@ -69,6 +69,7 @@ class _BatteryPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= 0 || size.height <= 0) return;
     final bodyWidth = size.width * 0.88;
     final terminalWidth = size.width * 0.10;
     final stroke = size.height * 0.1;

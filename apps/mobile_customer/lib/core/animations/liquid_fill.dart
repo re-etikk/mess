@@ -106,7 +106,7 @@ class _LiquidWavePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (fillPercent <= 0.0) return;
+    if (fillPercent <= 0.0 || size.isEmpty || size.width <= 0 || size.height <= 0) return;
 
     final baseHeight = size.height * (1.0 - fillPercent);
     final waveAmplitude = size.height * 0.045 * (fillPercent < 0.95 && fillPercent > 0.05 ? 1.0 : 0.2);

@@ -42,15 +42,11 @@ class MessProviderApp extends StatefulWidget {
 
 class _MessProviderAppState extends State<MessProviderApp> {
   ProviderSession? _session;
-  bool _showingSplash = true;
 
   @override
   void initState() {
     super.initState();
     _session = widget.initialSession;
-    Future.delayed(const Duration(milliseconds: 1600), () {
-      if (mounted) setState(() => _showingSplash = false);
-    });
   }
 
   @override
@@ -94,63 +90,24 @@ class _MessProviderAppState extends State<MessProviderApp> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
-      home: _showingSplash
-          ? const Scaffold(
-              backgroundColor: cream,
-              body: SafeArea(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      InfinityTrail(
-                        size: 64,
-                        color: orange,
-                        strokeWidth: 3.5,
-                      ),
-                      SizedBox(height: 24),
-                      TextShimmer(
-                        text: 'THALI PARTNER',
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 2.5,
-                          color: ink,
-                        ),
-                        shimmerColor: orange,
-                      ),
-                      SizedBox(height: 6),
-                      Text(
-                        'KITCHEN PARTNER HUB',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.5,
-                          color: muted,
-                        ),
-                      ),
-                    ],
+      home: _session == null
+          ? ProviderLoginScreen(
+              onLoginSuccess: (session) => setState(() => _session = session),
+              onRegister: () {
+                appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
+                  builder: (_) => ProviderOnboardingScreen(
+                    onComplete: (session) => setState(() => _session = session),
                   ),
-                ),
-              ),
+                ));
+              },
             )
-          : _session == null
-              ? ProviderLoginScreen(
-                  onLoginSuccess: (session) => setState(() => _session = session),
-                  onRegister: () {
-                    appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
-                      builder: (_) => ProviderOnboardingScreen(
-                        onComplete: (session) => setState(() => _session = session),
-                      ),
-                    ));
-                  },
-                )
-              : ProviderShell(
-                  session: _session!,
-                  onSignOut: () async {
-                    await ProviderApiService.clearSession();
-                    setState(() => _session = null);
-                  },
-                ),
+          : ProviderShell(
+              session: _session!,
+              onSignOut: () async {
+                await ProviderApiService.clearSession();
+                setState(() => _session = null);
+              },
+            ),
     );
   }
 }

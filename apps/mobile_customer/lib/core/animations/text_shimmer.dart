@@ -22,11 +22,16 @@ class TextShimmer extends StatefulWidget {
 
 class _TextShimmerState extends State<TextShimmer> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  late final Animation<Color?> _colorAnim;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: widget.duration)..repeat();
+    _controller = AnimationController(vsync: this, duration: widget.duration)..repeat(reverse: true);
+    _colorAnim = ColorTween(
+      begin: widget.baseColor,
+      end: widget.shimmerColor,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -44,19 +49,11 @@ class _TextShimmerState extends State<TextShimmer> with SingleTickerProviderStat
     }
 
     return AnimatedBuilder(
-      animation: _controller,
+      animation: _colorAnim,
       builder: (context, _) {
-        return ShaderMask(
-          blendMode: BlendMode.srcIn,
-          shaderCallback: (bounds) {
-            return LinearGradient(
-              begin: Alignment(-1.5 + (_controller.value * 3.0), 0),
-              end: Alignment(-0.5 + (_controller.value * 3.0), 0),
-              colors: [widget.baseColor, widget.shimmerColor, widget.baseColor],
-              stops: const [0.0, 0.5, 1.0],
-            ).createShader(bounds);
-          },
-          child: Text(widget.text, style: textStyle),
+        return Text(
+          widget.text,
+          style: textStyle.copyWith(color: _colorAnim.value ?? widget.shimmerColor),
         );
       },
     );

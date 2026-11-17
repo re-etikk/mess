@@ -78,6 +78,7 @@ class _ChasingSquarePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= strokeWidth * 2 || size.height <= strokeWidth * 2) return;
     final rect = (Offset.zero & size).deflate(strokeWidth);
     final borderPaint = Paint()
       ..color = color.withOpacity(0.2)

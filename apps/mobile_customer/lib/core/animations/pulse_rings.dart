@@ -84,8 +84,10 @@ class _PulseRingsPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= 0 || size.height <= 0) return;
     final center = Offset(size.width / 2, size.height / 2);
     final maxRadius = math.min(size.width, size.height) / 2;
+    if (maxRadius <= 0) return;
 
     for (int i = 0; i < ringCount; i++) {
       final ringProgress = (progress + (i / ringCount)) % 1.0;

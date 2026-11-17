@@ -75,6 +75,7 @@ class _InfinityStaticPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= 0 || size.height <= 0) return;
     final path = _buildLemniscatePath(size);
     final paint = Paint()
       ..color = color
@@ -101,6 +102,7 @@ class _InfinityTrailPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= 0 || size.height <= 0) return;
     final trackPath = _buildLemniscatePath(size);
     final trackPaint = Paint()
       ..color = color.withOpacity(0.18)
@@ -129,6 +131,7 @@ class _InfinityTrailPainter extends CustomPainter {
 
 Path _buildLemniscatePath(Size size) {
   final path = Path();
+  if (size.width <= 0 || size.height <= 0) return path;
   final a = size.width * 0.44;
   final center = Offset(size.width / 2, size.height / 2);
 

@@ -82,8 +82,10 @@ class _OrbitPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= 0 || size.height <= 0) return;
     final center = Offset(size.width / 2, size.height / 2);
     final orbitRadius = (math.min(size.width, size.height) / 2) - dotRadius - 2;
+    if (orbitRadius <= 0) return;
 
     final centerPaint = Paint()..color = color.withOpacity(0.9);
     canvas.drawCircle(center, dotRadius * 1.5, centerPaint);

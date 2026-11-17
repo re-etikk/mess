@@ -81,9 +81,11 @@ class _GradientRingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty || size.width <= 0 || size.height <= 0) return;
+    final radius = (math.min(size.width, size.height) - strokeWidth) / 2;
+    if (radius <= 0) return;
     final rect = Offset.zero & size;
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = (math.min(size.width, size.height) - strokeWidth) / 2;
 
     final paint = Paint()
       ..shader = SweepGradient(colors: colors).createShader(rect)
