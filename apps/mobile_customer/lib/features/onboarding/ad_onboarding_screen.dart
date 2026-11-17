@@ -5,6 +5,7 @@ import '../../core/animations/thali_animations.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../mess_app.dart';
 import '../auth/login_screen.dart';
+import '../auth/register_screen.dart';
 
 /// Full-screen promo & onboarding advertisement screen for first-time installed users.
 /// Adheres strictly to UI/UX Pro Max design intelligence:
@@ -66,14 +67,25 @@ class _AdOnboardingScreenState extends State<AdOnboardingScreen> {
     } catch (_) {}
 
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder<void>(
-        pageBuilder: (_, __, ___) => const LoginScreen(),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-        transitionDuration: const Duration(milliseconds: 280),
-      ),
-    );
+    if (toRegister) {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder<void>(
+          pageBuilder: (_, __, ___) => const RegisterScreen(),
+          transitionsBuilder: (_, anim, __, child) =>
+              FadeTransition(opacity: anim, child: child),
+          transitionDuration: const Duration(milliseconds: 280),
+        ),
+      );
+    } else {
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder<void>(
+          pageBuilder: (_, __, ___) => const MessRootGate(),
+          transitionsBuilder: (_, anim, __, child) =>
+              FadeTransition(opacity: anim, child: child),
+          transitionDuration: const Duration(milliseconds: 280),
+        ),
+      );
+    }
   }
 
   @override

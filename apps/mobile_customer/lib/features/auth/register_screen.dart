@@ -4,6 +4,7 @@ import '../../core/services/customer_auth_service.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
+import '../../mess_app.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -55,7 +56,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
           refreshToken: result.refreshToken,
       );
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Account created for ${result.name}!')));
-      Navigator.popUntil(context, (route) => route.isFirst);
+      Navigator.of(context).pushAndRemoveUntil(
+        messRoute(const MessRootGate()),
+        (route) => false,
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

@@ -12,6 +12,7 @@ import 'features/notifications_screen.dart';
 import 'features/customer_chats_screen.dart';
 import 'features/settlements_screen.dart';
 import 'features/animation_gallery_screen.dart';
+import 'features/provider_ad_onboarding_screen.dart';
 import 'core/animations/thali_animations.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -19,7 +20,12 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final savedSession = await ProviderApiService.loadSavedSession();
-  runApp(MessProviderApp(initialSession: savedSession));
+  bool hasSeenAd = false;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    hasSeenAd = prefs.getBool('thali_partner_has_seen_ad_onboarding') ?? false;
+  } catch (_) {}
+  runApp(MessProviderApp(initialSession: savedSession, hasSeenAd: hasSeenAd));
 }
 
 const Color ink = Color(0xFF182435);
@@ -33,8 +39,9 @@ const Color line = Color(0xFFE9E0D5);
 const Color green = Color(0xFFE94E12);
 
 class MessProviderApp extends StatefulWidget {
-  const MessProviderApp({super.key, this.initialSession});
+  const MessProviderApp({super.key, this.initialSession, this.hasSeenAd = true});
   final ProviderSession? initialSession;
+  final bool hasSeenAd;
 
   @override
   State<MessProviderApp> createState() => _MessProviderAppState();
@@ -42,11 +49,21 @@ class MessProviderApp extends StatefulWidget {
 
 class _MessProviderAppState extends State<MessProviderApp> {
   ProviderSession? _session;
+  late bool _hasSeenAd;
 
   @override
   void initState() {
     super.initState();
     _session = widget.initialSession;
+    _hasSeenAd = widget.hasSeenAd;
+  }
+
+  void _markAdSeen() async {
+    setState(() => _hasSeenAd = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('thali_partner_has_seen_ad_onboarding', true);
+    } catch (_) {}
   }
 
   @override
@@ -90,24 +107,36 @@ class _MessProviderAppState extends State<MessProviderApp> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
-      home: _session == null
-          ? ProviderLoginScreen(
-              onLoginSuccess: (session) => setState(() => _session = session),
-              onRegister: () {
-                appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
-                  builder: (_) => ProviderOnboardingScreen(
-                    onComplete: (session) => setState(() => _session = session),
-                  ),
-                ));
-              },
-            )
-          : ProviderShell(
+      home: _session != null
+          ? ProviderShell(
               session: _session!,
               onSignOut: () async {
                 await ProviderApiService.clearSession();
                 setState(() => _session = null);
               },
-            ),
+            )
+          : (!_hasSeenAd
+              ? ProviderAdOnboardingScreen(
+                  onSignIn: _markAdSeen,
+                  onRegister: () {
+                    _markAdSeen();
+                    appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
+                      builder: (_) => ProviderOnboardingScreen(
+                        onComplete: (session) => setState(() => _session = session),
+                      ),
+                    ));
+                  },
+                )
+              : ProviderLoginScreen(
+                  onLoginSuccess: (session) => setState(() => _session = session),
+                  onRegister: () {
+                    appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
+                      builder: (_) => ProviderOnboardingScreen(
+                        onComplete: (session) => setState(() => _session = session),
+                      ),
+                    ));
+                  },
+                )),
     );
   }
 }
