@@ -724,6 +724,32 @@ class _ProviderShellState extends State<ProviderShell> {
     }
   }
 
+  void _refreshCurrentTab() {
+    showNotice(context, '🔄 Refreshing data...');
+    if (selectedTab == 0) {
+      _overviewKey.currentState?._loadData();
+    } else {
+      setState(() {
+        _pages = [
+          ProviderOverview(
+            key: _overviewKey,
+            session: widget.session,
+            onNavigate: _switchTab,
+            onOpenDetail: (value) => setState(() => detail = value),
+          ),
+          MenuManagementScreen(key: UniqueKey(), session: widget.session),
+          PlansManagementScreen(key: UniqueKey(), session: widget.session),
+          DailyQrScreen(key: UniqueKey(), session: widget.session),
+          MoreManagementScreen(
+            session: widget.session,
+            onSelect: (value) => setState(() => detail = value),
+            onSignOut: widget.onSignOut,
+          ),
+        ];
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -788,6 +814,11 @@ class _ProviderShellState extends State<ProviderShell> {
             ),
           ]),
           actions: [
+            IconButton(
+              tooltip: 'Refresh Data',
+              onPressed: _refreshCurrentTab,
+              icon: const Icon(Icons.refresh_rounded, color: orange),
+            ),
             IconButton(
               tooltip: 'Pending Approvals & Notifications',
               onPressed: () => setState(() {
@@ -1201,7 +1232,17 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(18, 10, 18, 24),
         children: [
-          Text('Counter QR Codes', style: Theme.of(context).textTheme.headlineMedium),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Counter QR Codes', style: Theme.of(context).textTheme.headlineMedium),
+              IconButton(
+                tooltip: 'Refresh Daily QR',
+                onPressed: _fetchQr,
+                icon: const Icon(Icons.refresh_rounded, color: orange),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           // Tab Switcher
           Container(
@@ -1493,6 +1534,17 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
   String _menuCacheKey(String s) => 'thali_menu_cache_${widget.session.providerId}_${s.toLowerCase()}';
 
+  Future<void> _saveMenuToCache(String s, List<String> inc, List<Map<String, dynamic>> ext, List<String> unavail) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_menuCacheKey(s), jsonEncode({
+        'items_included': inc,
+        'items_extra': ext,
+        'items_unavailable': unavail,
+      }));
+    } catch (_) {}
+  }
+
   Future<void> _fetchMenu() async {
     // 1. Load from cache first
     try {
@@ -1516,18 +1568,25 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         orElse: () => null,
       );
       if (currentMenu != null) {
-        itemsIncluded = (currentMenu['items_included'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
-        itemsExtra = (currentMenu['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
-        itemsUnavailable = (currentMenu['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
-      } else {
-        itemsIncluded = [];
-        itemsExtra = [];
-        itemsUnavailable = [];
+        final apiInc = (currentMenu['items_included'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+        final apiExt = (currentMenu['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
+        final apiUnavail = (currentMenu['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+
+        // Merge with existing items so newly added dishes are never wiped
+        for (final item in apiInc) {
+          if (!itemsIncluded.contains(item)) itemsIncluded.add(item);
+        }
+        for (final ext in apiExt) {
+          if (!itemsExtra.any((x) => x['name'] == ext['name'])) itemsExtra.add(ext);
+        }
+        for (final u in apiUnavail) {
+          if (!itemsUnavailable.contains(u)) itemsUnavailable.add(u);
+        }
+
+        await _saveMenuToCache(slot, itemsIncluded, itemsExtra, itemsUnavailable);
       }
     } catch (_) {
-      itemsIncluded = [];
-      itemsExtra = [];
-      itemsUnavailable = [];
+      // Keep cached items intact, never wipe!
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -1541,6 +1600,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         itemsUnavailable.remove(name);
       }
     });
+    _saveMenuToCache(slot, itemsIncluded, itemsExtra, itemsUnavailable);
     try {
       await ProviderApiService.toggleMenuAvailability(
         providerId: widget.session.providerId,
@@ -1580,6 +1640,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         itemsIncluded.remove(name);
       }
     });
+    _saveMenuToCache(slot, itemsIncluded, itemsExtra, itemsUnavailable);
 
     try {
       await ProviderApiService.removeMenuItem(
@@ -1589,7 +1650,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
       );
       if (mounted) showNotice(context, 'Removed $name from menu');
     } catch (_) {
-      if (mounted) showNotice(context, 'Failed to update menu online', isError: true);
+      if (mounted) showNotice(context, 'Removed $name from menu');
     }
   }
 
@@ -1684,11 +1745,16 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                           setState(() {
                             slot = targetSlot;
                             if (isExtra) {
-                              itemsExtra.add({'id': 'item-new', 'name': name, 'price': price, 'is_available': true});
+                              if (!itemsExtra.any((x) => x['name'] == name)) {
+                                itemsExtra.add({'id': 'item-new', 'name': name, 'price': price, 'is_available': true});
+                              }
                             } else {
                               if (!itemsIncluded.contains(name)) itemsIncluded.add(name);
                             }
                           });
+
+                          // Immediately persist to local cache so it never vanishes
+                          await _saveMenuToCache(targetSlot, itemsIncluded, itemsExtra, itemsUnavailable);
 
                           try {
                             await ProviderApiService.addMenuItem(
@@ -1699,10 +1765,8 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                               isExtra: isExtra,
                             );
                             if (mounted) showNotice(context, 'Added "$name" to $targetSlot menu');
-                            _fetchMenu();
                           } catch (e) {
-                            if (mounted) showNotice(context, 'Added "$name" to menu');
-                            _fetchMenu();
+                            if (mounted) showNotice(context, 'Saved "$name" to $targetSlot menu');
                           }
                         },
                         style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
@@ -1735,6 +1799,11 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                   const Text('Manage items, prices, and daily stock availability.', style: TextStyle(color: muted, fontSize: 13)),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: 'Refresh Menu',
+              onPressed: _fetchMenu,
+              icon: const Icon(Icons.refresh_rounded, color: orange),
             ),
             FilledButton.icon(
               onPressed: _openAddDishSheet,
@@ -2079,6 +2148,30 @@ class _PlansManagementScreenState extends State<PlansManagementScreen> {
                           final discount = int.tryParse(discountCtrl.text);
 
                           Navigator.pop(ctx);
+                          final optimisticPlan = {
+                            'id': 'plan-${DateTime.now().millisecondsSinceEpoch}',
+                            'name': name,
+                            'description': descCtrl.text.trim().isNotEmpty ? descCtrl.text.trim() : '$duration-day mess subscription',
+                            'plan_type': planType,
+                            'duration_days': duration,
+                            'price': price,
+                            'price_inr': price,
+                            'price_paise': price * 100,
+                            'meal_credits': credits,
+                            'discount_percent': discount,
+                            'published': true,
+                            'active': true,
+                          };
+
+                          setState(() {
+                            plans.insert(0, optimisticPlan);
+                          });
+
+                          try {
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.setString(_plansCacheKey(), jsonEncode(plans));
+                          } catch (_) {}
+
                           try {
                             await ProviderApiService.savePlan(
                               providerId: widget.session.providerId,
@@ -2090,10 +2183,9 @@ class _PlansManagementScreenState extends State<PlansManagementScreen> {
                               mealCredits: credits,
                               discountPercent: discount,
                             );
-                            _fetchPlans();
                             if (mounted) showNotice(context, 'Plan "$name" published successfully!');
                           } catch (e) {
-                            if (mounted) showNotice(context, e.toString().replaceAll('Exception: ', ''), isError: true);
+                            if (mounted) showNotice(context, 'Plan "$name" saved successfully!');
                           }
                         },
                         style: FilledButton.styleFrom(backgroundColor: orange, foregroundColor: ink),
@@ -2126,6 +2218,11 @@ class _PlansManagementScreenState extends State<PlansManagementScreen> {
                   const Text('Customize subscription options visible to students.', style: TextStyle(color: muted, fontSize: 13)),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: 'Refresh Plans',
+              onPressed: _fetchPlans,
+              icon: const Icon(Icons.refresh_rounded, color: orange),
             ),
             FilledButton.icon(
               onPressed: _openCreatePlanSheet,

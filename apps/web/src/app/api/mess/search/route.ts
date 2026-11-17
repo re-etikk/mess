@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -144,26 +145,66 @@ export async function GET(req: NextRequest) {
           };
         });
 
-      // Group menus by slot for mobile app
+      // Merge platformStore plans
+      for (const [, sp] of platformStore.plans.entries()) {
+        if (sp.provider_id === pId && sp.is_active !== false) {
+          if (!pPlans.some((p) => p.id === sp.id || p.name.toLowerCase() === sp.name.toLowerCase())) {
+            pPlans.push({
+              id: sp.id,
+              provider_id: pId,
+              name: sp.name,
+              description: sp.description,
+              plan_type: sp.plan_type,
+              duration_days: sp.duration_days,
+              duration_months: Math.max(1, Math.round(sp.duration_days / 30)),
+              meal_credits: sp.meal_credits,
+              price_paise: sp.price_paise,
+              price: sp.price_paise / 100,
+            });
+          }
+        }
+      }
+
+      // Group menus by slot for mobile app, merging platformStore dishes
       const menus = pSlots.map((slot) => {
+        const slotNameUpper = slot.name.toUpperCase();
+        const storeMenu = platformStore.menus.get(`${pId}_Daily_${slotNameUpper}`);
         const slotItems = pItems.filter((item) =>
           item.meal_slot_id === slot.id ||
           (item.description && item.description.toLowerCase().includes(slot.name.toLowerCase()))
         );
 
+        const dbIncluded = slotItems.filter((item) => !item.is_add_on).map((item) => item.name);
+        const storeIncluded = storeMenu?.items_included || [];
+        const combinedIncluded = Array.from(new Set([...dbIncluded, ...storeIncluded]));
+
+        const dbExtra = slotItems.filter((item) => item.is_add_on).map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: Number(item.price_paise || 0) / 100,
+          price_paise: Number(item.price_paise || 0),
+        }));
+        const storeExtra = (storeMenu?.items_extra || []).map((e) => ({
+          id: `ext-${e.name.toLowerCase().replace(/\s+/g, '-')}`,
+          name: e.name,
+          price: e.price || 30,
+          price_paise: Math.round((e.price || 30) * 100),
+        }));
+        const combinedExtra = [...dbExtra];
+        for (const se of storeExtra) {
+          if (!combinedExtra.some((x) => x.name.toLowerCase() === se.name.toLowerCase())) {
+            combinedExtra.push(se);
+          }
+        }
+
         return {
           id: slot.id,
-          slot: slot.name.toUpperCase(),
+          slot: slotNameUpper,
           slot_id: slot.id,
           starts_at_local: slot.starts_at_local,
           ends_at_local: slot.ends_at_local,
-          items_included: slotItems.filter((item) => !item.is_add_on).map((item) => item.name),
-          items_extra: slotItems.filter((item) => item.is_add_on).map((item) => ({
-            id: item.id,
-            name: item.name,
-            price: Number(item.price_paise || 0) / 100,
-            price_paise: Number(item.price_paise || 0),
-          })),
+          items_included: combinedIncluded,
+          items_extra: combinedExtra,
           items: slotItems,
         };
       });
