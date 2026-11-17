@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/animations/thali_animations.dart';
 import '../services/provider_api_service.dart';
 
 const Color ink = Color(0xFF182435);
@@ -411,7 +412,7 @@ class _CustomerChatsScreenState extends State<CustomerChatsScreen> {
           ),
           Expanded(
             child: _loadingMessages
-                ? const Center(child: CircularProgressIndicator(color: orange))
+                ? const Center(child: SpinnerArc(size: 36, color: orange))
                 : _messages.isEmpty
                     ? Center(
                         child: Text('No messages with $customerName yet.', style: const TextStyle(color: muted)),

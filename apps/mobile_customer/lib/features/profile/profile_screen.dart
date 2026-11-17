@@ -10,6 +10,7 @@ import '../../core/widgets/mess_widgets.dart';
 import '../history/history_screen.dart';
 import '../mess/mess_detail_screen.dart';
 import '../plans/plans_screen.dart';
+import '../gallery/animation_gallery_screen.dart';
 import 'legal_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -126,6 +127,13 @@ class ProfileScreen extends StatelessWidget {
                       final provider = state.activeProvider;
                       if (provider != null) Navigator.push(context, messRoute(MessDetailScreen(provider: provider)));
                     }),
+                    const Divider(height: 1, indent: 54),
+                    _ProfileRow(
+                      icon: Icons.auto_awesome_motion_rounded,
+                      title: 'Animation & Component Gallery',
+                      subtitle: 'Interactive 20-widget animation preview showcase',
+                      onTap: () => Navigator.push(context, messRoute(const AnimationGalleryScreen())),
+                    ),
                     const Divider(height: 1, indent: 54),
                     _ProfileRow(icon: Icons.help_outline_rounded, title: 'Help & support', subtitle: 'Frequently asked questions & ticket assistance', onTap: () => _showHelp(context)),
                     const Divider(height: 1, indent: 54),

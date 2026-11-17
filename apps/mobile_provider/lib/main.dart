@@ -11,6 +11,8 @@ import 'features/payment_settings_screen.dart';
 import 'features/notifications_screen.dart';
 import 'features/customer_chats_screen.dart';
 import 'features/settlements_screen.dart';
+import 'features/animation_gallery_screen.dart';
+import 'core/animations/thali_animations.dart';
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -40,11 +42,15 @@ class MessProviderApp extends StatefulWidget {
 
 class _MessProviderAppState extends State<MessProviderApp> {
   ProviderSession? _session;
+  bool _showingSplash = true;
 
   @override
   void initState() {
     super.initState();
     _session = widget.initialSession;
+    Future.delayed(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _showingSplash = false);
+    });
   }
 
   @override
@@ -88,24 +94,63 @@ class _MessProviderAppState extends State<MessProviderApp> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
-      home: _session == null
-          ? ProviderLoginScreen(
-              onLoginSuccess: (session) => setState(() => _session = session),
-              onRegister: () {
-                appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
-                  builder: (_) => ProviderOnboardingScreen(
-                    onComplete: (session) => setState(() => _session = session),
+      home: _showingSplash
+          ? const Scaffold(
+              backgroundColor: cream,
+              body: SafeArea(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      InfinityTrail(
+                        size: 64,
+                        color: orange,
+                        strokeWidth: 3.5,
+                      ),
+                      SizedBox(height: 24),
+                      TextShimmer(
+                        text: 'THALI PARTNER',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2.5,
+                          color: ink,
+                        ),
+                        shimmerColor: orange,
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        'KITCHEN PARTNER HUB',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.5,
+                          color: muted,
+                        ),
+                      ),
+                    ],
                   ),
-                ));
-              },
+                ),
+              ),
             )
-          : ProviderShell(
-              session: _session!,
-              onSignOut: () async {
-                await ProviderApiService.clearSession();
-                setState(() => _session = null);
-              },
-            ),
+          : _session == null
+              ? ProviderLoginScreen(
+                  onLoginSuccess: (session) => setState(() => _session = session),
+                  onRegister: () {
+                    appNavigatorKey.currentState?.push<void>(MaterialPageRoute<void>(
+                      builder: (_) => ProviderOnboardingScreen(
+                        onComplete: (session) => setState(() => _session = session),
+                      ),
+                    ));
+                  },
+                )
+              : ProviderShell(
+                  session: _session!,
+                  onSignOut: () async {
+                    await ProviderApiService.clearSession();
+                    setState(() => _session = null);
+                  },
+                ),
     );
   }
 }
@@ -858,7 +903,34 @@ class _ProviderOverviewState extends State<ProviderOverview> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: orange));
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+        children: [
+          const IndeterminateBar(color: orange, height: 4),
+          const SizedBox(height: 16),
+          const SkeletonShimmer(width: 220, height: 24),
+          const SizedBox(height: 8),
+          const SkeletonShimmer(width: 150, height: 14),
+          const SizedBox(height: 18),
+          const SkeletonShimmer(height: 68, borderRadius: BorderRadius.all(Radius.circular(16))),
+          const SizedBox(height: 14),
+          Row(
+            children: const [
+              Expanded(child: SkeletonShimmer(height: 100, borderRadius: BorderRadius.all(Radius.circular(16)))),
+              SizedBox(width: 10),
+              Expanded(child: SkeletonShimmer(height: 100, borderRadius: BorderRadius.all(Radius.circular(16)))),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: const [
+              Expanded(child: SkeletonShimmer(height: 100, borderRadius: BorderRadius.all(Radius.circular(16)))),
+              SizedBox(width: 10),
+              Expanded(child: SkeletonShimmer(height: 100, borderRadius: BorderRadius.all(Radius.circular(16)))),
+            ],
+          ),
+        ],
+      );
     }
     if (_error != null) {
       return Center(
@@ -1212,7 +1284,7 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
                   ]),
                   const SizedBox(height: 20),
                   if (loading)
-                    const SizedBox(height: 220, child: Center(child: CircularProgressIndicator(color: orange)))
+                    const SizedBox(height: 220, child: Center(child: SpinnerArc(color: orange, size: 42)))
                   else if (error != null)
                     SizedBox(
                       height: 220,
@@ -1227,19 +1299,33 @@ class _DailyQrScreenState extends State<DailyQrScreen> {
                       ),
                     )
                   else
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: line),
-                      ),
-                      child: QrImageView(
-                        data: qrToken ?? '',
-                        version: QrVersions.auto,
-                        size: 220,
-                        backgroundColor: Colors.white,
-                      ),
+                    Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Positioned.fill(
+                          child: Center(
+                            child: PulseRings(
+                              size: 260,
+                              color: orange.withOpacity(0.35),
+                              ringCount: 2,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: line),
+                          ),
+                          child: QrImageView(
+                            data: qrToken ?? '',
+                            version: QrVersions.auto,
+                            size: 220,
+                            backgroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
                   const SizedBox(height: 14),
                   const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -2152,6 +2238,7 @@ class MoreManagementScreen extends StatelessWidget {
           MoreMenuTile(icon: Icons.fact_check_outlined, title: 'Meal Redemptions Log', subtitle: 'Real-time scan logs and attendance records', onTap: () => onSelect('Attendance')),
           MoreMenuTile(icon: Icons.account_balance_wallet_outlined, title: 'Settlement & Payouts', subtitle: 'Platform scan billing and payout summary', onTap: () => onSelect('Earnings')),
           MoreMenuTile(icon: Icons.support_agent_outlined, title: 'Help & Support Desk', subtitle: 'Submit issues and feedback directly to support', onTap: () => onSelect('Support')),
+          MoreMenuTile(icon: Icons.auto_awesome_motion_outlined, title: 'Animation & Component Gallery', subtitle: 'Interactive 20-widget animation preview showcase', onTap: () => onSelect('Animations')),
           MoreMenuTile(icon: Icons.store_mall_directory_outlined, title: 'Mess Profile & Details', subtitle: session.businessName, onTap: () => onSelect('Business profile')),
           const SizedBox(height: 18),
           OutlinedButton.icon(
@@ -3344,6 +3431,9 @@ class _MoreDetailScreenState extends State<MoreDetailScreen> {
           ],
         );
 
+      case 'Animations':
+        return const AnimationGalleryScreen();
+
       case 'Attendance':
         return _detailScaffold(
           context,
@@ -3592,7 +3682,22 @@ class MetricCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(13),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Container(width: 34, height: 34, decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 19, color: ink)),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                if (title == 'Today’s meals')
+                  Positioned.fill(
+                    child: Center(
+                      child: GradientRing(
+                        size: 38,
+                        strokeWidth: 2,
+                        colors: [orange, orange.withOpacity(0.15), orange],
+                      ),
+                    ),
+                  ),
+                Container(width: 34, height: 34, decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(10)), child: Icon(icon, size: 19, color: ink)),
+              ],
+            ),
             const SizedBox(height: 12),
             Text(title, style: const TextStyle(color: muted, fontSize: 12)),
             const SizedBox(height: 4),

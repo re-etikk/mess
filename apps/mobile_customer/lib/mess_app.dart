@@ -6,6 +6,7 @@ import 'core/widgets/app_state_scope.dart';
 import 'core/widgets/mess_widgets.dart';
 import 'features/auth/login_screen.dart';
 import 'features/home/home_shell.dart';
+import 'features/splash/splash_screen.dart';
 
 class MessApp extends StatelessWidget {
   const MessApp({super.key, required this.appState});
@@ -19,7 +20,7 @@ class MessApp extends StatelessWidget {
         title: 'MESS | Your Meals, Your Choice',
         debugShowCheckedModeBanner: false,
         theme: ThaliTheme.light,
-        home: const _MessRootGate(),
+        home: const SplashScreen(),
         onGenerateRoute: (settings) {
           if (settings.name == '/login') return messRoute(const LoginScreen());
           return null;
@@ -29,8 +30,8 @@ class MessApp extends StatelessWidget {
   }
 }
 
-class _MessRootGate extends StatelessWidget {
-  const _MessRootGate();
+class MessRootGate extends StatelessWidget {
+  const MessRootGate({super.key});
 
   @override
   Widget build(BuildContext context) {

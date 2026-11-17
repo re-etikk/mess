@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/animations/thali_animations.dart';
 import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -169,7 +170,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
-          icon: const Icon(Icons.check_circle_rounded, color: MessColors.green, size: 48),
+          icon: const BouncingBall(color: MessColors.green, size: 52),
           title: const Text('Meal Verified & Redeemed!'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -387,11 +388,28 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                     if (barcode?.rawValue != null) _handlePayload(barcode!.rawValue!);
                   },
                 ),
+                Positioned.fill(
+                  child: Center(
+                    child: IgnorePointer(
+                      child: PulseRings(
+                        size: 180,
+                        color: MessColors.orange.withOpacity(0.65),
+                        ringCount: 2,
+                      ),
+                    ),
+                  ),
+                ),
                 IgnorePointer(child: CustomPaint(painter: _ScanOverlayPainter())),
                 if (_processing)
                   Container(
                     color: Colors.black54,
-                    child: const Center(child: CircularProgressIndicator(color: MessColors.orange)),
+                    child: const Center(
+                      child: ChasingSquare(
+                        size: 54,
+                        color: MessColors.orange,
+                        strokeWidth: 3.0,
+                      ),
+                    ),
                   ),
               ]),
             ),

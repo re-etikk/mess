@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/animations/thali_animations.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -106,16 +107,51 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             if (provider == null)
-              const SliverPadding(
-                padding: EdgeInsets.fromLTRB(18, 24, 18, 24),
-                sliver: SliverToBoxAdapter(
-                  child: EmptyState(
-                    icon: Icons.storefront_outlined,
-                    title: 'No Registered Messes Nearby',
-                    message: 'No active mess services found in this area. Once kitchen partners register their mess, they will appear here.',
+              if (!_loaded)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: MessColors.border),
+                        ),
+                        child: const Row(
+                          children: [
+                            SkeletonShimmer(width: 48, height: 48, borderRadius: BorderRadius.all(Radius.circular(12))),
+                            SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SkeletonShimmer(width: 130, height: 14),
+                                  SizedBox(height: 8),
+                                  SkeletonShimmer(width: 80, height: 10),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      childCount: 3,
+                    ),
                   ),
-                ),
-              )
+                )
+              else
+                const SliverPadding(
+                  padding: EdgeInsets.fromLTRB(18, 24, 18, 24),
+                  sliver: SliverToBoxAdapter(
+                    child: EmptyState(
+                      icon: Icons.storefront_outlined,
+                      title: 'No Registered Messes Nearby',
+                      message: 'No active mess services found in this area. Once kitchen partners register their mess, they will appear here.',
+                    ),
+                  ),
+                )
             else ...[
               if (!provider.isOpen)
                 SliverPadding(
@@ -330,8 +366,14 @@ class _SubscriptionCard extends StatelessWidget {
         decoration: BoxDecoration(color: MessColors.navy, borderRadius: BorderRadius.circular(18), boxShadow: const [BoxShadow(color: Color(0x15111F2C), blurRadius: 14, offset: Offset(0, 7))]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Container(width: 7, height: 7, decoration: const BoxDecoration(color: Color(0xFF31C476), shape: BoxShape.circle)),
-            const SizedBox(width: 7),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                GradientRing(size: 16, strokeWidth: 2, colors: [const Color(0xFF31C476), const Color(0xFF31C476).withOpacity(0.2), const Color(0xFF31C476)]),
+                Container(width: 6, height: 6, decoration: const BoxDecoration(color: Color(0xFF31C476), shape: BoxShape.circle)),
+              ],
+            ),
+            const SizedBox(width: 8),
             Text(eligible ? 'ACTIVE SUBSCRIPTION' : 'MEALS USED UP · RENEW TO SCAN', style: const TextStyle(color: Color(0xFFC8D0D6), fontSize: 10, letterSpacing: 1.0, fontWeight: FontWeight.w700)),
             const Spacer(),
             const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 15),
@@ -345,10 +387,17 @@ class _SubscriptionCard extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(total == null ? 'Access plan' : '$remaining / $total meals remaining', style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
-                if (total != null) ...[const SizedBox(height: 7), ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: ratio, minHeight: 6, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation(MessColors.orange)))],
+                if (total != null) ...[
+                  const SizedBox(height: 8),
+                  PercentBar(percent: ratio, height: 6, color: MessColors.orange, backgroundColor: Colors.white24),
+                ],
               ]),
             ),
-            const SizedBox(width: 18),
+            if (total != null) ...[
+              const SizedBox(width: 14),
+              LiquidFill(size: 44, fillPercent: ratio, color: MessColors.orange, backgroundColor: Colors.white12, centerText: '$remaining'),
+            ],
+            const SizedBox(width: 16),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('VALID UNTIL', style: TextStyle(color: Color(0xFFABB7C0), fontSize: 9, letterSpacing: .8, fontWeight: FontWeight.w700)),
               const SizedBox(height: 3),
