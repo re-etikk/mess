@@ -18,7 +18,10 @@ class HttpMessRepository implements MessRepository {
   Future<List<MessProvider>> getProviders() async {
     try {
       final uri = Uri.parse('$baseUrl/api/mess/search');
-      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      final response = await http.get(
+        uri,
+        headers: {'Cache-Control': 'no-cache, no-store'},
+      ).timeout(const Duration(seconds: 12));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = jsonDecode(response.body);
@@ -39,7 +42,10 @@ class HttpMessRepository implements MessRepository {
     try {
       final qParam = query.trim().isNotEmpty ? '?q=${Uri.encodeComponent(query.trim())}' : '';
       final uri = Uri.parse('$baseUrl/api/mess/search$qParam');
-      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      final response = await http.get(
+        uri,
+        headers: {'Cache-Control': 'no-cache, no-store'},
+      ).timeout(const Duration(seconds: 12));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final data = jsonDecode(response.body);
@@ -74,8 +80,8 @@ class HttpMessRepository implements MessRepository {
       final menuUri = Uri.parse('$baseUrl/api/provider/menu?provider_id=$providerId');
       final plansUri = Uri.parse('$baseUrl/api/provider/plans?provider_id=$providerId');
       final results = await Future.wait([
-        http.get(menuUri).timeout(const Duration(seconds: 10)),
-        http.get(plansUri).timeout(const Duration(seconds: 10)),
+        http.get(menuUri, headers: {'Cache-Control': 'no-cache, no-store'}).timeout(const Duration(seconds: 10)),
+        http.get(plansUri, headers: {'Cache-Control': 'no-cache, no-store'}).timeout(const Duration(seconds: 10)),
       ]);
 
       final menuRes = results[0];
@@ -351,17 +357,22 @@ class HttpMessRepository implements MessRepository {
       );
     } else {
       final message = data['message']?.toString() ?? data['error']?.toString() ?? 'Meal redemption failed.';
+      final codeRaw = (data['code']?.toString() ?? '').toLowerCase();
       String code = 'invalid_qr';
-      if (message.toLowerCase().contains('already redeemed')) {
+      if (codeRaw == 'already_redeemed' || message.toLowerCase().contains('already redeemed')) {
         code = 'duplicate_redemption';
-      } else if (message.toLowerCase().contains('no active subscription') ||
+      } else if (codeRaw == 'no_active_subscription' ||
+          codeRaw == 'plan_unavailable' ||
+          codeRaw == 'daily_limit_reached' ||
+          message.toLowerCase().contains('entitlement') ||
+          message.toLowerCase().contains('no active subscription') ||
           message.toLowerCase().contains('no meal credits') ||
           message.toLowerCase().contains('pass found') ||
           message.toLowerCase().contains('renew')) {
         code = 'no_entitlement';
-      } else if (message.toLowerCase().contains('closed') || message.toLowerCase().contains('off today')) {
+      } else if (codeRaw == 'mess_closed' || message.toLowerCase().contains('closed') || message.toLowerCase().contains('off today')) {
         code = 'mess_closed';
-      } else if (message.toLowerCase().contains('expired')) {
+      } else if (codeRaw == 'qr_expired' || message.toLowerCase().contains('expired')) {
         code = 'expired_qr';
       }
       throw RepositoryException(message, code: code);

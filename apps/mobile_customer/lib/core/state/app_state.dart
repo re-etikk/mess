@@ -159,6 +159,7 @@ class AppState extends ChangeNotifier {
     if (_cachedProviders.isNotEmpty && (selectedProviderId.isEmpty || !_cachedProviders.any((p) => p.id == selectedProviderId))) {
       selectedProviderId = _cachedProviders.first.id;
     }
+    notifyListeners();
     return providers;
   }
 

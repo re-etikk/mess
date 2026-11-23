@@ -191,7 +191,7 @@ export async function GET(req: NextRequest) {
 
         const dbIncluded = slotItems.filter((item) => !item.is_add_on).map((item) => item.name);
         const storeIncluded = storeMenu?.items_included || [];
-        const combinedIncluded = Array.from(new Set([...dbIncluded, ...storeIncluded]));
+        const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeIncluded;
 
         const dbExtra = slotItems.filter((item) => item.is_add_on).map((item) => ({
           id: item.id,
@@ -205,12 +205,7 @@ export async function GET(req: NextRequest) {
           price: e.price || 30,
           price_paise: Math.round((e.price || 30) * 100),
         }));
-        const combinedExtra = [...dbExtra];
-        for (const se of storeExtra) {
-          if (!combinedExtra.some((x) => x.name.toLowerCase() === se.name.toLowerCase())) {
-            combinedExtra.push(se);
-          }
-        }
+        const combinedExtra = dbExtra.length > 0 ? dbExtra : storeExtra;
 
         return {
           id: slot.id,

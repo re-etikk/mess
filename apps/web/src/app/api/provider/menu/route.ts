@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
 
       const dbIncluded = slotItems.filter((item) => !item.is_add_on && item.active !== false).map((item) => item.name);
       const storeIncluded = storeMenu?.items_included || [];
-      const combinedIncluded = Array.from(new Set([...dbIncluded, ...storeIncluded]));
+      const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeIncluded;
 
       const dbExtra = slotItems.filter((item) => item.is_add_on && item.active !== false).map((item) => ({
         id: item.id,
@@ -107,16 +107,11 @@ export async function GET(req: NextRequest) {
         limit: e.limit || 5,
         is_available: e.is_available !== false,
       }));
-      const combinedExtra = [...dbExtra];
-      for (const se of storeExtra) {
-        if (!combinedExtra.some((x) => x.name.toLowerCase() === se.name.toLowerCase())) {
-          combinedExtra.push(se);
-        }
-      }
+      const combinedExtra = dbExtra.length > 0 ? dbExtra : storeExtra;
 
       const dbUnavailable = slotItems.filter((item) => item.active === false).map((item) => item.name);
       const storeUnavailable = storeMenu?.items_unavailable || [];
-      const combinedUnavailable = Array.from(new Set([...dbUnavailable, ...storeUnavailable]));
+      const combinedUnavailable = dbUnavailable.length > 0 ? dbUnavailable : storeUnavailable;
 
       return {
         id: slot.id,

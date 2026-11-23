@@ -1557,15 +1557,20 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         final apiExt = (currentMenu['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
         final apiUnavail = (currentMenu['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
 
-        // Merge with existing items so newly added dishes are never wiped
-        for (final item in apiInc) {
-          if (!itemsIncluded.contains(item)) itemsIncluded.add(item);
-        }
-        for (final ext in apiExt) {
-          if (!itemsExtra.any((x) => x['name'] == ext['name'])) itemsExtra.add(ext);
-        }
-        for (final u in apiUnavail) {
-          if (!itemsUnavailable.contains(u)) itemsUnavailable.add(u);
+        if (apiInc.isNotEmpty || apiExt.isNotEmpty) {
+          itemsIncluded = apiInc;
+          itemsExtra = apiExt;
+          itemsUnavailable = apiUnavail;
+        } else {
+          for (final item in apiInc) {
+            if (!itemsIncluded.contains(item)) itemsIncluded.add(item);
+          }
+          for (final ext in apiExt) {
+            if (!itemsExtra.any((x) => x['name'] == ext['name'])) itemsExtra.add(ext);
+          }
+          for (final u in apiUnavail) {
+            if (!itemsUnavailable.contains(u)) itemsUnavailable.add(u);
+          }
         }
 
         await _saveMenuToCache(slot, itemsIncluded, itemsExtra, itemsUnavailable);

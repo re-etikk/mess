@@ -51,9 +51,19 @@ export async function rejectUnimplementedRedemption(
     }
 
     if (!user && customerIdParam) {
+      const cleanParam = customerIdParam.trim();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (isUuid.test(customerIdParam.trim())) {
-        user = { id: customerIdParam.trim() };
+      if (isUuid.test(cleanParam)) {
+        user = { id: cleanParam };
+      } else if (admin) {
+        try {
+          const { data: profile } = await admin
+            .from('profiles')
+            .select('id')
+            .or(`id.eq.${cleanParam},phone_e164.eq.${cleanParam}`)
+            .maybeSingle();
+          if (profile) user = { id: profile.id };
+        } catch {}
       }
     }
 
@@ -73,12 +83,46 @@ export async function rejectUnimplementedRedemption(
     }
 
     // 3. Attempt atomic stored procedure execution
-    const { data, error } = await admin.rpc('redeem_meal_atomic', {
+    let rpcRes = await admin.rpc('redeem_meal_atomic', {
       p_customer_id: user.id,
       p_provider_id: qrVerification.providerId,
       p_service_date: qrVerification.date,
       p_slot_name: (qrVerification.slot || 'lunch').toLowerCase(),
     });
+
+    // If no active subscription found, check if student has a pending_payment pass/subscription that can be auto-activated
+    if (rpcRes.data && rpcRes.data.success === false && rpcRes.data.code === 'NO_ACTIVE_SUBSCRIPTION') {
+      try {
+        const { data: pendingSub } = await admin
+          .from('subscriptions')
+          .select('id, plan_id, plan_type_snapshot')
+          .eq('customer_id', user.id)
+          .eq('provider_id', qrVerification.providerId)
+          .eq('status', 'pending_payment')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (pendingSub) {
+          await admin
+            .from('subscriptions')
+            .update({ status: 'active', updated_at: new Date().toISOString() })
+            .eq('id', pendingSub.id);
+
+          // Retry atomic redemption with newly activated subscription
+          rpcRes = await admin.rpc('redeem_meal_atomic', {
+            p_customer_id: user.id,
+            p_provider_id: qrVerification.providerId,
+            p_service_date: qrVerification.date,
+            p_slot_name: (qrVerification.slot || 'lunch').toLowerCase(),
+          });
+        }
+      } catch (err) {
+        console.warn('Pending subscription check failed:', err);
+      }
+    }
+
+    const { data, error } = rpcRes;
 
     if (error) {
       // If RPC is missing on the database, fail closed safely

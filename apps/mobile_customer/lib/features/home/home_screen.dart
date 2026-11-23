@@ -21,10 +21,23 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
   List<MessProvider> _providers = [];
   bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadProviders();
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -58,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
   }
@@ -76,19 +90,24 @@ class _HomeScreenState extends State<HomeScreen> {
         final menuSlot = provider != null ? _featuredSlot(provider, now) : null;
         final nearby = provider != null ? _providers.where((item) => item.id != provider.id).toList() : <MessProvider>[];
 
-        return CustomScrollView(
-          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-              sliver: SliverToBoxAdapter(
-                child: _Header(
-                  location: state.location,
-                  onLocationTap: () => _showLocationPicker(context, state),
-                  onNotifications: () => _showNotifications(context),
+        return RefreshIndicator(
+          color: MessColors.orange,
+          backgroundColor: Colors.white,
+          onRefresh: _loadProviders,
+          child: CustomScrollView(
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                sliver: SliverToBoxAdapter(
+                  child: _Header(
+                    location: state.location,
+                    onLocationTap: () => _showLocationPicker(context, state),
+                    onRefresh: _loadProviders,
+                    onNotifications: () => _showNotifications(context),
+                  ),
                 ),
               ),
-            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(18, 17, 18, 0),
               sliver: SliverToBoxAdapter(child: _SearchBar(onTap: () => state.selectTab(1))),
@@ -293,7 +312,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ],
           ],
-        );
+        ),
+      );
       },
     );
   }
@@ -309,10 +329,17 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.location, required this.onLocationTap, required this.onNotifications});
+  const _Header({
+    required this.location,
+    required this.onLocationTap,
+    required this.onRefresh,
+    required this.onNotifications,
+  });
   final String location;
   final VoidCallback onLocationTap;
+  final VoidCallback onRefresh;
   final VoidCallback onNotifications;
+
   @override
   Widget build(BuildContext context) => Row(children: [
         const MessLogo(compact: true),
@@ -332,6 +359,19 @@ class _Header extends StatelessWidget {
               const SizedBox(width: 4),
               const Icon(Icons.keyboard_arrow_down_rounded, size: 19),
             ]),
+          ),
+        ),
+        const SizedBox(width: 7),
+        PressScale(
+          onTap: onRefresh,
+          child: Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MessColors.border),
+            ),
+            child: const Icon(Icons.refresh_rounded, size: 22, color: MessColors.orange),
           ),
         ),
         const SizedBox(width: 7),
