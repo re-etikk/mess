@@ -91,6 +91,8 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
       final q = await state.getUpgradeQuote(
         subscriptionId: widget.subscription.id,
         targetPlanId: targetPlan.id,
+        currentSub: widget.subscription,
+        targetPlan: targetPlan,
       );
       if (mounted) setState(() => _quote = q);
     } catch (e) {
@@ -109,6 +111,8 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
         paymentMode: _paymentMode,
         receiptUrl: _receiptCtrl.text.trim(),
         utrReference: _utrCtrl.text.trim(),
+        currentSub: widget.subscription,
+        targetPlan: _selectedPlan,
       );
       if (!mounted) return;
       Navigator.pop(context);

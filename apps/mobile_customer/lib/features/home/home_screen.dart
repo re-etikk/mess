@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/models/app_notification.dart';
 import '../../core/animations/thali_animations.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
@@ -102,6 +103,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 sliver: SliverToBoxAdapter(
                   child: _Header(
                     location: state.location,
+                    unreadCount: state.unreadNotificationsCount,
                     onLocationTap: () => _showLocationPicker(context, state),
                     onRefresh: _loadProviders,
                     onNotifications: () => _showNotifications(context),
@@ -334,11 +336,13 @@ class _Header extends StatelessWidget {
     required this.onLocationTap,
     required this.onRefresh,
     required this.onNotifications,
+    this.unreadCount = 0,
   });
   final String location;
   final VoidCallback onLocationTap;
   final VoidCallback onRefresh;
   final VoidCallback onNotifications;
+  final int unreadCount;
 
   @override
   Widget build(BuildContext context) => Row(children: [
@@ -375,7 +379,42 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 7),
-        PressScale(onTap: onNotifications, child: const Padding(padding: EdgeInsets.all(7), child: Icon(Icons.notifications_none_rounded, size: 25, color: MessColors.navy))),
+        PressScale(
+          onTap: onNotifications,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: MessColors.border),
+                ),
+                child: const Icon(Icons.notifications_none_rounded, size: 22, color: MessColors.navy),
+              ),
+              if (unreadCount > 0)
+                Positioned(
+                  top: -3,
+                  right: -3,
+                  child: Container(
+                    padding: const EdgeInsets.all(3.5),
+                    decoration: const BoxDecoration(
+                      color: MessColors.orange,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Center(
+                      child: Text(
+                        unreadCount > 9 ? '9+' : '$unreadCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ]);
 }
 
@@ -902,19 +941,193 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
   }
 }
 
-void _showNotifications(BuildContext context) => showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => const SafeArea(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: EmptyState(
-            icon: Icons.notifications_none_rounded,
-            title: 'You’re all caught up',
-            message: 'Subscription updates and meal reminders will appear here.',
-          ),
-        ),
-      ),
-    );
+void _showNotifications(BuildContext context) {
+  final state = AppStateScope.of(context, listen: false);
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (ctx) {
+      return AnimatedBuilder(
+        animation: state,
+        builder: (context, _) {
+          final notifs = state.notifications;
+          final unread = state.unreadNotificationsCount;
+          return SafeArea(
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.75,
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF0E5),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.notifications_active_rounded, color: MessColors.orange, size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Notifications',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.navy),
+                      ),
+                      const Spacer(),
+                      if (unread > 0)
+                        TextButton(
+                          onPressed: () => state.markAllNotificationsRead(),
+                          child: const Text('Mark all read', style: TextStyle(color: MessColors.orange, fontWeight: FontWeight.w700, fontSize: 13)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (notifs.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: EmptyState(
+                        icon: Icons.notifications_none_rounded,
+                        title: 'All caught up!',
+                        message: 'Meal check-ins, subscription approvals, and alerts will appear here.',
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: notifs.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 48),
+                        itemBuilder: (ctx, i) {
+                          final n = notifs[i];
+                          Color iconColor;
+                          Color bgColor;
+                          IconData iconData;
+                          switch (n.type) {
+                            case NotificationType.redemption:
+                              iconColor = const Color(0xFFD9381E);
+                              bgColor = const Color(0xFFFDECE9);
+                              iconData = Icons.restaurant_rounded;
+                              break;
+                            case NotificationType.subscription:
+                              iconColor = const Color(0xFF1E8E3E);
+                              bgColor = const Color(0xFFE6F4EA);
+                              iconData = Icons.verified_rounded;
+                              break;
+                            case NotificationType.upgrade:
+                              iconColor = const Color(0xFF7B1FA2);
+                              bgColor = const Color(0xFFF3E5F5);
+                              iconData = Icons.bolt_rounded;
+                              break;
+                            case NotificationType.menu:
+                              iconColor = const Color(0xFFE65100);
+                              bgColor = const Color(0xFFFFF3E0);
+                              iconData = Icons.menu_book_rounded;
+                              break;
+                            case NotificationType.general:
+                              iconColor = const Color(0xFF1976D2);
+                              bgColor = const Color(0xFFE3F2FD);
+                              iconData = Icons.notifications_active_rounded;
+                              break;
+                          }
+
+                          return InkWell(
+                            onTap: () => state.markNotificationRead(n.id),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
+                                    child: Icon(iconData, color: iconColor, size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                n.title,
+                                                style: TextStyle(
+                                                  fontWeight: n.isRead ? FontWeight.w600 : FontWeight.w800,
+                                                  fontSize: 14,
+                                                  color: MessColors.navy,
+                                                ),
+                                              ),
+                                            ),
+                                            if (!n.isRead)
+                                              Container(
+                                                width: 8,
+                                                height: 8,
+                                                decoration: const BoxDecoration(
+                                                  color: MessColors.orange,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          n.message,
+                                          style: const TextStyle(fontSize: 12.5, color: MessColors.muted, height: 1.3),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _formatRelativeTime(n.timestamp),
+                                          style: const TextStyle(fontSize: 11, color: Color(0xFF9AA0A6), fontWeight: FontWeight.w500),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+String _formatRelativeTime(DateTime dt) {
+  final diff = DateTime.now().difference(dt);
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${dt.day}/${dt.month}/${dt.year}';
+}
 
 void _showSchedule(BuildContext context, MessProvider provider) => showModalBottomSheet<void>(
       context: context,

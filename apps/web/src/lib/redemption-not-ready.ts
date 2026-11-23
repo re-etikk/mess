@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { verifyCounterQRToken } from '@/lib/crypto';
+import { addPartnerNotification } from '@/lib/partner-notifications';
 
 /**
  * Executes atomic QR redemption if the database RPC is active,
@@ -152,6 +153,15 @@ export async function rejectUnimplementedRedemption(
           { status: 400 }
         );
       }
+      try {
+        addPartnerNotification({
+          provider_id: qrVerification.providerId,
+          type: 'redemption',
+          title: 'Meal Redeemed 🍽️',
+          message: `${user.email?.split('@')[0] || 'Student'} redeemed ${(qrVerification.slot || 'lunch').toUpperCase()}`,
+          customer_name: user.email?.split('@')[0] || 'Student',
+        });
+      } catch (_) {}
       return NextResponse.json({ success: true, ...data }, { status: 200 });
     }
 

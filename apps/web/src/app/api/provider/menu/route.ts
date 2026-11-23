@@ -65,7 +65,15 @@ export async function GET(req: NextRequest) {
     if (slotFilter) {
       itemsQuery = itemsQuery.eq('meal_slot_id', slotFilter);
     }
-    const { data: dbItems, error: itemsError } = await itemsQuery.order('name'); if (itemsError) console.error('Menu items query error:', itemsError.message); let items = dbItems ?? []; if (items.length === 0) { const { data: fb } = await client.from('menu_items').select('*').eq('provider_id', providerId); if (fb && fb.length > 0) items = fb; }
+    const { data: dbItems, error: itemsError } = await itemsQuery.order('name');
+    if (itemsError) console.error('Menu items query error:', itemsError.message);
+    let items = (dbItems ?? []).filter((item: any) => !item.name?.toLowerCase().includes('test'));
+    if (items.length === 0) {
+      const { data: fb } = await client.from('menu_items').select('*').eq('provider_id', providerId);
+      if (fb && fb.length > 0) {
+        items = fb.filter((item: any) => !item.name?.toLowerCase().includes('test'));
+      }
+    }
 
     // Merge with platformStore items
     const storeLunchKey = `${providerId}_Daily_LUNCH`;
@@ -87,31 +95,37 @@ export async function GET(req: NextRequest) {
         (item.description && item.description.toLowerCase().includes(slot.name.toLowerCase()))
       );
 
-      const dbIncluded = slotItems.filter((item) => !item.is_add_on && item.active !== false).map((item) => item.name);
-      const storeIncluded = storeMenu?.items_included || [];
-      const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeIncluded;
+      const dbIncluded = slotItems
+        .filter((item) => !item.is_add_on && item.active !== false && !item.name?.toLowerCase().includes('test'))
+        .map((item) => item.name);
+      const storeIncluded = (storeMenu?.items_included || []).filter((name: string) => !name.toLowerCase().includes('test'));
+      const combinedIncluded = storeIncluded.length > 0 ? storeIncluded : dbIncluded;
 
-      const dbExtra = slotItems.filter((item) => item.is_add_on && item.active !== false).map((item) => ({
-        id: item.id,
-        name: item.name,
-        price_paise: Number(item.price_paise || 0),
-        price: Number(item.price_paise || 0) / 100,
-        limit: item.max_quantity || 5,
-        is_available: item.active !== false,
-      }));
-      const storeExtra = (storeMenu?.items_extra || []).map((e) => ({
-        id: `store-extra-${e.name.toLowerCase().replace(/\s+/g, '-')}`,
-        name: e.name,
-        price_paise: Math.round((e.price || 30) * 100),
-        price: e.price || 30,
-        limit: e.limit || 5,
-        is_available: e.is_available !== false,
-      }));
-      const combinedExtra = dbExtra.length > 0 ? dbExtra : storeExtra;
+      const dbExtra = slotItems
+        .filter((item) => item.is_add_on && item.active !== false && !item.name?.toLowerCase().includes('test'))
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          price_paise: Number(item.price_paise || 0),
+          price: Number(item.price_paise || 0) / 100,
+          limit: item.max_quantity || 5,
+          is_available: item.active !== false,
+        }));
+      const storeExtra = (storeMenu?.items_extra || [])
+        .filter((e: any) => !e.name.toLowerCase().includes('test'))
+        .map((e: any) => ({
+          id: `store-extra-${e.name.toLowerCase().replace(/\s+/g, '-')}`,
+          name: e.name,
+          price_paise: Math.round((e.price || 30) * 100),
+          price: e.price || 30,
+          limit: e.limit || 5,
+          is_available: e.is_available !== false,
+        }));
+      const combinedExtra = storeExtra.length > 0 ? storeExtra : dbExtra;
 
       const dbUnavailable = slotItems.filter((item) => item.active === false).map((item) => item.name);
       const storeUnavailable = storeMenu?.items_unavailable || [];
-      const combinedUnavailable = dbUnavailable.length > 0 ? dbUnavailable : storeUnavailable;
+      const combinedUnavailable = (storeUnavailable.length > 0 ? storeUnavailable : dbUnavailable).filter((name: string) => !name.toLowerCase().includes('test'));
 
       return {
         id: slot.id,

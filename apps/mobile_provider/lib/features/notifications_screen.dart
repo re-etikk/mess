@@ -133,13 +133,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               CircleAvatar(
-                                backgroundColor: isPending ? const Color(0xFFFFEDD5) : const Color(0xFFE2E8F0),
+                                backgroundColor: type == 'redemption'
+                                    ? const Color(0xFFFDECE9)
+                                    : (isPending ? const Color(0xFFFFEDD5) : const Color(0xFFE2E8F0)),
                                 radius: 18,
                                 child: Icon(
-                                  type == 'plan_upgrade'
-                                      ? Icons.upgrade_rounded
-                                      : (type == 'pending_payment' ? Icons.payment_outlined : Icons.notifications_outlined),
-                                  color: isPending ? orange : ink,
+                                  type == 'redemption'
+                                      ? Icons.restaurant_rounded
+                                      : (type == 'plan_upgrade'
+                                          ? Icons.upgrade_rounded
+                                          : (type == 'pending_payment' ? Icons.payment_outlined : Icons.notifications_outlined)),
+                                  color: type == 'redemption' ? const Color(0xFFD9381E) : (isPending ? orange : ink),
                                   size: 20,
                                 ),
                               ),

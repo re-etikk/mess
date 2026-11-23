@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mess_models.dart';
+import '../models/app_notification.dart';
 import '../repositories/http_mess_repository.dart';
 import '../repositories/mess_repository.dart';
 import '../services/customer_auth_service.dart';
@@ -32,7 +33,101 @@ class AppState extends ChangeNotifier {
   int currentTab = 0;
   List<MessProvider> _cachedProviders = [];
 
+  static const String _notificationsKey = 'thali_customer_saved_notifications_v1';
+  final List<AppNotification> _notifications = [];
+  List<AppNotification> get notifications => List.unmodifiable(_notifications);
+  int get unreadNotificationsCount => _notifications.where((n) => !n.isRead).length;
+
+  Future<void> _loadNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_notificationsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final list = jsonDecode(raw) as List<dynamic>;
+        _notifications.clear();
+        for (final item in list) {
+          if (item is Map<String, dynamic>) {
+            _notifications.add(AppNotification.fromJson(item));
+          }
+        }
+      }
+      if (_notifications.isEmpty) {
+        _notifications.add(AppNotification(
+          id: 'welcome-01',
+          title: 'Welcome to MESS!',
+          message: 'Explore messes in your area, select your thali pass, and scan at the counter for seamless dining.',
+          timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
+          type: NotificationType.general,
+          isRead: false,
+        ));
+        await _saveNotifications();
+      }
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  Future<void> _saveNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = _notifications.take(50).map((n) => n.toJson()).toList();
+      await prefs.setString(_notificationsKey, jsonEncode(list));
+    } catch (_) {}
+  }
+
+  void addNotification({
+    required String title,
+    required String message,
+    NotificationType type = NotificationType.general,
+    String? actionRoute,
+    Map<String, dynamic>? metadata,
+  }) {
+    final notif = AppNotification(
+      id: 'notif-${DateTime.now().millisecondsSinceEpoch}',
+      title: title,
+      message: message,
+      timestamp: DateTime.now(),
+      type: type,
+      isRead: false,
+      actionRoute: actionRoute,
+      metadata: metadata,
+    );
+    _notifications.insert(0, notif);
+    if (_notifications.length > 50) _notifications.removeLast();
+    _saveNotifications();
+    notifyListeners();
+  }
+
+  void markNotificationRead(String id) {
+    final idx = _notifications.indexWhere((n) => n.id == id);
+    if (idx != -1 && !_notifications[idx].isRead) {
+      _notifications[idx] = _notifications[idx].copyWith(isRead: true);
+      _saveNotifications();
+      notifyListeners();
+    }
+  }
+
+  void markAllNotificationsRead() {
+    bool changed = false;
+    for (int i = 0; i < _notifications.length; i++) {
+      if (!_notifications[i].isRead) {
+        _notifications[i] = _notifications[i].copyWith(isRead: true);
+        changed = true;
+      }
+    }
+    if (changed) {
+      _saveNotifications();
+      notifyListeners();
+    }
+  }
+
+  void clearNotifications() {
+    _notifications.clear();
+    _saveNotifications();
+    notifyListeners();
+  }
+
   Future<void> initSession() async {
+    await _loadNotifications();
     try {
       final prefs = await SharedPreferences.getInstance();
       final str = prefs.getString(_sessionKey);
@@ -285,6 +380,11 @@ class AppState extends ChangeNotifier {
     _dailyMeal = null;
     selectedProviderId = plan.providerId;
     clearAddOns();
+    addNotification(
+      title: 'Pass Activated 🎉',
+      message: 'Your ${plan.name} has been activated. Enjoy healthy, delicious meals!',
+      type: NotificationType.subscription,
+    );
     notifyListeners();
     _persistSession();
     return subscription;
@@ -292,8 +392,18 @@ class AppState extends ChangeNotifier {
 
   Future<Map<String, dynamic>> fetchPaymentSettings(String providerId) => repository.fetchPaymentSettings(providerId);
 
-  Future<Map<String, dynamic>> getUpgradeQuote({required String subscriptionId, required String targetPlanId}) =>
-      repository.getUpgradeQuote(subscriptionId: subscriptionId, targetPlanId: targetPlanId);
+  Future<Map<String, dynamic>> getUpgradeQuote({
+    required String subscriptionId,
+    required String targetPlanId,
+    ActiveSubscription? currentSub,
+    MealPlan? targetPlan,
+  }) =>
+      repository.getUpgradeQuote(
+        subscriptionId: subscriptionId,
+        targetPlanId: targetPlanId,
+        currentSub: currentSub,
+        targetPlan: targetPlan,
+      );
 
   Future<Map<String, dynamic>> requestPlanUpgrade({
     required String subscriptionId,
@@ -301,14 +411,25 @@ class AppState extends ChangeNotifier {
     String paymentMode = 'counter_cash',
     String? receiptUrl,
     String? utrReference,
-  }) =>
-      repository.requestPlanUpgrade(
-        subscriptionId: subscriptionId,
-        targetPlanId: targetPlanId,
-        paymentMode: paymentMode,
-        receiptUrl: receiptUrl,
-        utrReference: utrReference,
-      );
+    ActiveSubscription? currentSub,
+    MealPlan? targetPlan,
+  }) async {
+    final res = await repository.requestPlanUpgrade(
+      subscriptionId: subscriptionId,
+      targetPlanId: targetPlanId,
+      paymentMode: paymentMode,
+      receiptUrl: receiptUrl,
+      utrReference: utrReference,
+      currentSub: currentSub,
+      targetPlan: targetPlan,
+    );
+    addNotification(
+      title: 'Upgrade Requested ⚡',
+      message: 'Upgrade to ${targetPlan?.name ?? "selected plan"} requested. Complete payment at counter to switch.',
+      type: NotificationType.upgrade,
+    );
+    return res;
+  }
 
   Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) => purchasePlan(plan);
 
@@ -320,6 +441,11 @@ class AppState extends ChangeNotifier {
     _dailyMeal = entitlement;
     selectedProviderId = plan.providerId;
     clearAddOns();
+    addNotification(
+      title: 'Daily Meal Token Ready 🍛',
+      message: 'One-time meal token generated for ${slotId.toUpperCase()}. Scan counter QR to dine.',
+      type: NotificationType.subscription,
+    );
     notifyListeners();
     return entitlement;
   }
@@ -366,6 +492,12 @@ class AppState extends ChangeNotifier {
       );
     }
     if (_dailyMeal != null) _dailyMeal = null;
+
+    addNotification(
+      title: 'Meal Redeemed! 🍽️',
+      message: 'Successfully checked in for $slotName at ${redemption.providerName}. Bon appétit!',
+      type: NotificationType.redemption,
+    );
 
     notifyListeners();
     _persistSession();

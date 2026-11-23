@@ -805,9 +805,9 @@ class _ProviderShellState extends State<ProviderShell> {
               icon: const Icon(Icons.refresh_rounded, color: orange),
             ),
             IconButton(
-              tooltip: 'Pending Approvals & Notifications',
+              tooltip: 'Partner Notifications',
               onPressed: () => setState(() {
-                detail = 'PendingApprovals';
+                detail = 'Notifications';
               }),
               icon: const Icon(Icons.notifications_outlined, color: ink),
             ),
@@ -1537,9 +1537,18 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
       final cached = prefs.getString(_menuCacheKey(slot));
       if (cached != null && cached.isNotEmpty) {
         final decoded = jsonDecode(cached);
-        itemsIncluded = (decoded['items_included'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
-        itemsExtra = (decoded['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
-        itemsUnavailable = (decoded['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+        itemsIncluded = (decoded['items_included'] as List<dynamic>? ?? [])
+            .map((e) => e.toString())
+            .where((x) => !x.toLowerCase().contains('test'))
+            .toList();
+        itemsExtra = (decoded['items_extra'] as List<dynamic>? ?? [])
+            .map((e) => e as Map<String, dynamic>)
+            .where((x) => !(x['name']?.toString().toLowerCase().contains('test') ?? false))
+            .toList();
+        itemsUnavailable = (decoded['items_unavailable'] as List<dynamic>? ?? [])
+            .map((e) => e.toString())
+            .where((x) => !x.toLowerCase().contains('test'))
+            .toList();
         loading = false;
       }
     } catch (_) {}
@@ -1553,9 +1562,18 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
         orElse: () => null,
       );
       if (currentMenu != null) {
-        final apiInc = (currentMenu['items_included'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
-        final apiExt = (currentMenu['items_extra'] as List<dynamic>? ?? []).map((e) => e as Map<String, dynamic>).toList();
-        final apiUnavail = (currentMenu['items_unavailable'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
+        final apiInc = (currentMenu['items_included'] as List<dynamic>? ?? [])
+            .map((e) => e.toString())
+            .where((x) => !x.toLowerCase().contains('test'))
+            .toList();
+        final apiExt = (currentMenu['items_extra'] as List<dynamic>? ?? [])
+            .map((e) => e as Map<String, dynamic>)
+            .where((x) => !(x['name']?.toString().toLowerCase().contains('test') ?? false))
+            .toList();
+        final apiUnavail = (currentMenu['items_unavailable'] as List<dynamic>? ?? [])
+            .map((e) => e.toString())
+            .where((x) => !x.toLowerCase().contains('test'))
+            .toList();
 
         if (apiInc.isNotEmpty || apiExt.isNotEmpty) {
           itemsIncluded = apiInc;

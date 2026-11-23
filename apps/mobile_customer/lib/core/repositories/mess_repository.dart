@@ -15,13 +15,20 @@ abstract interface class MessRepository {
   });
   Future<DailyMealEntitlement> purchaseDailyMeal({required MealPlan plan, required String slotId, required String customerId});
   Future<Map<String, dynamic>> fetchPaymentSettings(String providerId);
-  Future<Map<String, dynamic>> getUpgradeQuote({required String subscriptionId, required String targetPlanId});
+  Future<Map<String, dynamic>> getUpgradeQuote({
+    required String subscriptionId,
+    required String targetPlanId,
+    ActiveSubscription? currentSub,
+    MealPlan? targetPlan,
+  });
   Future<Map<String, dynamic>> requestPlanUpgrade({
     required String subscriptionId,
     required String targetPlanId,
     String paymentMode = 'counter_cash',
     String? receiptUrl,
     String? utrReference,
+    ActiveSubscription? currentSub,
+    MealPlan? targetPlan,
   });
 }
 
