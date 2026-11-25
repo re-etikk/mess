@@ -1,64 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-
-class ProviderSession {
-  ProviderSession({
-    required this.token,
-    this.refreshToken = '',
-    required this.userId,
-    required this.email,
-    required this.providerId,
-    required this.businessName,
-  });
-
-  final String token;
-  final String refreshToken;
-  final String userId;
-  final String email;
-  final String providerId;
-  final String businessName;
-
-  Map<String, dynamic> toJson() => {
-    'token': token,
-    'refreshToken': refreshToken,
-    'userId': userId,
-    'email': email,
-    'providerId': providerId,
-    'businessName': businessName,
-  };
-
-  factory ProviderSession.fromJson(Map<String, dynamic> json) => ProviderSession(
-    token: json['token'] as String? ?? '',
-    refreshToken: json['refreshToken'] as String? ?? '',
-    userId: json['userId'] as String? ?? '',
-    email: json['email'] as String? ?? '',
-    providerId: json['providerId'] as String? ?? '',
-    businessName: json['businessName'] as String? ?? '',
-  );
-}
-
-class DashboardMetrics {
-  DashboardMetrics({
-    required this.todayScans,
-    required this.totalScans,
-    required this.unbilledScans,
-    required this.activeSubscribers,
-    required this.activePlans,
-    required this.currentSlot,
-    required this.todayDate,
-    required this.recentRedemptions,
-  });
-
-  final int todayScans;
-  final int totalScans;
-  final int unbilledScans;
-  final int activeSubscribers;
-  final int activePlans;
-  final String currentSlot;
-  final String todayDate;
-  final List<Map<String, dynamic>> recentRedemptions;
-}
+import '../models/models.dart';
 
 class ProviderApiService {
   static const String baseUrl = String.fromEnvironment(
@@ -68,17 +11,71 @@ class ProviderApiService {
   static const String supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
   static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
 
-  static Map<String, dynamic> _decodeResponse(http.Response response) {
+  static String friendlyError(
+    Object error, {
+    int? statusCode,
+    String? body,
+    String action = 'load data',
+  }) {
+    final raw = error.toString();
+    final lower = raw.toLowerCase();
+
+    if (lower.contains('socketexception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection reset') ||
+        lower.contains('clientexception')) {
+      return 'No internet connection or unable to reach Thali servers right now. Check your network and pull down to retry.';
+    }
+    if (lower.contains('timeoutexception') || lower.contains('timed out')) {
+      return 'Server took too long to respond while trying to $action. Pull down to retry.';
+    }
+
+    final bodyTrim = (body ?? '').trimLeft().toLowerCase();
+    if (statusCode == 404 ||
+        lower.contains('formatexception') ||
+        bodyTrim.startsWith('<!doctype') ||
+        bodyTrim.startsWith('<html')) {
+      if (statusCode == 404) {
+        return 'This feature is not live on thali.store yet (404). Redeploy the web backend to enable $action.';
+      }
+      return 'Could not $action because the server returned a web page instead of app data. Please redeploy the web backend.';
+    }
+    if (statusCode == 401) {
+      return 'Your partner session expired. Please sign in again.';
+    }
+    if (statusCode == 403) {
+      return 'You do not have permission for this kitchen action.';
+    }
+    if (statusCode == 503) {
+      return 'Database table or server credentials are not configured yet on the backend.';
+    }
+    if (raw.startsWith('Exception: ')) {
+      final clean = raw.substring(11).trim();
+      if (clean.toLowerCase().contains('persisted provider review table')) {
+        return 'Reviews table is missing in Supabase or the web update is not deployed yet. Run the SQL migration and redeploy.';
+      }
+      return clean;
+    }
+    return 'Unable to $action right now. Pull down to refresh.';
+  }
+
+  static Map<String, dynamic> _decodeResponse(http.Response response, {String action = 'load data'}) {
     if (response.statusCode >= 300 && response.statusCode < 400) {
-      throw Exception('The sign-in service redirected the request. Update the app and try again.');
+      throw Exception('The server redirected the request while trying to $action. Please update the app.');
+    }
+    final trimmed = response.body.trimLeft().toLowerCase();
+    if (response.statusCode == 404 || trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
+      throw Exception(friendlyError('HTML/404', statusCode: response.statusCode, body: response.body, action: action));
     }
     try {
       final decoded = jsonDecode(response.body);
       if (decoded is Map<String, dynamic>) return decoded;
-    } on FormatException {
-      // Translate proxy, deployment, and HTML responses into a useful app error.
+    } on FormatException catch (e) {
+      throw Exception(friendlyError(e, statusCode: response.statusCode, body: response.body, action: action));
     }
-    throw Exception('The server returned an unexpected response. Please try again shortly.');
+    throw Exception('Server could not process $action (HTTP ${response.statusCode}). Please try again.');
   }
 
   static ProviderSession? currentSession;
@@ -218,26 +215,37 @@ class ProviderApiService {
     required String password,
     required String address,
     required String city,
+    bool supportsDelivery = false,
+    bool supportsPickup = true,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/auth/register');
-    final response = await http
-        .post(
-          uri,
-          headers: _authHeaders(json: true),
-          body: jsonEncode({
-            'email': email.trim().isNotEmpty ? email.trim() : '${businessName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '')}@mess.in',
-            'password': password.isNotEmpty ? password : 'ProviderPass@123',
-            'role': 'provider',
-            'business_name': businessName.trim(),
-            'name': ownerName.trim(),
-            'phone': phone.trim(),
-            'address': address.trim(),
-            'city': city.trim(),
-          }),
-        )
-        .timeout(const Duration(seconds: 12));
+    if (!email.trim().contains('@') || password.trim().length < 6) {
+      throw Exception('Valid partner email and password (min 6 characters) are required.');
+    }
+    final uri = Uri.parse('$baseUrl/api/provider/register');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'email': email.trim(),
+              'password': password,
+              'business_name': businessName.trim(),
+              'name': ownerName.trim(),
+              'phone': phone.trim(),
+              'address': address.trim(),
+              'city': city.trim(),
+              'supports_delivery': supportsDelivery,
+              'supports_pickup': supportsPickup,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'register your kitchen'));
+    }
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final data = _decodeResponse(response, action: 'register your kitchen');
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
       final user = data['user'] as Map<String, dynamic>? ?? {};
       final provider = data['provider'] as Map<String, dynamic>?;
@@ -284,6 +292,8 @@ class ProviderApiService {
         } catch (_) {}
       }
 
+      final providerObj = data['provider'] as Map<String, dynamic>? ?? {};
+      final rawAvg = metrics['average_rating'];
       return DashboardMetrics(
         todayScans: (metrics['today_scans_count'] as num?)?.toInt() ?? 0,
         totalScans: (metrics['total_scans'] as num?)?.toInt() ?? 0,
@@ -293,6 +303,13 @@ class ProviderApiService {
         currentSlot: (data['current_slot'] as String?) ?? 'LUNCH',
         todayDate: (data['today_date'] as String?) ?? '',
         recentRedemptions: redemptions,
+        pendingCashCount: (metrics['pending_cash_count'] as num?)?.toInt() ?? 0,
+        pendingCashInr: (metrics['pending_cash_inr'] as num?)?.toInt() ?? 0,
+        onlineSettledInr: (metrics['online_settled_inr'] as num?)?.toInt() ?? 0,
+        averageRating: rawAvg != null ? (rawAvg as num).toDouble() : null,
+        reviewsCount: (metrics['reviews_count'] as num?)?.toInt() ?? 0,
+        locality: providerObj['locality']?.toString() ?? '',
+        city: providerObj['city']?.toString() ?? '',
       );
     }
     final data = _decodeResponse(response);
@@ -426,7 +443,7 @@ class ProviderApiService {
     } catch (_) {}
 
     if (localCached.isNotEmpty) return localCached;
-    return {'upi_id': 'thalipay@upi', 'upi_name': 'Mess Counter', 'upi_qr_url': ''};
+    return {'upi_id': '', 'upi_name': '', 'upi_qr_url': ''};
   }
 
   static Future<void> savePaymentSettings({
@@ -723,8 +740,11 @@ class ProviderApiService {
     required String slot,
     int price = 0,
     bool isExtra = false,
+    String dayOfWeek = 'Daily',
+    String itemKind = '',
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/menu');
+    final resolvedKind = itemKind.isNotEmpty ? itemKind : (isExtra ? 'addon' : 'included');
     final headers = {
       'Content-Type': 'application/json',
       if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
@@ -739,7 +759,9 @@ class ProviderApiService {
         'item_name': name,
         'slot': slot.toLowerCase(),
         'price': price,
-        'is_extra': isExtra,
+        'is_extra': isExtra || resolvedKind == 'addon',
+        'day_of_week': dayOfWeek,
+        'item_kind': resolvedKind,
       }),
     ).timeout(const Duration(seconds: 10));
 
@@ -757,7 +779,9 @@ class ProviderApiService {
             'item_name': name,
             'slot': slot.toLowerCase(),
             'price': price,
-            'is_extra': isExtra,
+            'is_extra': isExtra || resolvedKind == 'addon',
+            'day_of_week': dayOfWeek,
+            'item_kind': resolvedKind,
           }),
         ).timeout(const Duration(seconds: 10));
       } catch (_) {}
@@ -996,54 +1020,32 @@ class ProviderApiService {
   static Future<void> updateTimings({
     required String providerId,
     required Map<String, dynamic> timings,
+    bool? supportsDelivery,
+    bool? supportsPickup,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/timings');
-    await http.post(
-      uri,
-      headers: _authHeaders(json: true),
-      body: jsonEncode({
-        'provider_id': providerId,
-        ...timings,
-      }),
-    ).timeout(const Duration(seconds: 10));
-
+    http.Response response;
     try {
-      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
-      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-
-      String to24(String t) {
-        final match = RegExp(r'^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$', caseSensitive: false).firstMatch(t.trim());
-        if (match == null) return t.trim().length == 5 ? '${t.trim()}:00' : '12:00:00';
-        int h = int.parse(match.group(1)!);
-        final m = match.group(2)!;
-        final meridiem = match.group(3)?.toUpperCase();
-        if (meridiem == 'AM' && h == 12) h = 0;
-        if (meridiem == 'PM' && h < 12) h += 12;
-        return '${h.toString().padLeft(2, '0')}:$m:00';
-      }
-
-      for (final slotName in ['breakfast', 'lunch', 'dinner']) {
-        if (timings.containsKey(slotName) && timings[slotName] is Map) {
-          final slotData = timings[slotName] as Map<String, dynamic>;
-          final start = to24(slotData['start']?.toString() ?? '');
-          final end = to24(slotData['end']?.toString() ?? '');
-          await http.patch(
-            Uri.parse('$supabaseUrl/rest/v1/meal_slots?provider_id=eq.$providerId&name=ilike.$slotName'),
-            headers: {
-              'apikey': supabaseKey,
-              'Authorization': 'Bearer $supabaseKey',
-              'Content-Type': 'application/json',
-              'Prefer': 'return=minimal',
-            },
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
             body: jsonEncode({
-              'starts_at_local': start,
-              'ends_at_local': end,
-              'active': slotData['enabled'] != false,
+              'provider_id': providerId,
+              if (supportsDelivery != null) 'supports_delivery': supportsDelivery,
+              if (supportsPickup != null) 'supports_pickup': supportsPickup,
+              ...timings,
             }),
-          ).timeout(const Duration(seconds: 5));
-        }
-      }
-    } catch (_) {}
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'save meal timings'));
+    }
+
+    final data = _decodeResponse(response, action: 'save meal timings');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? friendlyError('HTTP ${response.statusCode}', statusCode: response.statusCode, action: 'save meal timings'));
+    }
   }
 
   static Future<void> submitSupportTicket({
@@ -1183,5 +1185,216 @@ class ProviderApiService {
       'history': <Map<String, dynamic>>[],
       'monthly_summary': <Map<String, dynamic>>[],
     };
+  }
+
+  static Future<Map<String, dynamic>> sendOtp({
+    required String identifier,
+    String purpose = 'signin',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/auth/otp/send');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({
+        'identifier': identifier.trim(),
+        'purpose': purpose,
+      }),
+    ).timeout(const Duration(seconds: 12));
+    final data = _decodeResponse(response);
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    }
+    throw Exception(data['error'] ?? 'Could not send OTP.');
+  }
+
+  static Future<ProviderSession> verifyOtpSignIn({
+    required String identifier,
+    required String otp,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/auth/otp/verify');
+    final response = await http.post(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({
+        'identifier': identifier.trim(),
+        'otp': otp.trim(),
+        'create_session': true,
+        'role': 'provider',
+      }),
+    ).timeout(const Duration(seconds: 12));
+    final data = _decodeResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300 || data['success'] != true) {
+      throw Exception(data['error'] ?? 'Invalid or expired OTP.');
+    }
+    final user = data['user'] as Map<String, dynamic>? ?? {};
+    final prov = data['provider'] as Map<String, dynamic>?;
+    final providerId = (prov?['id'] ?? user['provider_id'] ?? '').toString().trim();
+    if (providerId.isEmpty) {
+      throw Exception('No registered kitchen is linked to this email or mobile. Please register your kitchen.');
+    }
+    final session = ProviderSession(
+      token: data['token']?.toString() ?? '',
+      userId: user['id']?.toString() ?? '',
+      email: user['email']?.toString() ?? identifier.trim(),
+      providerId: providerId,
+      businessName: (prov?['display_name'] ?? user['provider_name'] ?? 'Kitchen Partner').toString(),
+      locality: prov?['locality']?.toString() ?? '',
+      city: prov?['city']?.toString() ?? '',
+    );
+    await saveSession(session);
+    return session;
+  }
+
+  static Future<KitchenQueueResponse> fetchKitchenQueue({
+    required String providerId,
+    String? date,
+    String slot = 'LUNCH',
+  }) async {
+    final dQuery = (date != null && date.isNotEmpty) ? '&date=$date' : '';
+    final uri = Uri.parse('$baseUrl/api/provider/kitchen-queue?provider_id=$providerId&slot=${slot.toUpperCase()}$dQuery');
+    http.Response response;
+    try {
+      response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'load live kitchen queue'));
+    }
+    final data = _decodeResponse(response, action: 'load live kitchen queue');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? friendlyError('HTTP ${response.statusCode}', statusCode: response.statusCode, action: 'load live kitchen queue'));
+    }
+    return KitchenQueueResponse.fromJson(data);
+  }
+
+  static Future<void> updateKitchenQueueStatus({
+    required String providerId,
+    required String subscriptionId,
+    required String customerId,
+    required String serviceDate,
+    required String slot,
+    required String status,
+    int? etaMinutes,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/kitchen-queue');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              'subscription_id': subscriptionId,
+              'customer_id': customerId,
+              'service_date': serviceDate,
+              'slot': slot.toUpperCase(),
+              'status': status,
+              if (etaMinutes != null) 'eta_minutes': etaMinutes,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'update meal status'));
+    }
+    final data = _decodeResponse(response, action: 'update meal status');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to update meal status.');
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchReviews(String providerId) async {
+    final uri = Uri.parse('$baseUrl/api/mess/reviews?provider_id=$providerId');
+    http.Response response;
+    try {
+      response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'load customer reviews'));
+    }
+    final data = _decodeResponse(response, action: 'load customer reviews');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      final rawErr = data['error']?.toString() ?? '';
+      if (rawErr.toLowerCase().contains('persisted provider review table')) {
+        throw Exception('Reviews database table is missing or backend update is not deployed yet.');
+      }
+      throw Exception(rawErr.isNotEmpty ? rawErr : 'Failed to load reviews.');
+    }
+    return data;
+  }
+
+  static Future<void> replyToReview({
+    required String providerId,
+    required String reviewId,
+    required String reply,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/mess/reviews');
+    http.Response response;
+    try {
+      response = await http
+          .patch(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              'review_id': reviewId,
+              'partner_reply': reply,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'post reply'));
+    }
+    final data = _decodeResponse(response, action: 'post reply');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to post reply.');
+    }
+  }
+
+  static Future<Map<String, dynamic>> fetchProviderProfile(String providerId) async {
+    final uri = Uri.parse('$baseUrl/api/provider/profile?provider_id=$providerId');
+    http.Response response;
+    try {
+      response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'load kitchen settings'));
+    }
+    final data = _decodeResponse(response, action: 'load kitchen settings');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to load kitchen settings.');
+    }
+    return data['provider'] as Map<String, dynamic>? ?? {};
+  }
+
+  static Future<Map<String, dynamic>> updateProviderProfile({
+    required String providerId,
+    bool? supportsDelivery,
+    bool? supportsPickup,
+    bool? allowsTakeaway,
+    String? description,
+    String? coverImageBase64,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/provider/profile');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              if (supportsDelivery != null) 'supports_delivery': supportsDelivery,
+              if (supportsPickup != null) 'supports_pickup': supportsPickup,
+              if (allowsTakeaway != null) 'allows_takeaway': allowsTakeaway,
+              if (description != null) 'description': description,
+              if (coverImageBase64 != null) 'cover_image_base64': coverImageBase64,
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'update kitchen settings'));
+    }
+    final data = _decodeResponse(response, action: 'update kitchen settings');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to update kitchen settings.');
+    }
+    return data;
   }
 }

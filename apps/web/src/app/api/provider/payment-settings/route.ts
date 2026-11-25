@@ -35,16 +35,15 @@ export async function GET(req: NextRequest) {
     } catch {}
   }
 
-  const defaultName = providerInfo?.display_name || 'Mess Counter';
-  const defaultUpi = providerInfo?.public_phone ? `${providerInfo.public_phone}@paytm` : 'thalipay@upi';
+  const defaultName = providerInfo?.display_name || '';
 
   return NextResponse.json({
     success: true,
     settings: {
       provider_id: providerId,
-      upi_id: billingAccount?.upi_id || defaultUpi,
+      upi_id: billingAccount?.upi_id || '',
       upi_name: billingAccount?.upi_name || defaultName,
-      upi_qr_url: billingAccount?.upi_qr_url || providerInfo?.cover_path || '',
+      upi_qr_url: billingAccount?.upi_qr_url || '',
       account_number: billingAccount?.account_number || '',
       ifsc_code: billingAccount?.ifsc_code || '',
       bank_name: billingAccount?.bank_name || '',

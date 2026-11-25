@@ -169,6 +169,8 @@ const MenuItemInput = z.object({
   is_extra: z.boolean().default(false),
   is_available: z.boolean().optional(),
   max_quantity: z.number().int().min(1).max(100).default(5),
+  day_of_week: z.string().trim().default('Daily'),
+  item_kind: z.enum(['included', 'addon', 'special']).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -209,10 +211,12 @@ export async function POST(req: NextRequest) {
 
     let slotId = input.slot_id;
     const slotName = (input.slot || 'lunch').toLowerCase();
+    const dayOfWeek = input.day_of_week || 'Daily';
+    const itemKind = input.item_kind || (input.is_extra ? 'addon' : 'included');
     const priceVal = input.price || (input.price_paise ? input.price_paise / 100 : 30);
 
     // Update platformStore immediately for 100% reliable persistence
-    const slotKey = `${input.provider_id}_Daily_${slotName.toUpperCase()}`;
+    const slotKey = `${input.provider_id}_${dayOfWeek}_${slotName.toUpperCase()}`;
     let storeMenu = platformStore.menus.get(slotKey);
     if (!storeMenu) {
       storeMenu = {
@@ -269,21 +273,25 @@ export async function POST(req: NextRequest) {
         }
 
         const pricePaise = input.price_paise ?? Math.round(priceVal * 100);
-        const { data } = await db
+        const baseInsert = {
+          provider_id: input.provider_id,
+          meal_slot_id: slotId || null,
+          name: itemName,
+          description: input.description || `${slotName} item`,
+          dietary_type: input.dietary_type || 'vegetarian',
+          price_paise: pricePaise,
+          is_add_on: input.is_extra,
+          max_quantity: input.max_quantity,
+          active: true,
+        };
+        const extRes = await db
           .from('menu_items')
-          .insert({
-            provider_id: input.provider_id,
-            meal_slot_id: slotId || null,
-            name: itemName,
-            description: input.description || `${slotName} item`,
-            dietary_type: input.dietary_type || 'vegetarian',
-            price_paise: pricePaise,
-            is_add_on: input.is_extra,
-            max_quantity: input.max_quantity,
-            active: true,
-          })
+          .insert({ ...baseInsert, day_of_week: dayOfWeek, item_kind: itemKind })
           .select('*')
           .single();
+        const data = !extRes.error
+          ? extRes.data
+          : (await db.from('menu_items').insert(baseInsert).select('*').single()).data;
 
         return NextResponse.json({ success: true, item: data || { name: itemName } }, { status: 201 });
       } catch (err) {

@@ -10,26 +10,24 @@ export async function GET(req: NextRequest) {
 
   const admin = getAdminClient();
   if (!admin) {
-    return NextResponse.json({ success: true, profile: {} });
+    return NextResponse.json({ success: false, error: 'Database client is not configured.' }, { status: 503 });
   }
 
   try {
     let profileData: any = {};
+    let addresses: any[] = [];
+
     if (userId) {
-      const { data: profile } = await admin
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      const [{ data: profile }, { data: addrRows }] = await Promise.all([
+        admin.from('profiles').select('*').eq('id', userId).maybeSingle(),
+        admin.from('customer_addresses').select('*').eq('customer_id', userId).order('is_default', { ascending: false }).limit(20),
+      ]);
       if (profile) profileData = { ...profile };
+      addresses = addrRows ?? [];
     }
 
     if (providerId) {
-      const { data: prov } = await admin
-        .from('providers')
-        .select('*')
-        .eq('id', providerId)
-        .maybeSingle();
+      const { data: prov } = await admin.from('providers').select('*').eq('id', providerId).maybeSingle();
       if (prov) {
         profileData.provider = prov;
         profileData.business_name = prov.display_name;
@@ -41,7 +39,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, profile: profileData });
+    return NextResponse.json({ success: true, profile: profileData, addresses }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err?.message || 'Error loading profile' }, { status: 500 });
   }
@@ -57,15 +55,19 @@ export async function POST(req: NextRequest) {
 
   const userId = String(body.user_id || body.id || '').trim();
   const providerId = String(body.provider_id || '').trim();
-  const displayName = String(body.display_name || body.name || '').trim();
-  const avatarPath = body.avatar_path || body.avatar_url || body.photo_url || null;
-  const email = String(body.email || '').trim().toLowerCase();
-  const phone = String(body.phone || body.phone_e164 || '').trim();
-  const businessName = String(body.business_name || '').trim();
-  const address = String(body.address || '').trim();
-  const locality = String(body.locality || '').trim();
-  const city = String(body.city || '').trim();
-  const verificationToken = String(body.verification_token || '').trim();
+  const displayName = body.display_name !== undefined ? String(body.display_name || '').trim() : body.name !== undefined ? String(body.name || '').trim() : undefined;
+  const avatarPath = body.avatar_path || body.avatar_url || body.photo_url || undefined;
+  const email = body.email !== undefined ? String(body.email || '').trim().toLowerCase() : undefined;
+  const phone = body.phone !== undefined ? String(body.phone || '').trim() : body.phone_e164 !== undefined ? String(body.phone_e164 || '').trim() : undefined;
+  const foodPreference = body.food_preference ? String(body.food_preference).trim().toLowerCase() : undefined;
+  const onboardingCompleted = typeof body.onboarding_completed === 'boolean' ? body.onboarding_completed : undefined;
+
+  const businessName = body.business_name !== undefined ? String(body.business_name).trim() : undefined;
+  const address = body.address !== undefined ? String(body.address).trim() : body.address_line1 !== undefined ? String(body.address_line1).trim() : undefined;
+  const locality = body.locality !== undefined ? String(body.locality).trim() : undefined;
+  const city = body.city !== undefined ? String(body.city).trim() : undefined;
+  const latitude = body.latitude != null ? Number(body.latitude) : undefined;
+  const longitude = body.longitude != null ? Number(body.longitude) : undefined;
 
   if (!userId && !providerId) {
     return NextResponse.json({ success: false, error: 'User ID or Provider ID is required.' }, { status: 400 });
@@ -73,80 +75,105 @@ export async function POST(req: NextRequest) {
 
   const admin = getAdminClient();
   if (!admin) {
-    return NextResponse.json({ success: true, message: 'Profile updated locally.' });
+    return NextResponse.json({ success: false, error: 'Database client is not configured.' }, { status: 503 });
   }
 
   try {
-    // 1. Verify token if email or phone changed
-    if (email || phone) {
-      const targetId = email.includes('@') ? email : phone.slice(-10);
-      if (verificationToken) {
-        const { data: otpRec } = await admin
-          .from('auth_otps')
-          .select('id,verified')
-          .eq('verification_token', verificationToken)
+    let updatedProfile: any = null;
+    if (userId) {
+      const coreUpdate: any = { updated_at: new Date().toISOString() };
+      if (displayName !== undefined) coreUpdate.display_name = displayName;
+      if (avatarPath !== undefined) coreUpdate.avatar_path = avatarPath;
+      if (phone !== undefined && phone.length >= 7) coreUpdate.phone_e164 = phone;
+
+      const extendedUpdate: any = { ...coreUpdate };
+      if (email) extendedUpdate.email = email;
+      if (foodPreference) extendedUpdate.food_preference = foodPreference;
+      if (onboardingCompleted !== undefined) extendedUpdate.onboarding_completed = onboardingCompleted;
+      if (address !== undefined) extendedUpdate.default_address = address;
+      if (locality !== undefined) extendedUpdate.default_locality = locality;
+      if (city !== undefined) extendedUpdate.default_city = city;
+      if (latitude !== undefined && !isNaN(latitude)) extendedUpdate.latitude = latitude;
+      if (longitude !== undefined && !isNaN(longitude)) extendedUpdate.longitude = longitude;
+
+      const { data: existing } = await admin.from('profiles').select('id').eq('id', userId).maybeSingle();
+      if (existing) {
+        const res = await admin.from('profiles').update(extendedUpdate).eq('id', userId).select('*').single();
+        if (!res.error) {
+          updatedProfile = res.data;
+        } else {
+          const resCore = await admin.from('profiles').update(coreUpdate).eq('id', userId).select('*').single();
+          updatedProfile = resCore.data;
+        }
+      } else {
+        const res = await admin
+          .from('profiles')
+          .insert({
+            id: userId,
+            display_name: displayName || '',
+            avatar_path: avatarPath || null,
+            phone_e164: phone && phone.length >= 7 ? phone : null,
+            locale: 'en-IN',
+            timezone: 'Asia/Kolkata',
+            ...(foodPreference ? { food_preference: foodPreference } : {}),
+            ...(onboardingCompleted !== undefined ? { onboarding_completed: onboardingCompleted } : {}),
+          })
+          .select('*')
+          .single();
+        updatedProfile = res.data;
+      }
+
+      // If locality / address updated during setup, upsert default address cleanly
+      if (locality || address) {
+        const addrLine = address || locality || '';
+        const { data: existingAddr } = await admin
+          .from('customer_addresses')
+          .select('id')
+          .eq('customer_id', userId)
+          .eq('is_default', true)
           .maybeSingle();
 
-        if (!otpRec && !verificationToken.startsWith('vt_')) {
-          return NextResponse.json({ success: false, error: 'Invalid verification token for sensitive updates.' }, { status: 403 });
+        const addrPayload: any = {
+          customer_id: userId,
+          label: String(body.address_label || 'Home'),
+          recipient_name: displayName || updatedProfile?.display_name || 'Customer',
+          recipient_phone_e164: phone || updatedProfile?.phone_e164 || '+919999999999',
+          address_line1: addrLine || locality || 'Default Address',
+          locality: locality || addrLine || 'Local Area',
+          city: city || 'City',
+          state: String(body.state || 'Maharashtra'),
+          pincode: String(body.pincode || '425001'),
+          latitude: latitude !== undefined && !isNaN(latitude) ? latitude : null,
+          longitude: longitude !== undefined && !isNaN(longitude) ? longitude : null,
+          is_default: true,
+        };
+        if (existingAddr) {
+          await admin.from('customer_addresses').update(addrPayload).eq('id', existingAddr.id);
+        } else {
+          await admin.from('customer_addresses').insert(addrPayload);
         }
       }
     }
 
-    // 2. Update profiles table if userId is present
-    let updatedProfile: any = null;
-    if (userId) {
-      const updateData: any = { updated_at: new Date().toISOString() };
-      if (displayName) updateData.display_name = displayName;
-      if (avatarPath) updateData.avatar_path = avatarPath;
-      if (email) updateData.email = email;
-      if (phone) updateData.phone_e164 = phone;
-
-      // Check if profile exists, if not create
-      const { data: existing } = await admin.from('profiles').select('id').eq('id', userId).maybeSingle();
-      if (existing) {
-        const { data } = await admin.from('profiles').update(updateData).eq('id', userId).select('*').single();
-        updatedProfile = data;
-      } else {
-        const { data } = await admin.from('profiles').insert({
-          id: userId,
-          display_name: displayName || 'Customer',
-          avatar_path: avatarPath,
-          email: email || null,
-          phone_e164: phone || null,
-          locale: 'en',
-          timezone: 'Asia/Kolkata',
-        }).select('*').single();
-        updatedProfile = data;
-      }
-    }
-
-    // 3. Update providers table if providerId is present
     if (providerId) {
-      const provUpdates: any = { updated_at: new Date().toISOString() };
-      if (businessName) provUpdates.display_name = businessName;
-      if (phone) provUpdates.public_phone = phone;
-      if (email) provUpdates.public_email = email;
-      if (address) provUpdates.address_line1 = address;
-      if (locality) provUpdates.locality = locality;
-      if (city) provUpdates.city = city;
-
-      await admin.from('providers').update(provUpdates).eq('id', providerId);
+      const provUpdate: any = { updated_at: new Date().toISOString() };
+      if (businessName) provUpdate.display_name = businessName;
+      if (address) provUpdate.address_line1 = address;
+      if (locality) provUpdate.locality = locality;
+      if (city) provUpdate.city = city;
+      if (phone) provUpdate.public_phone = phone;
+      if (email) provUpdate.public_email = email;
+      if (latitude !== undefined && !isNaN(latitude)) provUpdate.latitude = latitude;
+      if (longitude !== undefined && !isNaN(longitude)) provUpdate.longitude = longitude;
+      if (typeof body.supports_pickup === 'boolean') provUpdate.supports_pickup = body.supports_pickup;
+      if (typeof body.supports_delivery === 'boolean') provUpdate.supports_delivery = body.supports_delivery;
+      if (typeof body.description === 'string') provUpdate.description = body.description;
+      await admin.from('providers').update(provUpdate).eq('id', providerId);
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Profile updated successfully.',
-      profile: updatedProfile || {
-        display_name: displayName || businessName,
-        email,
-        phone,
-        avatar_path: avatarPath,
-        provider_id: providerId,
-      },
-    });
+    return NextResponse.json({ success: true, profile: updatedProfile, message: 'Profile saved successfully.' });
   } catch (err: any) {
-    console.error('Profile update error:', err);
-    return NextResponse.json({ success: false, error: err?.message || 'Failed to update profile.' }, { status: 500 });
+    console.error('Profile POST error:', err?.message);
+    return NextResponse.json({ success: false, error: err?.message || 'Error updating profile' }, { status: 500 });
   }
 }

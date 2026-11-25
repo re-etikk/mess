@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore } from '@/lib/platform-service';
 import { addPartnerNotification } from '@/lib/partner-notifications';
+import { sendCustomerInvoiceEmail } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,13 @@ export async function POST(req: NextRequest) {
       payment_mode = 'counter_cash',
       receipt_url = '',
       utr_reference = '',
+      selected_slots = {},
+      repeat_days = [1, 2, 3, 4, 5, 6, 7],
+      packaging_preference = 'reusable_tiffin',
+      delivery_instructions = '',
+      promo_code = '',
+      discount_paise = 0,
+      starts_at: requestedStart,
     } = body;
 
     if (!provider_id) {
@@ -113,7 +121,10 @@ export async function POST(req: NextRequest) {
 
     // 4. Create Subscription
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + durDays * 24 * 60 * 60 * 1000);
+    const startDt = requestedStart ? new Date(requestedStart) : now;
+    const effectiveStart = isNaN(startDt.getTime()) ? now : startDt;
+    const expiresAt = new Date(effectiveStart.getTime() + durDays * 24 * 60 * 60 * 1000);
+    const netPayablePaise = Math.max(0, effectivePricePaise - Number(discount_paise || 0));
     const subUuid = (admin && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedCustomerId))
       ? crypto.randomUUID()
       : `sub-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
@@ -121,29 +132,43 @@ export async function POST(req: NextRequest) {
     let createdDbSub: any = null;
 
     if (admin) {
+      const baseInsert = {
+        id: subUuid,
+        customer_id: resolvedCustomerId,
+        provider_id,
+        plan_id: effectivePlanId,
+        status: 'pending_payment',
+        plan_type_snapshot: effectivePlanType,
+        plan_name_snapshot: effectivePlanName,
+        terms_version_snapshot: 'v2.0-behance',
+        price_paid_paise: netPayablePaise,
+        initial_meal_credits: initialCredits,
+        remaining_meal_credits: initialCredits,
+        starts_at: effectiveStart.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      };
       try {
-        const { data: sub, error: subErr } = await admin
+        const resExt = await admin
           .from('subscriptions')
           .insert({
-            id: subUuid,
-            customer_id: resolvedCustomerId,
-            provider_id,
-            plan_id: effectivePlanId,
-            status: 'pending_payment',
-            plan_type_snapshot: effectivePlanType,
-            plan_name_snapshot: effectivePlanName,
-            terms_version_snapshot: 'v1.0-counter',
-            price_paid_paise: effectivePricePaise,
-            initial_meal_credits: initialCredits,
-            remaining_meal_credits: initialCredits,
-            starts_at: now.toISOString(),
-            expires_at: expiresAt.toISOString(),
+            ...baseInsert,
+            duration_days: durDays,
+            selected_slots: selected_slots || {},
+            repeat_days: Array.isArray(repeat_days) && repeat_days.length > 0 ? repeat_days : [1, 2, 3, 4, 5, 6, 7],
+            packaging_preference: packaging_preference || 'reusable_tiffin',
+            delivery_instructions: delivery_instructions || null,
+            promo_code: promo_code || null,
+            discount_paise: Number(discount_paise || 0),
+            payment_mode: 'counter_cash',
           })
           .select('*')
           .single();
 
-        if (!subErr && sub) {
-          createdDbSub = sub;
+        if (!resExt.error && resExt.data) {
+          createdDbSub = resExt.data;
+        } else {
+          const { data: sub } = await admin.from('subscriptions').insert(baseInsert).select('*').single();
+          if (sub) createdDbSub = sub;
         }
       } catch (e) {
         console.warn('DB error inserting subscription:', e);
@@ -162,34 +187,64 @@ export async function POST(req: NextRequest) {
       plan_type: effectivePlanType,
       plan_name: effectivePlanName,
       status: 'pending_payment',
-      starts_at: now.toISOString(),
+      starts_at: effectiveStart.toISOString(),
       expires_at: expiresAt.toISOString(),
       remaining_meal_credits: initialCredits,
       initial_meal_credits: initialCredits,
-      price_paid_paise: effectivePricePaise,
-      payment_mode,
+      price_paid_paise: netPayablePaise,
+      payment_mode: 'counter_cash',
       created_at: now.toISOString(),
       ...({
         receipt_url,
         utr_reference,
+        selected_slots,
+        repeat_days,
+        packaging_preference,
+        delivery_instructions,
+        promo_code,
+        discount_paise,
       } as any),
     });
 
-    const paymentLabel = payment_mode === 'direct_upi'
-      ? 'Direct UPI (Scan & Pay)'
-      : (payment_mode === 'counter_upi' ? 'Counter UPI QR' : 'Counter Cash');
+    const paymentLabel = 'Pay Cash at Counter';
 
     // Send notification to Mess Partner
     addPartnerNotification({
       provider_id,
       type: 'pending_payment',
       title: 'New Subscription Payment Pending',
-      message: `${clientName} placed an order for ${effectivePlanName} (₹${(effectivePricePaise / 100).toFixed(0)}) via ${paymentLabel}. Please verify payment and confirm.`,
+      message: `${clientName} placed an order for ${effectivePlanName} (₹${(netPayablePaise / 100).toFixed(0)}) via ${paymentLabel}. Please verify payment and confirm.`,
       customer_name: clientName,
       customer_phone: cleanPhone,
-      amount_inr: effectivePricePaise / 100,
+      amount_inr: netPayablePaise / 100,
       subscription_id: subUuid,
     });
+
+    // Dispatch Customer Invoice Email (counter cash pending confirmation)
+    let resolvedCustomerEmail = (customer_email || '').trim();
+    if (!resolvedCustomerEmail && admin && resolvedCustomerId) {
+      try {
+        const { data: prof } = await admin.from('profiles').select('email').eq('id', resolvedCustomerId).maybeSingle();
+        if (prof?.email) resolvedCustomerEmail = prof.email;
+      } catch {}
+    }
+    if (resolvedCustomerEmail && resolvedCustomerEmail.includes('@')) {
+      await sendCustomerInvoiceEmail({
+        to: resolvedCustomerEmail,
+        customerName: clientName,
+        providerName,
+        planName: effectivePlanName,
+        subscriptionId: subUuid,
+        amountInr: netPayablePaise / 100,
+        discountInr: Number(discount_paise || 0) / 100,
+        promoCode: promo_code || undefined,
+        paymentMode: 'counter_cash',
+        paymentStatus: 'Pending Counter Cash Confirmation',
+        startsAtIso: effectiveStart.toISOString(),
+        expiresAtIso: expiresAt.toISOString(),
+        packagingPreference: packaging_preference,
+      }).catch(() => null);
+    }
 
     return NextResponse.json({
       success: true,

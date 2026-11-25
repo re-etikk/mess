@@ -25,17 +25,33 @@ function displayClock(value?: string | null): string {
   return `${String(hour12).padStart(2, '0')}:${minuteText || '00'} ${suffix}`;
 }
 
-const DEFAULT_SLOTS = [
-  { name: 'breakfast', starts_at_local: '07:30:00', ends_at_local: '10:00:00' },
-  { name: 'lunch', starts_at_local: '12:00:00', ends_at_local: '15:30:00' },
-  { name: 'dinner', starts_at_local: '19:30:00', ends_at_local: '22:30:00' },
-];
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 100) / 100;
+}
 
 export async function GET(req: NextRequest) {
   const params = new URL(req.url).searchParams;
   const query = params.get('q')?.trim().slice(0, 100) || '';
   const city = params.get('city')?.trim().slice(0, 100) || '';
-  const dietary = params.get('dietary')?.trim().toLowerCase();
+  const area = params.get('area')?.trim().slice(0, 100) || '';
+  const dietary = params.get('dietary')?.trim().toLowerCase() || '';
+  const slotFilter = params.get('slot')?.trim().toLowerCase() || '';
+  const minRatingParam = Number(params.get('min_rating') || '0');
+  const openNowOnly = params.get('open_now') === 'true';
+  const deliveryOnly = params.get('delivery_only') === 'true';
+  const sortBy = params.get('sort')?.trim().toLowerCase() || '';
+  const userLat = params.get('lat') ? Number(params.get('lat')) : null;
+  const userLng = params.get('lng') ? Number(params.get('lng')) : null;
+  const hasUserCoords = userLat !== null && userLng !== null && !isNaN(userLat) && !isNaN(userLng);
 
   try {
     let supabase = getAdminClient();
@@ -48,210 +64,231 @@ export async function GET(req: NextRequest) {
 
     let providersQuery = supabase
       .from('providers')
-      .select('id,display_name,slug,description,public_phone,public_email,address_line1,locality,city,state,pincode,latitude,longitude,status,created_at')
+      .select(
+        'id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,address_line1,address_line2,locality,city,state,pincode,latitude,longitude,supports_pickup,supports_delivery,status,created_at'
+      )
       .eq('status', 'active')
       .order('display_name');
 
     if (city) {
       providersQuery = providersQuery.ilike('city', `%${city.replace(/[\\%_]/g, '\\$&')}%`);
     }
+    if (area) {
+      const esc = area.replace(/[\\%_]/g, '\\$&');
+      providersQuery = providersQuery.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%,address_line1.ilike.%${esc}%`);
+    }
 
-    const { data: dbProviders, error: providersError } = await providersQuery.limit(500);
+    const { data: dbProviders, error: providersError } = await providersQuery.limit(200);
     if (providersError) throw providersError;
 
     const allProviders = dbProviders ?? [];
     if (allProviders.length === 0) {
-      return NextResponse.json({ success: true, total: 0, providers: [] });
+      return NextResponse.json({ success: true, total: 0, providers: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    // Filter providers first by query before querying children
-    const matchedProviders = allProviders.filter((provider) => {
-      if (!query) return true;
-      const q = query.toLowerCase();
-      return (
-        (provider.display_name && provider.display_name.toLowerCase().includes(q)) ||
-        (provider.description && provider.description.toLowerCase().includes(q)) ||
-        (provider.locality && provider.locality.toLowerCase().includes(q)) ||
-        (provider.city && provider.city.toLowerCase().includes(q))
-      );
-    });
+    const targetIds = allProviders.map((p) => p.id);
 
-    const targetProviders = matchedProviders.length > 0 ? matchedProviders.slice(0, 50) : allProviders.slice(0, 50);
-    const targetIds = targetProviders.map((p) => p.id);
-
-    // Fetch related records in parallel for target providers
-    const [plansRes, slotsRes, itemsRes, hoursRes] = await Promise.all([
-      supabase
-        .from('subscription_plans')
-        .select('*')
-        .in('provider_id', targetIds)
-        .eq('active', true),
-      supabase
-        .from('meal_slots')
-        .select('*')
-        .in('provider_id', targetIds)
-        .eq('active', true),
-      supabase
-        .from('menu_items')
-        .select('*')
-        .in('provider_id', targetIds)
-        .eq('active', true),
-      supabase
-        .from('provider_operating_hours')
-        .select('*')
-        .in('provider_id', targetIds),
+    const [plansRes, slotsRes, itemsRes, hoursRes, reviewsRes, subsRes] = await Promise.all([
+      supabase.from('subscription_plans').select('*').in('provider_id', targetIds).eq('active', true),
+      supabase.from('meal_slots').select('*').in('provider_id', targetIds).eq('active', true),
+      supabase.from('menu_items').select('*').in('provider_id', targetIds).eq('active', true),
+      supabase.from('provider_operating_hours').select('*').in('provider_id', targetIds),
+      supabase.from('mess_reviews').select('provider_id,rating').in('provider_id', targetIds).then((r) => r, () => ({ data: [] as any[], error: null })),
+      supabase.from('subscriptions').select('provider_id').in('provider_id', targetIds).eq('status', 'active').then((r) => r, () => ({ data: [] as any[], error: null })),
     ]);
 
     const allPlans = plansRes.data ?? [];
     const allSlots = slotsRes.data ?? [];
     const allItems = itemsRes.data ?? [];
     const allHours = hoursRes.data ?? [];
+    const allReviews = (reviewsRes as any)?.data ?? [];
+    const allSubs = (subsRes as any)?.data ?? [];
 
-    // Filter providers based on search query or dietary filter
-    const filtered = targetProviders.filter((provider) => {
-      const pItems = allItems.filter((i) => i.provider_id === provider.id);
+    const nowWeekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
+    const todayWeekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(nowWeekdayName);
 
-      if (dietary) {
-        const allowedTypes = dietary === 'veg' ? ['vegetarian', 'vegan'] : dietary === 'non_veg' ? ['non_vegetarian'] : [dietary];
-        const hasDietary = pItems.some((item) => allowedTypes.includes(item.dietary_type));
-        if (!hasDietary && pItems.length > 0) return false;
-      }
+    let results = allProviders
+      .map((provider: any) => {
+        const pId = provider.id;
+        const pItems = allItems.filter((i: any) => i.provider_id === pId);
+        const pSlots = allSlots.filter((s: any) => s.provider_id === pId);
+        const pHours = allHours.filter((h: any) => h.provider_id === pId);
+        const pReviews = allReviews.filter((r: any) => r.provider_id === pId);
+        const dbSubCount = allSubs.filter((s: any) => s.provider_id === pId).length;
 
-      if (!query) return true;
+        const pPlans = allPlans
+          .filter((plan: any) => plan.provider_id === pId)
+          .map((plan: any) => {
+            const durMonths = plan.duration_months || 1;
+            const durDays = plan.duration_days || durMonths * 30;
+            const pricePaise = Number(plan.price_paise || 0);
+            return {
+              ...plan,
+              duration_days: durDays,
+              price_paise: pricePaise,
+              price: pricePaise / 100,
+            };
+          });
 
-      const q = query.toLowerCase();
-      const textMatch =
-        (provider.display_name && provider.display_name.toLowerCase().includes(q)) ||
-        (provider.description && provider.description.toLowerCase().includes(q)) ||
-        (provider.locality && provider.locality.toLowerCase().includes(q)) ||
-        (provider.city && provider.city.toLowerCase().includes(q));
+        const menus = pSlots.map((slot: any) => {
+          const slotNameUpper = String(slot.name || '').toUpperCase();
+          const storeMenu = platformStore.menus.get(`${pId}_Daily_${slotNameUpper}`);
+          const slotItems = pItems.filter(
+            (item: any) =>
+              item.meal_slot_id === slot.id ||
+              (item.description && item.description.toLowerCase().includes(String(slot.name).toLowerCase()))
+          );
 
-      const dishMatch = pItems.some((item) => item.name && item.name.toLowerCase().includes(q));
-      return textMatch || dishMatch;
-    });
+          const dbIncluded = slotItems.filter((item: any) => !item.is_add_on).map((item: any) => item.name);
+          const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeMenu?.items_included || [];
 
-    const results = filtered.map((provider) => {
-      const pId = provider.id;
-      const pItems = allItems.filter((i) => i.provider_id === pId);
-      let pSlots = allSlots.filter((s) => s.provider_id === pId);
+          const dbExtra = slotItems
+            .filter((item: any) => item.is_add_on)
+            .map((item: any) => ({
+              id: item.id,
+              name: item.name,
+              kind: item.item_kind || 'addon',
+              price: Number(item.price_paise || 0) / 100,
+              price_paise: Number(item.price_paise || 0),
+            }));
+          const combinedExtra =
+            dbExtra.length > 0
+              ? dbExtra
+              : (storeMenu?.items_extra || []).map((e: any) => ({
+                  id: `ext-${e.name.toLowerCase().replace(/\s+/g, '-')}`,
+                  name: e.name,
+                  kind: 'addon',
+                  price: e.price || 0,
+                  price_paise: Math.round((e.price || 0) * 100),
+                }));
 
-      if (pSlots.length === 0) {
-        pSlots = DEFAULT_SLOTS.map((s) => ({
-          id: `slot-${s.name}-${pId.slice(0, 8)}`,
-          provider_id: pId,
-          name: s.name,
-          starts_at_local: s.starts_at_local,
-          ends_at_local: s.ends_at_local,
-          active: true,
-        }));
-      }
-
-      const pPlans = allPlans
-        .filter((plan) => plan.provider_id === pId)
-        .map((plan) => {
-          const durMonths = plan.duration_months || 1;
-          const durDays = plan.duration_days || durMonths * 30;
-          const pricePaise = Number(plan.price_paise || 0);
           return {
-            ...plan,
-            duration_days: durDays,
-            price_paise: pricePaise,
-            price: pricePaise / 100,
+            id: slot.id,
+            slot: slotNameUpper,
+            slot_id: slot.id,
+            starts_at_local: slot.starts_at_local,
+            ends_at_local: slot.ends_at_local,
+            items_included: combinedIncluded,
+            items_extra: combinedExtra,
+            items: slotItems,
           };
         });
 
-      // Merge platformStore plans
-      for (const [, sp] of platformStore.plans.entries()) {
-        if (sp.provider_id === pId && sp.is_active !== false) {
-          if (!pPlans.some((p) => p.id === sp.id || p.name.toLowerCase() === sp.name.toLowerCase())) {
-            pPlans.push({
-              id: sp.id,
-              provider_id: pId,
-              name: sp.name,
-              description: sp.description,
-              plan_type: sp.plan_type,
-              duration_days: sp.duration_days,
-              duration_months: Math.max(1, Math.round(sp.duration_days / 30)),
-              meal_credits: sp.meal_credits,
-              price_paise: sp.price_paise,
-              price: sp.price_paise / 100,
-            });
+        const timings: Record<string, { enabled: boolean; start: string; end: string }> = {};
+        for (const slot of pSlots) {
+          timings[String(slot.name).toLowerCase()] = {
+            enabled: slot.active !== false,
+            start: displayClock(slot.starts_at_local),
+            end: displayClock(slot.ends_at_local),
+          };
+        }
+
+        // Real aggregated rating (null when 0 reviews — NEVER hardcode 4.8)
+        const totalReviews = pReviews.length;
+        const avgRating =
+          totalReviews > 0
+            ? Math.round((pReviews.reduce((acc: number, r: any) => acc + Number(r.rating || 0), 0) / totalReviews) * 10) / 10
+            : null;
+
+        // Real Haversine distance (null unless both user & provider coordinates exist)
+        const pLat = provider.latitude != null ? Number(provider.latitude) : null;
+        const pLng = provider.longitude != null ? Number(provider.longitude) : null;
+        const distanceKm =
+          hasUserCoords && pLat != null && pLng != null && !isNaN(pLat) && !isNaN(pLng)
+            ? haversineKm(userLat!, userLng!, pLat, pLng)
+            : null;
+
+        // Real open today flag
+        const todayHour = pHours.find((h: any) => Number(h.weekday) === todayWeekday);
+        const manualOpen = platformStore.providerStatuses.get(pId);
+        const isOpenToday = manualOpen !== undefined ? manualOpen : Boolean(!todayHour || !todayHour.closed);
+
+        // Real dietary types from active menu items
+        const dietarySet = new Set<string>();
+        for (const item of pItems) {
+          if (item.dietary_type && item.dietary_type !== 'unspecified') {
+            dietarySet.add(item.dietary_type);
           }
         }
-      }
 
-      // Group menus by slot for mobile app, merging platformStore dishes
-      const menus = pSlots.map((slot) => {
-        const slotNameUpper = slot.name.toUpperCase();
-        const storeMenu = platformStore.menus.get(`${pId}_Daily_${slotNameUpper}`);
-        const slotItems = pItems.filter((item) =>
-          item.meal_slot_id === slot.id ||
-          (item.description && item.description.toLowerCase().includes(slot.name.toLowerCase()))
-        );
-
-        const dbIncluded = slotItems.filter((item) => !item.is_add_on).map((item) => item.name);
-        const storeIncluded = storeMenu?.items_included || [];
-        const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeIncluded;
-
-        const dbExtra = slotItems.filter((item) => item.is_add_on).map((item) => ({
-          id: item.id,
-          name: item.name,
-          price: Number(item.price_paise || 0) / 100,
-          price_paise: Number(item.price_paise || 0),
-        }));
-        const storeExtra = (storeMenu?.items_extra || []).map((e) => ({
-          id: `ext-${e.name.toLowerCase().replace(/\s+/g, '-')}`,
-          name: e.name,
-          price: e.price || 30,
-          price_paise: Math.round((e.price || 30) * 100),
-        }));
-        const combinedExtra = dbExtra.length > 0 ? dbExtra : storeExtra;
+        // Real starting meal price in INR (null if no prices configured)
+        const nonZeroMenuPrices = pItems.filter((i: any) => !i.is_add_on && Number(i.price_paise) > 0).map((i: any) => Number(i.price_paise));
+        const dailyPlanPrices = pPlans
+          .filter((pl: any) => Number(pl.price_paise) > 0)
+          .map((pl: any) => Math.round(Number(pl.price_paise) / Math.max(1, Number(pl.duration_days || 30))));
+        const minPaiseCandidates = [...nonZeroMenuPrices, ...dailyPlanPrices];
+        const startingMealPrice =
+          minPaiseCandidates.length > 0 ? Math.round(Math.min(...minPaiseCandidates) / 100) : null;
 
         return {
-          id: slot.id,
-          slot: slotNameUpper,
-          slot_id: slot.id,
-          starts_at_local: slot.starts_at_local,
-          ends_at_local: slot.ends_at_local,
-          items_included: combinedIncluded,
-          items_extra: combinedExtra,
-          items: slotItems,
+          ...provider,
+          rating: avgRating,
+          total_reviews: totalReviews,
+          subscriber_count: dbSubCount,
+          distance_km: distanceKm,
+          is_open_today: isOpenToday,
+          dietary_types: Array.from(dietarySet),
+          starting_meal_price: startingMealPrice,
+          plans: pPlans,
+          menus,
+          timings,
+          meal_slots: pSlots,
         };
+      })
+      .filter((provider: any) => {
+        if (query) {
+          const q = query.toLowerCase();
+          const textMatch =
+            (provider.display_name && provider.display_name.toLowerCase().includes(q)) ||
+            (provider.description && provider.description.toLowerCase().includes(q)) ||
+            (provider.locality && provider.locality.toLowerCase().includes(q)) ||
+            (provider.city && provider.city.toLowerCase().includes(q));
+          const dishMatch = (provider.menus || []).some(
+            (m: any) =>
+              (m.items_included || []).some((x: string) => x.toLowerCase().includes(q)) ||
+              (m.items_extra || []).some((x: any) => String(x.name || '').toLowerCase().includes(q))
+          );
+          if (!textMatch && !dishMatch) return false;
+        }
+        if (dietary && dietary !== 'all') {
+          const types = (provider.dietary_types as string[]) || [];
+          if (types.length > 0) {
+            if (dietary === 'veg' && !types.some((t) => t === 'vegetarian' || t === 'vegan' || t === 'jain')) return false;
+            if (dietary === 'non_veg' && !types.includes('non_vegetarian')) return false;
+          }
+        }
+        if (slotFilter) {
+          const hasSlot = (provider.meal_slots || []).some((s: any) => String(s.name).toLowerCase() === slotFilter && s.active !== false);
+          if (!hasSlot) return false;
+        }
+        if (minRatingParam > 0 && (provider.rating == null || provider.rating < minRatingParam)) {
+          return false;
+        }
+        if (openNowOnly && !provider.is_open_today) {
+          return false;
+        }
+        if (deliveryOnly && !provider.supports_delivery) {
+          return false;
+        }
+        return true;
       });
 
-      // Build timings map
-      const timings: Record<string, { enabled: boolean; start: string; end: string }> = {};
-      for (const slot of pSlots) {
-        timings[slot.name.toLowerCase()] = {
-          enabled: slot.active !== false,
-          start: displayClock(slot.starts_at_local),
-          end: displayClock(slot.ends_at_local),
-        };
-      }
-      if (!timings.breakfast) timings.breakfast = { enabled: true, start: '07:30 AM', end: '10:00 AM' };
-      if (!timings.lunch) timings.lunch = { enabled: true, start: '12:00 PM', end: '03:30 PM' };
-      if (!timings.dinner) timings.dinner = { enabled: true, start: '07:30 PM', end: '10:30 PM' };
+    if (sortBy === 'rating') {
+      results.sort((a: any, b: any) => (b.rating ?? -1) - (a.rating ?? -1));
+    } else if (sortBy === 'price') {
+      results.sort((a: any, b: any) => (a.starting_meal_price ?? 999999) - (b.starting_meal_price ?? 999999));
+    } else if (sortBy === 'distance') {
+      results.sort((a: any, b: any) => (a.distance_km ?? 999999) - (b.distance_km ?? 999999));
+    }
 
-      return {
-        ...provider,
-        rating: 4.8,
-        total_reviews: 24,
-        distance_km: 0.8,
-        is_open_today: true,
-        cuisines: ['North Indian', 'Homestyle'],
-        dietary_types: ['veg'],
-        plans: pPlans,
-        menus,
-        timings,
-        meal_slots: pSlots,
-      };
-    });
-
-    return NextResponse.json({
-      success: true,
-      total: results.length,
-      providers: results,
-    }, { headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json(
+      {
+        success: true,
+        total: results.length,
+        providers: results,
+      },
+      { headers: { 'Cache-Control': 'private, no-store' } }
+    );
   } catch (error: any) {
     console.error('Provider search error:', error?.message);
     return NextResponse.json({ success: false, error: 'Failed to search providers.' }, { status: 500 });

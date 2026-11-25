@@ -1,29 +1,83 @@
 import 'package:flutter/material.dart';
+
+import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/mess_widgets.dart';
-import '../../core/theme/mess_theme.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
+
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  final _controller = TextEditingController();
   final _key = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  bool _sent = false;
+
   @override
-  void dispose() { _controller.dispose(); super.dispose(); }
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  void _send() {
+    if (!(_key.currentState?.validate() ?? false)) return;
+    setState(() => _sent = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Reset instructions sent to ${_email.text.trim()}')),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(leading: IconButton(onPressed: () => Navigator.maybePop(context), icon: const Icon(Icons.arrow_back_rounded)), title: const Text('Reset password')),
-        body: SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 430), child: Form(key: _key, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const SizedBox(height: 36), const Icon(Icons.lock_reset_rounded, size: 48, color: MessColors.orange), const SizedBox(height: 22),
-          Text('Forgot your password?', style: Theme.of(context).textTheme.headlineLarge), const SizedBox(height: 8),
-          Text('Enter the email connected to your account. We will send a secure link to your email.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: MessColors.muted)),
-          const SizedBox(height: 25),
-          TextFormField(controller: _controller, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email address', prefixIcon: Icon(Icons.mail_outline_rounded)), validator: (v) => v != null && v.contains('@') ? null : 'Enter a valid email address.'),
-          const SizedBox(height: 16),
-          MessActionButton(label: 'Send reset link', onPressed: () { if (!_key.currentState!.validate()) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password reset instructions have been dispatched to your email.'))); }),
-        ])))))),
-      );
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: ThaliColors.card,
+      appBar: AppBar(title: const Text('Reset Password')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
+          child: Form(
+            key: _key,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: ThaliColors.primarySoft,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.lock_reset_rounded, size: 30, color: ThaliColors.primary),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Reset Password',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Enter your email or sign in directly using Email/Mobile OTP from the login screen.',
+                  style: TextStyle(fontSize: 13.5, color: ThaliColors.muted, height: 1.45),
+                ),
+                const SizedBox(height: 22),
+                TextFormField(
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Email Address',
+                    prefixIcon: Icon(Icons.mail_outline_rounded),
+                  ),
+                  validator: (v) => v != null && v.contains('@') && v.contains('.') ? null : 'Enter a valid email.',
+                ),
+                const SizedBox(height: 18),
+                MessActionButton(label: _sent ? 'Resend Link' : 'Send Reset Link', onPressed: _send),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

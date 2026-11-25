@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     const subject = `[THALI SUPPORT TICKET] ${category} - from ${name} (${role.toUpperCase()})`;
     const html = `
       <div style="font-family: sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-        <h2 style="color: #0f172a; margin-top: 0;">🆘 New Support Request from ${name}</h2>
+        <h2 style="color: #0f172a; margin-top: 0;">New Support Request from ${name}</h2>
         <div style="background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
           <p style="margin: 4px 0;"><strong>Category:</strong> ${category}</p>
           <p style="margin: 4px 0;"><strong>Role:</strong> ${role.toUpperCase()}</p>
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       email_dispatched: emailResult.success,
-      message: '✅ Support ticket submitted successfully! Our team will contact you shortly.',
+      message: 'Support ticket submitted successfully! Our team will contact you shortly.',
     });
   } catch (err: any) {
     return NextResponse.json(

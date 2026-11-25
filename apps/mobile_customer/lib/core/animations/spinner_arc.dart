@@ -5,7 +5,7 @@ class SpinnerArc extends StatefulWidget {
   const SpinnerArc({
     super.key,
     this.size = 36.0,
-    this.color = const Color(0xFFFF6B1A),
+    this.color = const Color(0xFFE95F35),
     this.strokeWidth = 3.5,
     this.duration = const Duration(milliseconds: 1000),
   });

@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             from: process.env.RESEND_FROM_EMAIL || 'Thali Security <onboarding@resend.dev>',
             to: [identifier],
-            subject: `🔒 ${otpCode} is your Thali verification code`,
+            subject: `${otpCode} is your Thali verification code`,
             text: `Your Thali verification code is ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border: 1px solid #E2E8F0; border-radius: 16px;">

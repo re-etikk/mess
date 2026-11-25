@@ -1,15 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/animations/thali_animations.dart';
+import '../core/theme/thali_partner_theme.dart';
+import '../core/widgets/partner_widgets.dart';
 
-/// Full-screen promo & onboarding advertisement screen for first-time installed kitchen partners.
-/// Designed for high conversion, clear value proposition, and instant action:
-/// - Slide 1: Digital Counter QR Code & Paperless Attendance
-/// - Slide 2: Direct Student-to-Kitchen UPI & 0% Commissions
-/// - Slide 3: Live Menu, Timings & Plan Management
-/// - Top "Skip" action to jump straight to Sign In / Register
-/// - Bottom CTAs: "Register Kitchen / Partner" (Primary) and "Already a Partner? Sign In" (Secondary)
 class ProviderAdOnboardingScreen extends StatefulWidget {
   const ProviderAdOnboardingScreen({
     super.key,
@@ -26,257 +21,129 @@ class ProviderAdOnboardingScreen extends StatefulWidget {
 
 class _ProviderAdOnboardingScreenState extends State<ProviderAdOnboardingScreen> {
   final PageController _pageController = PageController();
-  int _currentPage = 0;
+  int _index = 0;
 
-  static const Color ink = Color(0xFF182435);
-  static const Color orange = Color(0xFFFF6B1A);
-  static const Color orangeSoft = Color(0xFFFFF0E5);
-  static const Color cream = Color(0xFFFBF6EE);
-  static const Color muted = Color(0xFF687382);
-  static const Color line = Color(0xFFE9E0D5);
-
-  final List<Map<String, dynamic>> _slides = [
-    {
-      'tag': 'SMART COUNTER QR',
-      'title': 'Zero Paper Registers, 100% Verified',
-      'subtitle':
-          'Replace manual khata registers and physical meal tokens. Display today\'s cryptographically signed counter QR code — students scan and verify their meal in 1 second.',
-      'icon': Icons.qr_code_scanner_rounded,
-      'badgeColor': Color(0xFFFFEDD5),
-      'badgeText': Color(0xFFC2410C),
-      'cardBg': Color(0xFFFFF7ED),
-      'iconColor': orange,
-    },
-    {
-      'tag': 'DIRECT SETTLEMENTS',
-      'title': 'Instant UPI, 0% Commissions',
-      'subtitle':
-          'Student subscription fees go directly to your registered UPI handle or QR code. Track real-time transactions, student approvals, and daily cash/UPI settlement statements.',
-      'icon': Icons.account_balance_wallet_rounded,
-      'badgeColor': Color(0xFFDCFCE7),
-      'badgeText': Color(0xFF15803D),
-      'cardBg': Color(0xFFF0FDF4),
-      'iconColor': Color(0xFF16A34A),
-    },
-    {
-      'tag': 'FULL CONTROL',
-      'title': 'Live Menu & Kitchen Management',
-      'subtitle':
-          'Update breakfast, lunch, snacks, and dinner menus instantly. Create custom monthly and meal-count plans, set slot timings, and toggle kitchen open/closed anytime.',
-      'icon': Icons.storefront_rounded,
-      'badgeColor': Color(0xFFFEF3C7),
-      'badgeText': Color(0xFFB45309),
-      'cardBg': Color(0xFFFFFBEB),
-      'iconColor': Color(0xFFD97706),
-    },
+  static const _slides = [
+    (
+      'LIVE KITCHEN QUEUE',
+      'Prep, Dispatch & Counter Check-In',
+      'See every subscriber meal for Breakfast, Lunch, and Dinner in real time, update cooking status, and read delivery instructions in one view.',
+      'assets/images/ui/illus_onboard_1.svg',
+      Icons.kitchen_outlined,
+    ),
+    (
+      'ONLINE & COUNTER CASH',
+      'Cashfree Online + Cash Approvals',
+      'Accept instant online subscriptions settled via Cashfree, or review and activate counter cash members in one tap.',
+      'assets/images/ui/illus_onboard_2.svg',
+      Icons.payments_outlined,
+    ),
+    (
+      'DAILY COUNTER QR',
+      'Instant Verified Meal Attendance',
+      'Display your kitchen\'s cryptographic counter QR code. Diners scan to check in, eliminating paper registers and token disputes.',
+      'assets/images/ui/illus_onboard_3.svg',
+      Icons.qr_code_2_rounded,
+    ),
   ];
 
-  Future<void> _handleSkipOrSignIn() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('thali_partner_has_seen_ad_onboarding', true);
-    } catch (_) {}
-    widget.onSignIn();
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
-  Future<void> _handleRegister() async {
+  Future<void> _markSeenAndGo(VoidCallback action) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('thali_partner_has_seen_ad_onboarding', true);
     } catch (_) {}
-    widget.onRegister();
+    action();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: cream,
+      backgroundColor: ThaliColors.card,
       body: SafeArea(
         child: Column(
           children: [
-            // Top Bar: Partner Brand + Skip Button
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.fromLTRB(20, 14, 14, 8),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: orangeSoft,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.restaurant_rounded,
-                          color: orange,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'THALI',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.5,
-                              color: ink,
-                              height: 1.1,
-                            ),
-                          ),
-                          Text(
-                            'KITCHEN PARTNER HUB',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.8,
-                              color: orange,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  TextButton.icon(
-                    onPressed: _handleSkipOrSignIn,
-                    icon: const Text(
+                  const ThaliLogoMark(size: 34, withWordmark: true, subtitle: 'Partner'),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => _markSeenAndGo(widget.onSignIn),
+                    child: const Text(
                       'Skip',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: muted,
-                      ),
-                    ),
-                    label: const Icon(
-                      Icons.arrow_forward_ios_rounded,
-                      size: 13,
-                      color: muted,
-                    ),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      backgroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        side: const BorderSide(color: line),
-                      ),
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ThaliColors.muted),
                     ),
                   ),
                 ],
               ),
             ),
-
-            // Carousel Slides
             Expanded(
               child: PageView.builder(
                 controller: _pageController,
                 itemCount: _slides.length,
-                onPageChanged: (idx) => setState(() => _currentPage = idx),
-                itemBuilder: (context, index) {
-                  final slide = _slides[index];
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (_, i) {
+                  final s = _slides[i];
                   return Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 10, 22, 12),
+                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Visual Hero Card with Pulse Effect
                         Container(
-                          width: double.infinity,
-                          constraints: const BoxConstraints(maxHeight: 270),
-                          padding: const EdgeInsets.all(28),
+                          width: 240,
+                          height: 220,
+                          padding: const EdgeInsets.all(22),
                           decoration: BoxDecoration(
-                            color: slide['cardBg'] as Color,
+                            color: ThaliColors.primarySoft,
                             borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                              color: line,
-                              width: 1.5,
-                            ),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x0A182435),
-                                blurRadius: 16,
-                                offset: Offset(0, 8),
-                              ),
-                            ],
                           ),
-                          child: Center(
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                PulseRings(
-                                  size: 160,
-                                  color: slide['iconColor'] as Color,
-                                  ringCount: 3,
-                                ),
-                                Container(
-                                  width: 90,
-                                  height: 90,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: (slide['iconColor'] as Color).withOpacity(0.24),
-                                        blurRadius: 18,
-                                        offset: const Offset(0, 6),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Icon(
-                                    slide['icon'] as IconData,
-                                    color: slide['iconColor'] as Color,
-                                    size: 46,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          child: SvgPicture.asset(
+                            s.$4,
+                            placeholderBuilder: (_) => Icon(s.$5, size: 84, color: ThaliColors.primary),
                           ),
                         ),
-                        const SizedBox(height: 24),
-
-                        // Promotional Tag
+                        const SizedBox(height: 26),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: slide['badgeColor'] as Color,
-                            borderRadius: BorderRadius.circular(20),
+                            color: ThaliColors.primarySoft,
+                            borderRadius: BorderRadius.circular(99),
                           ),
                           child: Text(
-                            slide['tag'] as String,
-                            style: TextStyle(
-                              fontSize: 11,
+                            s.$1,
+                            style: const TextStyle(
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w800,
+                              color: ThaliColors.primaryDark,
                               letterSpacing: 0.8,
-                              color: slide['badgeText'] as Color,
                             ),
                           ),
                         ),
                         const SizedBox(height: 12),
-
-                        // Title
                         Text(
-                          slide['title'] as String,
+                          s.$2,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            fontSize: 23,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.3,
-                            color: ink,
-                            height: 1.2,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: ThaliColors.ink,
+                            letterSpacing: -0.4,
                           ),
                         ),
                         const SizedBox(height: 10),
-
-                        // Subtitle
                         Text(
-                          slide['subtitle'] as String,
+                          s.$3,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
-                            fontSize: 13.5,
-                            color: muted,
+                            fontSize: 14,
+                            color: ThaliColors.body,
                             height: 1.5,
                           ),
                         ),
@@ -286,82 +153,45 @@ class _ProviderAdOnboardingScreenState extends State<ProviderAdOnboardingScreen>
                 },
               ),
             ),
-
-            // Pagination Dots
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(
-                _slides.length,
-                (i) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
+              children: List.generate(_slides.length, (i) {
+                final active = _index == i;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
                   margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: _currentPage == i ? 24 : 8,
-                  height: 8,
+                  width: active ? 22 : 7,
+                  height: 7,
                   decoration: BoxDecoration(
-                    color: _currentPage == i ? orange : line,
-                    borderRadius: BorderRadius.circular(4),
+                    color: active ? ThaliColors.primary : ThaliColors.stroke,
+                    borderRadius: BorderRadius.circular(99),
                   ),
-                ),
-              ),
+                );
+              }),
             ),
-            const SizedBox(height: 22),
-
-            // Bottom CTAs
+            const SizedBox(height: 24),
             Padding(
-              padding: const EdgeInsets.fromLTRB(22, 0, 22, 20),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
               child: Column(
                 children: [
-                  SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: FilledButton(
-                      onPressed: _handleRegister,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: orange,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Register Kitchen / Partner',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 16,
-                            ),
-                          ),
-                          SizedBox(width: 8),
-                          Icon(Icons.arrow_forward_rounded, size: 20),
-                        ],
-                      ),
-                    ),
+                  PartnerActionButton(
+                    label: _index < _slides.length - 1 ? 'Next' : 'Register Your Kitchen',
+                    onPressed: () {
+                      if (_index < _slides.length - 1) {
+                        _pageController.nextPage(
+                          duration: const Duration(milliseconds: 280),
+                          curve: Curves.easeOutCubic,
+                        );
+                      } else {
+                        _markSeenAndGo(widget.onRegister);
+                      }
+                    },
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: OutlinedButton(
-                      onPressed: _handleSkipOrSignIn,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: ink,
-                        side: const BorderSide(color: line, width: 1.5),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        backgroundColor: Colors.white,
-                      ),
-                      child: const Text(
-                        'Already a Partner? Sign In',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
+                  PartnerActionButton(
+                    label: 'Already a Partner? Sign In',
+                    secondary: true,
+                    onPressed: () => _markSeenAndGo(widget.onSignIn),
                   ),
                 ],
               ),

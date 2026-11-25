@@ -1,89 +1,60 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../core/animations/thali_animations.dart';
-import '../../core/theme/mess_theme.dart';
-import '../../mess_app.dart';
-import '../onboarding/ad_onboarding_screen.dart';
+import '../../core/theme/thali_theme.dart';
+import '../../core/widgets/mess_widgets.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, required this.nextScreen});
+  final Widget nextScreen;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  Timer? _timer;
-
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 1800), () async {
-      if (!mounted) return;
-      bool hasSeenOnboarding = false;
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        hasSeenOnboarding = prefs.getBool('thali_has_seen_onboarding') ?? false;
-      } catch (_) {}
-
+    Future.delayed(const Duration(milliseconds: 1100), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        PageRouteBuilder<void>(
-          pageBuilder: (_, __, ___) => hasSeenOnboarding
-              ? const MessRootGate()
-              : const AdOnboardingScreen(),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child),
-          transitionDuration: const Duration(milliseconds: 300),
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => widget.nextScreen,
+          transitionDuration: const Duration(milliseconds: 350),
+          transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c),
         ),
       );
     });
   }
 
   @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: MessColors.cream,
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const InfinityTrail(
-                size: 64,
-                color: MessColors.orange,
-                strokeWidth: 3.5,
+      backgroundColor: ThaliColors.primary,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ThaliLogoMark(size: 74, whiteContainer: true),
+            const SizedBox(height: 18),
+            const Text(
+              'Thali',
+              style: TextStyle(
+                fontSize: 36,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: -0.9,
               ),
-              const SizedBox(height: 24),
-              const TextShimmer(
-                text: 'THALI',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 3.0,
-                  color: MessColors.navy,
-                ),
-                shimmerColor: MessColors.orange,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Home-style meals, every day',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withValues(alpha: 0.92),
               ),
-              const SizedBox(height: 6),
-              const Text(
-                'YOUR MEALS · YOUR CHOICE',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
-                  color: MessColors.muted,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

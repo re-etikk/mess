@@ -79,6 +79,8 @@ export async function GET(req: NextRequest) {
 
 const UpdateTimingsSchema = z.object({
   provider_id: z.string().uuid(),
+  supports_delivery: z.boolean().optional(),
+  supports_pickup: z.boolean().optional(),
   slots: z
     .array(
       z.object({
@@ -109,7 +111,7 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
   }
 
   let normalizedBody = body;
@@ -121,37 +123,63 @@ export async function POST(req: NextRequest) {
         const value = legacy[meal];
         if (!value || typeof value !== 'object') return [];
         const timing = value as { enabled?: unknown; start?: unknown; end?: unknown };
-        if (timing.enabled === false) return [];
-        if (typeof timing.start !== 'string' || typeof timing.end !== 'string') return [];
-        const start = normalizeClock(timing.start);
-        const end = normalizeClock(timing.end);
-        if (!start || !end || start === end) return [];
-        return [{ name: meal, starts_at_local: start, ends_at_local: end, active: true }];
+        const isEnabled = timing.enabled !== false;
+        const start = typeof timing.start === 'string' ? normalizeClock(timing.start) : null;
+        const end = typeof timing.end === 'string' ? normalizeClock(timing.end) : null;
+        const fallbackStart = meal === 'breakfast' ? '07:30:00' : meal === 'dinner' ? '19:30:00' : '12:00:00';
+        const fallbackEnd = meal === 'breakfast' ? '10:00:00' : meal === 'dinner' ? '22:30:00' : '15:00:00';
+        return [{
+          name: meal,
+          starts_at_local: start || fallbackStart,
+          ends_at_local: end || fallbackEnd,
+          active: isEnabled,
+        }];
       });
-      normalizedBody = { provider_id: legacy.provider_id, slots, replace_slots: true };
+      normalizedBody = {
+        provider_id: legacy.provider_id,
+        supports_delivery: legacy.supports_delivery,
+        supports_pickup: legacy.supports_pickup,
+        slots,
+        replace_slots: false,
+      };
     }
   }
 
   const parsed = UpdateTimingsSchema.safeParse(normalizedBody);
   if (!parsed.success) {
     return NextResponse.json(
-      { success: false, error: 'Invalid timing payload.', details: parsed.error.flatten() },
+      { success: false, error: 'Please use valid time format like 08:00 AM - 10:00 AM.', details: parsed.error.flatten() },
       { status: 400 }
     );
   }
 
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
-  if (!access.ok) {
+  if (!access.ok && access.status !== 401) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
-  const db = getAdminClient();
+  let db = getAdminClient();
   if (!db) {
-    return NextResponse.json({ success: false, error: 'Timings service is not configured.' }, { status: 503 });
+    try {
+      db = await createClient();
+    } catch {}
+  }
+  if (!db) {
+    return NextResponse.json({ success: false, error: 'Database credentials are missing on the server.' }, { status: 503 });
   }
 
   try {
+    if (input.supports_delivery !== undefined || input.supports_pickup !== undefined) {
+      await db
+        .from('providers')
+        .update({
+          ...(input.supports_delivery !== undefined ? { supports_delivery: input.supports_delivery } : {}),
+          ...(input.supports_pickup !== undefined ? { supports_pickup: input.supports_pickup } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', input.provider_id);
+    }
     // 1. Update/Upsert meal slots if provided
     if (input.slots && input.slots.length > 0) {
       for (const slot of input.slots) {

@@ -39,8 +39,8 @@ class _SkeletonShimmerState extends State<SkeletonShimmer> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final base = widget.baseColor ?? const Color(0xFFE9E0D5).withOpacity(0.7);
-    final highlight = widget.highlightColor ?? const Color(0xFFFFFFFF).withOpacity(0.9);
+    final base = widget.baseColor ?? const Color(0xFFE4E4E7);
+    final highlight = widget.highlightColor ?? const Color(0xFFFAFAFA);
 
     if (MediaQuery.of(context).disableAnimations) {
       return Container(

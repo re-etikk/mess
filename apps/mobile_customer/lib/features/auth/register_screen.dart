@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/services/customer_auth_service.dart';
-import '../../core/theme/mess_theme.dart';
+import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
-import '../home/home_shell.dart';
-import '../../mess_app.dart';
-import 'login_screen.dart';
+import '../setup/profile_location_setup_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
+
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
@@ -20,8 +19,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _email = TextEditingController();
   final _phone = TextEditingController();
   final _password = TextEditingController();
-  bool _showPassword = false;
-  bool _terms = false;
+  bool _obscure = true;
+  bool _agree = false;
   bool _busy = false;
 
   @override
@@ -33,14 +32,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  Future<void> _register() async {
-    if (!_key.currentState!.validate()) return;
-    if (!_terms) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please accept the Terms and Privacy Policy to continue.')));
+  Future<void> _submit() async {
+    if (!(_key.currentState?.validate() ?? false)) return;
+    if (!_agree) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please accept the Terms of Service and Privacy Policy.')),
+      );
       return;
     }
+
+    final state = AppStateScope.of(context, listen: false);
     setState(() => _busy = true);
-    final state = AppStateScope.of(context);
     try {
       final result = await CustomerAuthService.register(
         name: _name.text.trim(),
@@ -53,21 +55,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
         emailOrPhone: result.email,
         name: result.name,
         userId: result.userId,
-          token: result.token,
-          refreshToken: result.refreshToken,
+        token: result.token,
+        refreshToken: result.refreshToken,
       );
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Account created for ${result.name}!')));
       Navigator.of(context).pushAndRemoveUntil(
-        messRoute(const HomeShell(key: ValueKey('home-shell'))),
+        messRoute(const ProfileLocationSetupScreen()),
         (route) => false,
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString().replaceAll('Exception: ', '')),
-          backgroundColor: MessColors.red,
-        ),
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -75,87 +73,114 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(leading: IconButton(onPressed: () => Navigator.maybePop(context), icon: const Icon(Icons.arrow_back_rounded)), title: const Text('Create account')),
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 430),
-                child: Form(
-                  key: _key,
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    const Center(child: MessLogo(compact: true)),
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: ThaliColors.card,
+      appBar: AppBar(title: const Text('Create Account')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 430),
+              child: Form(
+                key: _key,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Center(child: ThaliLogoMark(size: 40, withWordmark: true)),
                     const SizedBox(height: 22),
-                    Text('Join MESS', style: Theme.of(context).textTheme.headlineLarge),
+                    const Text(
+                      'Join Thali',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                    ),
                     const SizedBox(height: 6),
-                    Text('One account for your plans and meal history.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: MessColors.muted)),
-                    const SizedBox(height: 24),
+                    const Text(
+                      'Create one account for daily tiffin subscriptions, skips, and counter check-ins.',
+                      style: TextStyle(fontSize: 13.5, color: ThaliColors.muted, height: 1.4),
+                    ),
+                    const SizedBox(height: 20),
                     TextFormField(
                       controller: _name,
                       textCapitalization: TextCapitalization.words,
-                      autofillHints: const [AutofillHints.name],
-                      decoration: const InputDecoration(labelText: 'Full name', prefixIcon: Icon(Icons.badge_outlined)),
+                      decoration: const InputDecoration(
+                        labelText: 'Full Name',
+                        prefixIcon: Icon(Icons.person_outline_rounded),
+                      ),
                       validator: (v) => v == null || v.trim().length < 2 ? 'Enter your full name.' : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _email,
                       keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [AutofillHints.email],
-                      decoration: const InputDecoration(labelText: 'Email address', prefixIcon: Icon(Icons.mail_outline_rounded)),
-                      validator: (v) => v != null && v.contains('@') && v.contains('.') ? null : 'Enter a valid email address.',
+                      decoration: const InputDecoration(
+                        labelText: 'Email Address',
+                        prefixIcon: Icon(Icons.mail_outline_rounded),
+                      ),
+                      validator: (v) => v != null && v.contains('@') && v.contains('.') ? null : 'Enter a valid email.',
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _phone,
                       keyboardType: TextInputType.phone,
-                      autofillHints: const [AutofillHints.telephoneNumber],
-                      decoration: const InputDecoration(labelText: 'Phone number (optional)', prefixIcon: Icon(Icons.phone_outlined)),
-                      validator: (v) => v != null && v.trim().isNotEmpty && v.trim().length < 10 ? 'Enter a valid phone number.' : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Mobile Number (optional)',
+                        prefixIcon: Icon(Icons.phone_outlined),
+                      ),
+                      validator: (v) => v != null && v.trim().isNotEmpty && v.trim().length < 10
+                          ? 'Enter a valid 10-digit number.'
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _password,
-                      obscureText: !_showPassword,
-                      autofillHints: const [AutofillHints.newPassword],
+                      obscureText: _obscure,
                       decoration: InputDecoration(
-                        labelText: 'Create password',
+                        labelText: 'Password',
                         prefixIcon: const Icon(Icons.lock_outline_rounded),
                         suffixIcon: IconButton(
-                          onPressed: () => setState(() => _showPassword = !_showPassword),
-                          icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                          icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
                         ),
                       ),
-                      validator: (v) => v == null || v.length < 8 ? 'Use at least 8 characters.' : null,
+                      validator: (v) => v == null || v.length < 6 ? 'Minimum 6 characters required.' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      value: _agree,
+                      activeColor: ThaliColors.primary,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'I agree to the Terms of Service and Privacy Policy.',
+                        style: TextStyle(fontSize: 12.5, color: ThaliColors.body),
+                      ),
+                      onChanged: (v) => setState(() => _agree = v ?? false),
+                    ),
+                    const SizedBox(height: 16),
+                    MessActionButton(
+                      label: 'Create Account',
+                      loading: _busy,
+                      onPressed: _submit,
                     ),
                     const SizedBox(height: 14),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: _terms,
-                      onChanged: (value) => setState(() => _terms = value ?? false),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text('I agree to the Terms and Privacy Policy.', style: TextStyle(fontSize: 12.5)),
-                      activeColor: MessColors.orange,
-                      dense: true,
-                    ),
-                    const SizedBox(height: 10),
-                    MessActionButton(label: 'Create account', loading: _busy, onPressed: _register),
-                    const SizedBox(height: 22),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text('Already have an account? ', style: TextStyle(color: MessColors.muted)),
-                        TextButton(onPressed: () => Navigator.pushReplacement(context, messRoute(const LoginScreen())), child: const Text('Sign in')),
+                        const Text('Already have an account?', style: TextStyle(color: ThaliColors.muted, fontSize: 13)),
+                        TextButton(
+                          onPressed: () => Navigator.maybePop(context),
+                          child: const Text('Sign In', style: TextStyle(color: ThaliColors.primary, fontWeight: FontWeight.w700)),
+                        ),
                       ],
                     ),
-                  ]),
+                  ],
                 ),
               ),
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }

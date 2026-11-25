@@ -1,139 +1,179 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { createClient } from '@/lib/supabase/server';
 import { platformStore } from '@/lib/platform-service';
 
+export const dynamic = 'force-dynamic';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
+const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+
+function getFallbackClient() {
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+function displayClock(value?: string | null): string {
+  if (!value) return '';
+  const [hourText, minuteText] = value.split(':');
+  const hour = Number(hourText);
+  if (isNaN(hour)) return value;
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${String(hour12).padStart(2, '0')}:${minuteText || '00'} ${suffix}`;
+}
+
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const db = getAdminClient();
-  const slot = new URL(req.url).searchParams.get('slot');
+  let db = getAdminClient();
+  if (!db) {
+    try {
+      db = await createClient();
+    } catch {}
+  }
+  db = db || getFallbackClient();
+  const searchParams = new URL(req.url).searchParams;
+  const slot = searchParams.get('slot');
+  const dayFilter = searchParams.get('day');
   const providerId = params.id;
 
-  // 1. Try DB first
   if (db) {
     try {
       const { data: provider } = await db
         .from('providers')
-        .select('id,display_name,address,phone,status')
+        .select('id,display_name,description,address_line1,locality,city,public_phone,public_email,cover_path,supports_pickup,supports_delivery,status')
         .eq('id', providerId)
         .maybeSingle();
 
       if (provider) {
-        let slotId: string | null = null;
-        if (slot) {
-          const { data } = await db
-            .from('meal_slots')
-            .select('id,name')
-            .eq('provider_id', provider.id)
-            .eq('active', true)
-            .ilike('name', slot)
-            .maybeSingle();
-          slotId = data?.id ?? null;
+        const [{ data: slots }, { data: dbItems }] = await Promise.all([
+          db.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', provider.id).order('starts_at_local'),
+          db.from('menu_items').select('id,name,description,category,dietary_type,price_paise,meal_slot_id,is_add_on,max_quantity,active,day_of_week,item_kind').eq('provider_id', provider.id).eq('active', true).order('name'),
+        ]);
+
+        let filteredItems = dbItems ?? [];
+        if (dayFilter && dayFilter !== 'Daily') {
+          const dayMatched = filteredItems.filter((it: any) => !it.day_of_week || it.day_of_week === dayFilter || it.day_of_week === 'Daily');
+          filteredItems = dayMatched;
         }
 
-        const { data: dbItems } = await db
-          .from('menu_items')
-          .select('id,name,description,category,dietary_type,price_paise,active,available_from,available_until')
-          .eq('provider_id', provider.id)
-          .eq('active', true)
-          .order('name');
-
-        const targetSlot = (slot || 'lunch').toUpperCase();
-        const storeMenu = platformStore.menus.get(`${providerId}_Daily_${targetSlot}`) || platformStore.menus.get(`${providerId}_Daily_LUNCH`);
-
-        const items = dbItems ?? [];
-        const includedDb = items.filter((item) => Number(item.price_paise) === 0);
-        const extraDb = items.filter((item) => Number(item.price_paise) > 0);
-
-        // Merge in items from platformStore
-        const combinedIncluded: any[] = [...includedDb];
-        if (storeMenu?.items_included) {
-          for (const incName of storeMenu.items_included) {
-            if (!combinedIncluded.some((x) => x.name.toLowerCase() === incName.toLowerCase())) {
-              combinedIncluded.push({
-                id: `store-inc-${incName.toLowerCase().replace(/\s+/g, '-')}`,
-                name: incName,
-                description: 'Fresh prepared standard thali portion',
-                price_paise: 0,
-                dietary_type: 'vegetarian',
-                active: true,
-              });
-            }
-          }
+        if (slot && slots?.length) {
+          const targetSlot = slots.find((s) => s.name.toLowerCase() === slot.toLowerCase());
+          const slotItems = targetSlot
+            ? filteredItems.filter((i: any) => i.meal_slot_id === targetSlot.id || (i.description || '').toLowerCase().includes(slot.toLowerCase()))
+            : [];
+          const included = slotItems.filter((i: any) => !i.is_add_on && Number(i.price_paise || 0) === 0);
+          const extra = slotItems.filter((i: any) => i.is_add_on || Number(i.price_paise || 0) > 0);
+          return NextResponse.json({
+            success: true,
+            provider: {
+              id: provider.id,
+              name: provider.display_name,
+              address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
+              phone: provider.public_phone,
+              description: provider.description,
+              supports_pickup: provider.supports_pickup,
+              supports_delivery: provider.supports_delivery,
+            },
+            slot: slot.toUpperCase(),
+            meal_slot_id: targetSlot?.id ?? null,
+            menu: {
+              items_included: included,
+              items_extra: extra,
+              items: [...included, ...extra],
+            },
+          });
         }
 
-        const combinedExtra: any[] = [...extraDb];
-        if (storeMenu?.items_extra) {
-          for (const ext of storeMenu.items_extra) {
-            if (!combinedExtra.some((x) => x.name.toLowerCase() === ext.name.toLowerCase())) {
-              combinedExtra.push({
-                id: `store-ext-${ext.name.toLowerCase().replace(/\s+/g, '-')}`,
-                name: ext.name,
-                description: 'Add-on extra',
-                price_paise: (ext.price || 30) * 100,
-                dietary_type: 'vegetarian',
-                active: true,
-              });
-            }
-          }
-        }
+        // Return grouped menus across active slots cleanly from DB
+        const activeSlots = (slots ?? []).filter((s) => s.active !== false);
+        const timings = Object.fromEntries(
+          (slots ?? []).map((s) => [
+            String(s.name).toLowerCase(),
+            {
+              enabled: s.active !== false,
+              start: displayClock(s.starts_at_local),
+              end: displayClock(s.ends_at_local),
+            },
+          ])
+        );
+        const groupedMenus = activeSlots.map((s) => {
+          const sItems = filteredItems.filter(
+            (i: any) => i.meal_slot_id === s.id || (i.description || '').toLowerCase().includes(s.name.toLowerCase())
+          );
+          return {
+            slot: s.name.toUpperCase(),
+            slot_id: s.id,
+            starts_at_local: s.starts_at_local,
+            ends_at_local: s.ends_at_local,
+            enabled: s.active !== false,
+            items_included: sItems.filter((i: any) => !i.is_add_on).map((i: any) => i.name),
+            items_extra: sItems
+              .filter((i: any) => i.is_add_on)
+              .map((i: any) => ({
+                id: i.id,
+                name: i.name,
+                kind: i.item_kind || 'addon',
+                price_paise: Number(i.price_paise || 0),
+                price: Number(i.price_paise || 0) / 100,
+              })),
+            items: sItems,
+          };
+        });
 
         return NextResponse.json(
           {
             success: true,
-            provider: { id: provider.id, name: provider.display_name, address: provider.address, phone: provider.phone },
-            slot: slot || null,
-            meal_slot_id: slotId,
-            menu: {
-              items_included: combinedIncluded,
-              items_extra: combinedExtra,
-              items: [...combinedIncluded, ...combinedExtra],
+            provider: {
+              id: provider.id,
+              name: provider.display_name,
+              address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
+              phone: provider.public_phone,
+              description: provider.description,
+              cover_path: provider.cover_path,
+              supports_pickup: provider.supports_pickup,
+              supports_delivery: provider.supports_delivery,
             },
+            day: dayFilter || 'Daily',
+            timings,
+            menus: groupedMenus,
           },
-          { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } }
+          { headers: { 'Cache-Control': 'private, no-store' } }
         );
       }
-    } catch (_) {}
+    } catch (e: any) {
+      console.warn('Mess menu DB error:', e?.message);
+    }
   }
 
-  // 2. Resilient platformStore fallback
+  // Only check real persisted entries in platformStore (no fabricated menu items!)
+  const targetSlot = (slot || 'LUNCH').toUpperCase();
+  const keyDay = dayFilter || 'Daily';
+  const storeMenu = platformStore.menus.get(`${providerId}_${keyDay}_${targetSlot}`) || platformStore.menus.get(`${providerId}_Daily_${targetSlot}`);
   const storeProv = platformStore.providers.get(providerId);
-  const targetSlot = (slot || 'lunch').toUpperCase();
-  const storeMenu = platformStore.menus.get(`${providerId}_Daily_${targetSlot}`) || platformStore.menus.get(`${providerId}_Daily_LUNCH`);
-
-  const included = (storeMenu?.items_included || ['Dal Tadka', 'Basmati Rice', '4 Rotis', 'Sabzi of the day', 'Salad']).map((name, i) => ({
-    id: `item-inc-${i}`,
-    name,
-    description: 'Fresh prepared standard thali portion',
-    price_paise: 0,
-    dietary_type: 'vegetarian',
-    active: true,
-  }));
-
-  const extra = (storeMenu?.items_extra || [
-    { name: 'Gulab Jamun (2 pcs)', price: 30 },
-    { name: 'Extra Paneer Sabzi', price: 50 },
-  ]).map((e, i) => ({
-    id: `item-ext-${i}`,
-    name: e.name,
-    description: 'Add-on extra',
-    price_paise: (e.price || 30) * 100,
-    dietary_type: 'vegetarian',
-    active: true,
-  }));
 
   return NextResponse.json({
     success: true,
-    provider: {
-      id: providerId,
-      name: storeProv?.display_name || 'Mess Partner',
-      address: storeProv?.address || 'Campus Road',
-      phone: storeProv?.phone || '',
-    },
-    slot: slot || 'lunch',
-    meal_slot_id: `slot-${targetSlot.toLowerCase()}`,
+    provider: storeProv
+      ? { id: storeProv.id, name: storeProv.display_name, address: storeProv.address, phone: storeProv.phone }
+      : { id: providerId, name: 'Mess Partner' },
+    day: keyDay,
+    slot: targetSlot,
     menu: {
-      items_included: included,
-      items_extra: extra,
-      items: [...included, ...extra],
+      items_included: (storeMenu?.items_included || []).map((name, i) => ({
+        id: `inc-${i}`,
+        name,
+        price_paise: 0,
+        active: true,
+      })),
+      items_extra: (storeMenu?.items_extra || []).map((e, i) => ({
+        id: `ext-${i}`,
+        name: e.name,
+        price_paise: Math.round((e.price || 0) * 100),
+        price: e.price || 0,
+        active: true,
+      })),
     },
   });
 }
