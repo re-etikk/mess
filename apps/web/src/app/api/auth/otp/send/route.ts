@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { randomInt } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,61 +24,55 @@ export async function POST(req: NextRequest) {
   const raw = String(body.identifier || body.email || body.phone || '').trim();
   const purpose = String(body.purpose || 'profile_update');
 
-  if (!raw) {
-    return NextResponse.json({ success: false, error: 'Phone or email is required.' }, { status: 400 });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+    return NextResponse.json({ success: false, error: 'A valid email address is required. Phone OTP is disabled.' }, { status: 400 });
   }
 
-  const isEmail = raw.includes('@');
-  const cleanPhone = raw.replace(/\D/g, '');
-
-  if (!isEmail && cleanPhone.length < 10) {
-    return NextResponse.json({ success: false, error: 'Please enter a valid 10-digit phone number or email address.' }, { status: 400 });
-  }
-
-  const identifier = isEmail ? raw.toLowerCase() : cleanPhone.slice(-10);
-  const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+  const identifier = raw.toLowerCase();
+  const otpCode = randomInt(100000, 1000000).toString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
   const admin = getAdminClient();
-  if (admin) {
-    try {
-      // Invalidate prior unused OTPs for this identifier
-      await admin.from('auth_otps').delete().eq('identifier', identifier);
-
-      // Insert new OTP
-      await admin.from('auth_otps').insert({
-        identifier,
-        otp_code: otpCode,
-        purpose,
-        expires_at: expiresAt,
-        verified: false,
-        attempts: 0,
-      });
-    } catch (e: any) {
-      console.warn('DB auth_otps insert error:', e?.message);
-    }
+  if (!admin) {
+    return NextResponse.json({ success: false, error: 'Authentication service is not configured on this server.' }, { status: 503 });
+  }
+  const { error: deleteError } = await admin.from('auth_otps').delete().eq('identifier', identifier);
+  if (deleteError) {
+    console.error('Could not invalidate previous OTP:', deleteError.message);
+    return NextResponse.json({ success: false, error: 'Could not send the verification code. Please try again later.' }, { status: 503 });
+  }
+  const { error: insertError } = await admin.from('auth_otps').insert({
+    identifier,
+    otp_code: otpCode,
+    purpose,
+    expires_at: expiresAt,
+    verified: false,
+    attempts: 0,
+  });
+  if (insertError) {
+    console.error('Could not save OTP:', insertError.message);
+    return NextResponse.json({ success: false, error: 'Could not send the verification code. Please try again later.' }, { status: 503 });
   }
 
-  // Dispatch Email or SMS
+  // Dispatch the verification code by email.
   let delivered = false;
+  let deliveryNote: string | undefined;
 
-  // 1. Send via Resend if email
-  if (isEmail) {
-    const resendApiKey = process.env.RESEND_API_KEY;
-    if (resendApiKey) {
-      try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${resendApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: process.env.RESEND_FROM_EMAIL || 'Thali Security <onboarding@resend.dev>',
-            to: [identifier],
-            subject: `${otpCode} is your Thali verification code`,
-            text: `Your Thali verification code is ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
-            html: `
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (resendApiKey) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM_EMAIL || 'Thali Security <onboarding@resend.dev>',
+          to: [identifier],
+          subject: `${otpCode} is your Thali verification code`,
+          text: `Your Thali verification code is ${otpCode}. Valid for 10 minutes. Do not share with anyone.`,
+          html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border: 1px solid #E2E8F0; border-radius: 16px;">
                 <div style="display: flex; align-items: center; margin-bottom: 20px;">
                   <span style="font-size: 24px; font-weight: 900; color: #FF6B1A;">THALI</span>
@@ -91,40 +86,28 @@ export async function POST(req: NextRequest) {
                 <p style="color: #94A3B8; font-size: 11px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
               </div>
             `,
-          }),
-        });
-        if (res.ok) delivered = true;
-      } catch (err: any) {
-        console.warn('Resend email error:', err?.message);
+        }),
+      });
+      if (res.ok) {
+        delivered = true;
+      } else {
+        const errJson = await res.json().catch(() => null);
+        deliveryNote = errJson?.message || `Email provider HTTP ${res.status}`;
       }
+    } catch (err: any) {
+      deliveryNote = err?.message;
+      console.warn('Resend email error:', err?.message);
     }
   } else {
-    // 2. Send via Fast2SMS if Indian phone
-    const fast2SmsKey = process.env.FAST2SMS_API_KEY;
-    if (fast2SmsKey && identifier.length === 10) {
-      try {
-        const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-          method: 'POST',
-          headers: {
-            authorization: fast2SmsKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            route: 'otp',
-            variables_values: otpCode,
-            numbers: identifier,
-          }),
-        });
-        const smsJson = await res.json().catch(() => null);
-        if (res.ok && smsJson && smsJson.return === true) {
-          delivered = true;
-        } else {
-          console.warn('Fast2SMS response:', smsJson);
-        }
-      } catch (err: any) {
-        console.warn('Fast2SMS error:', err?.message);
-      }
-    }
+    deliveryNote = 'RESEND_API_KEY not configured';
+  }
+
+  if (!delivered && process.env.NODE_ENV === 'production') {
+    console.error('OTP email delivery failed:', deliveryNote || 'No email provider is configured');
+    return NextResponse.json(
+      { success: false, error: 'Could not send the verification code. Please try again later.' },
+      { status: deliveryNote?.includes('not configured') ? 503 : 502 }
+    );
   }
 
   return NextResponse.json({
@@ -134,6 +117,7 @@ export async function POST(req: NextRequest) {
     message: delivered
       ? `Verification code sent to ${maskIdentifier(identifier)}.`
       : `Verification code generated. Valid for 10 minutes.`,
-    test_otp: !delivered || process.env.NODE_ENV !== 'production' ? otpCode : undefined,
+    delivery_note: !delivered && process.env.NODE_ENV !== 'production' ? deliveryNote : undefined,
+    test_otp: process.env.NODE_ENV !== 'production' ? otpCode : undefined,
   });
 }

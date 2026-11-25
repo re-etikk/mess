@@ -71,8 +71,8 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
 
   Future<void> _sendOtp() async {
     final id = _identifierCtrl.text.trim();
-    if (id.isEmpty) {
-      setState(() => _error = 'Enter your registered email or mobile number.');
+    if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(id)) {
+      setState(() => _error = 'Enter a valid partner email address.');
       return;
     }
     setState(() {
@@ -236,19 +236,16 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                       ),
                       const SizedBox(height: 20),
                       Text(
-                        _isPasswordMode ? 'Partner Email' : 'Email or 10-Digit Mobile',
+                        'Partner Email',
                         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: ThaliColors.ink),
                       ),
                       const SizedBox(height: 6),
                       TextField(
                         controller: _identifierCtrl,
-                        keyboardType: _isPasswordMode ? TextInputType.emailAddress : TextInputType.text,
+                        keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
-                          hintText: _isPasswordMode ? 'owner@kitchen.com' : 'email@kitchen.com or 9876543210',
-                          prefixIcon: Icon(
-                            _isPasswordMode ? Icons.mail_outline_rounded : Icons.person_outline_rounded,
-                            color: ThaliColors.muted,
-                          ),
+                          hintText: 'owner@kitchen.com',
+                          prefixIcon: const Icon(Icons.mail_outline_rounded, color: ThaliColors.muted),
                         ),
                       ),
                       if (_isPasswordMode) ...[
