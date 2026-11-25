@@ -33,12 +33,13 @@ class _MessDetailScreenState extends State<MessDetailScreen> {
   Future<void> _fetchLive() async {
     if (!mounted) return;
     try {
-      final repo = AppStateScope.of(context, listen: false).repository;
-      final live = await repo.fetchLiveProvider(widget.provider.id);
+      final state = AppStateScope.of(context, listen: false);
+      final live = await state.repository.fetchLiveProvider(widget.provider.id);
       if (live != null && mounted) {
         setState(() {
           _currentProvider = live;
         });
+        state.getProviders();
       }
     } catch (_) {}
   }

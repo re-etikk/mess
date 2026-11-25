@@ -4,8 +4,10 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mess_models.dart';
+import '../models/app_notification.dart';
 import '../repositories/http_mess_repository.dart';
 import '../repositories/mess_repository.dart';
+import '../services/cashfree_payment_service.dart';
 import '../services/customer_auth_service.dart';
 
 class AppState extends ChangeNotifier {
@@ -32,7 +34,101 @@ class AppState extends ChangeNotifier {
   int currentTab = 0;
   List<MessProvider> _cachedProviders = [];
 
+  static const String _notificationsKey = 'thali_customer_saved_notifications_v1';
+  final List<AppNotification> _notifications = [];
+  List<AppNotification> get notifications => List.unmodifiable(_notifications);
+  int get unreadNotificationsCount => _notifications.where((n) => !n.isRead).length;
+
+  Future<void> _loadNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_notificationsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final list = jsonDecode(raw) as List<dynamic>;
+        _notifications.clear();
+        for (final item in list) {
+          if (item is Map<String, dynamic>) {
+            _notifications.add(AppNotification.fromJson(item));
+          }
+        }
+      }
+      if (_notifications.isEmpty) {
+        _notifications.add(AppNotification(
+          id: 'welcome-01',
+          title: 'Welcome to MESS!',
+          message: 'Explore messes in your area, select your thali pass, and scan at the counter for seamless dining.',
+          timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
+          type: NotificationType.general,
+          isRead: false,
+        ));
+        await _saveNotifications();
+      }
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  Future<void> _saveNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = _notifications.take(50).map((n) => n.toJson()).toList();
+      await prefs.setString(_notificationsKey, jsonEncode(list));
+    } catch (_) {}
+  }
+
+  void addNotification({
+    required String title,
+    required String message,
+    NotificationType type = NotificationType.general,
+    String? actionRoute,
+    Map<String, dynamic>? metadata,
+  }) {
+    final notif = AppNotification(
+      id: 'notif-${DateTime.now().millisecondsSinceEpoch}',
+      title: title,
+      message: message,
+      timestamp: DateTime.now(),
+      type: type,
+      isRead: false,
+      actionRoute: actionRoute,
+      metadata: metadata,
+    );
+    _notifications.insert(0, notif);
+    if (_notifications.length > 50) _notifications.removeLast();
+    _saveNotifications();
+    notifyListeners();
+  }
+
+  void markNotificationRead(String id) {
+    final idx = _notifications.indexWhere((n) => n.id == id);
+    if (idx != -1 && !_notifications[idx].isRead) {
+      _notifications[idx] = _notifications[idx].copyWith(isRead: true);
+      _saveNotifications();
+      notifyListeners();
+    }
+  }
+
+  void markAllNotificationsRead() {
+    bool changed = false;
+    for (int i = 0; i < _notifications.length; i++) {
+      if (!_notifications[i].isRead) {
+        _notifications[i] = _notifications[i].copyWith(isRead: true);
+        changed = true;
+      }
+    }
+    if (changed) {
+      _saveNotifications();
+      notifyListeners();
+    }
+  }
+
+  void clearNotifications() {
+    _notifications.clear();
+    _saveNotifications();
+    notifyListeners();
+  }
+
   Future<void> initSession() async {
+    await _loadNotifications();
     try {
       final prefs = await SharedPreferences.getInstance();
       final str = prefs.getString(_sessionKey);
@@ -43,6 +139,13 @@ class AppState extends ChangeNotifier {
         customerEmail = data['customerEmail']?.toString() ?? '';
         customerPhone = data['customerPhone']?.toString() ?? '';
         customerAvatar = data['customerAvatar']?.toString() ?? '';
+        if (customerAvatar.isEmpty) {
+          customerAvatar = prefs.getString('thali_customer_avatar_$customerId') ??
+              prefs.getString('thali_customer_avatar_global') ?? '';
+        }
+        if (customerPhone.isEmpty) {
+          customerPhone = prefs.getString('thali_customer_phone_$customerId') ?? '';
+        }
         location = data['location']?.toString() ?? 'Sector 62, Noida';
         authToken = data['authToken']?.toString() ?? '';
         refreshToken = data['refreshToken']?.toString() ?? '';
@@ -152,6 +255,7 @@ class AppState extends ChangeNotifier {
     if (_cachedProviders.isNotEmpty && (selectedProviderId.isEmpty || !_cachedProviders.any((p) => p.id == selectedProviderId))) {
       selectedProviderId = _cachedProviders.first.id;
     }
+    notifyListeners();
     return providers;
   }
 
@@ -196,10 +300,16 @@ class AppState extends ChangeNotifier {
   void signIn({required String emailOrPhone, required String name, String? userId, String? token, String? refreshToken}) {
     customerEmail = emailOrPhone.contains('@') ? emailOrPhone.trim() : '$emailOrPhone@student.local';
     customerName = name.trim().isEmpty ? _nameFromEmail(customerEmail) : name.trim();
-    if (token != null) authToken = token;
+    if (token != null && token.isNotEmpty) {
+      authToken = token;
+    } else if (authToken.isEmpty) {
+      authToken = 'cust_session_${DateTime.now().millisecondsSinceEpoch}';
+    }
     if (refreshToken != null) this.refreshToken = refreshToken;
     if (userId != null && userId.isNotEmpty) {
       customerId = userId;
+    } else if (customerId.isEmpty) {
+      customerId = 'usr-cust-${DateTime.now().millisecondsSinceEpoch}';
     }
     isSignedIn = true;
     notifyListeners();
@@ -271,6 +381,11 @@ class AppState extends ChangeNotifier {
     _dailyMeal = null;
     selectedProviderId = plan.providerId;
     clearAddOns();
+    addNotification(
+      title: 'Pass Activated 🎉',
+      message: 'Your ${plan.name} has been activated. Enjoy healthy, delicious meals!',
+      type: NotificationType.subscription,
+    );
     notifyListeners();
     _persistSession();
     return subscription;
@@ -278,8 +393,18 @@ class AppState extends ChangeNotifier {
 
   Future<Map<String, dynamic>> fetchPaymentSettings(String providerId) => repository.fetchPaymentSettings(providerId);
 
-  Future<Map<String, dynamic>> getUpgradeQuote({required String subscriptionId, required String targetPlanId}) =>
-      repository.getUpgradeQuote(subscriptionId: subscriptionId, targetPlanId: targetPlanId);
+  Future<Map<String, dynamic>> getUpgradeQuote({
+    required String subscriptionId,
+    required String targetPlanId,
+    ActiveSubscription? currentSub,
+    MealPlan? targetPlan,
+  }) =>
+      repository.getUpgradeQuote(
+        subscriptionId: subscriptionId,
+        targetPlanId: targetPlanId,
+        currentSub: currentSub,
+        targetPlan: targetPlan,
+      );
 
   Future<Map<String, dynamic>> requestPlanUpgrade({
     required String subscriptionId,
@@ -287,14 +412,108 @@ class AppState extends ChangeNotifier {
     String paymentMode = 'counter_cash',
     String? receiptUrl,
     String? utrReference,
-  }) =>
-      repository.requestPlanUpgrade(
-        subscriptionId: subscriptionId,
-        targetPlanId: targetPlanId,
-        paymentMode: paymentMode,
-        receiptUrl: receiptUrl,
-        utrReference: utrReference,
+    ActiveSubscription? currentSub,
+    MealPlan? targetPlan,
+  }) async {
+    final res = await repository.requestPlanUpgrade(
+      subscriptionId: subscriptionId,
+      targetPlanId: targetPlanId,
+      paymentMode: paymentMode,
+      receiptUrl: receiptUrl,
+      utrReference: utrReference,
+      currentSub: currentSub,
+      targetPlan: targetPlan,
+    );
+    addNotification(
+      title: 'Upgrade Requested ⚡',
+      message: 'Upgrade to ${targetPlan?.name ?? "selected plan"} requested. Complete payment at counter to switch.',
+      type: NotificationType.upgrade,
+    );
+    return res;
+  }
+
+  Future<Map<String, dynamic>> payWithCashfree({
+    required String purpose,
+    required MessProvider provider,
+    MealPlan? plan,
+    String? slotId,
+    ActiveSubscription? currentSub,
+    int addOnsPaise = 0,
+  }) async {
+    final order = await repository.createCashfreeOrder(
+      purpose: purpose,
+      providerId: provider.id,
+      customerId: customerId,
+      customerName: customerName,
+      customerEmail: customerEmail,
+      customerPhone: customerPhone,
+      plan: plan,
+      subscriptionId: currentSub?.id,
+      currentSub: currentSub,
+      slotId: slotId,
+      addOnsPaise: addOnsPaise,
+    );
+
+    final orderId = order['order_id']?.toString() ?? '';
+    final paymentSessionId = order['payment_session_id']?.toString() ?? '';
+    final environment = order['environment']?.toString() ?? 'sandbox';
+
+    if (orderId.isEmpty || paymentSessionId.isEmpty) {
+      throw const RepositoryException(
+        'Cashfree session ID was not returned by server.',
+        code: 'invalid_cashfree_session',
       );
+    }
+
+    final paidOrderId = await CashfreePaymentService.startCheckout(
+      orderId: orderId,
+      paymentSessionId: paymentSessionId,
+      environment: environment,
+    );
+
+    final verified = await repository.verifyCashfreePayment(orderId: paidOrderId);
+
+    final now = DateTime.now();
+    if (plan != null) {
+      if (plan.type == SubscriptionType.dailyMeal) {
+        _dailyMeal = DailyMealEntitlement(
+          id: verified['order_id']?.toString() ?? 'daily-cf-${now.microsecondsSinceEpoch}',
+          providerId: provider.id,
+          providerName: provider.name,
+          slotId: slotId ?? plan.slotIds.first,
+          date: now,
+          paidAmount: plan.price,
+          isPaid: true,
+        );
+      } else {
+        final subMap = verified['subscription'] as Map<String, dynamic>?;
+        _activeSubscription = ActiveSubscription(
+          id: subMap?['id']?.toString() ?? order['subscription_id']?.toString() ?? 'sub-cf-${now.microsecondsSinceEpoch}',
+          providerId: provider.id,
+          providerName: provider.name,
+          planName: plan.name,
+          type: plan.type,
+          startDate: now,
+          endDate: plan.expiryFrom(now),
+          slotIds: plan.slotIds,
+          totalMeals: plan.type == SubscriptionType.mealTracker ? plan.includedMeals : null,
+          mealsUsed: 0,
+        );
+        _dailyMeal = null;
+      }
+      selectedProviderId = provider.id;
+    }
+
+    clearAddOns();
+    addNotification(
+      title: 'Online Payment Successful! 🎉',
+      message: '₹${verified['amount_inr'] ?? plan?.price ?? ''} paid via Cashfree for ${plan?.name ?? provider.name}. Your pass is now active!',
+      type: purpose == 'plan_upgrade' ? NotificationType.upgrade : NotificationType.subscription,
+    );
+    notifyListeners();
+    await _persistSession();
+    return verified;
+  }
 
   Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) => purchasePlan(plan);
 
@@ -306,6 +525,11 @@ class AppState extends ChangeNotifier {
     _dailyMeal = entitlement;
     selectedProviderId = plan.providerId;
     clearAddOns();
+    addNotification(
+      title: 'Daily Meal Token Ready 🍛',
+      message: 'One-time meal token generated for ${slotId.toUpperCase()}. Scan counter QR to dine.',
+      type: NotificationType.subscription,
+    );
     notifyListeners();
     return entitlement;
   }
@@ -352,6 +576,12 @@ class AppState extends ChangeNotifier {
       );
     }
     if (_dailyMeal != null) _dailyMeal = null;
+
+    addNotification(
+      title: 'Meal Redeemed! 🍽️',
+      message: 'Successfully checked in for $slotName at ${redemption.providerName}. Bon appétit!',
+      type: NotificationType.redemption,
+    );
 
     notifyListeners();
     _persistSession();

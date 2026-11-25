@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/animations/thali_animations.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -219,15 +220,20 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: Icon(Icons.search_rounded, color: MessColors.muted, size: 22),
                       ),
                       prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                      suffixIcon: _query.text.isEmpty
-                          ? null
-                          : IconButton(
-                              onPressed: () {
-                                _query.clear();
-                                _onQueryChanged('');
-                              },
-                              icon: const Icon(Icons.close_rounded, size: 18, color: MessColors.muted),
-                            ),
+                      suffixIcon: !_loaded
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: BouncingDots(size: 22, color: MessColors.orange),
+                            )
+                          : (_query.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  onPressed: () {
+                                    _query.clear();
+                                    _onQueryChanged('');
+                                  },
+                                  icon: const Icon(Icons.close_rounded, size: 18, color: MessColors.muted),
+                                )),
                       border: InputBorder.none,
                       enabledBorder: InputBorder.none,
                       focusedBorder: InputBorder.none,
@@ -690,38 +696,21 @@ class _SkeletonTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(MessColors.radiusCard),
         border: Border.all(color: MessColors.border),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          Container(
+          SkeletonShimmer(
             width: 52,
             height: 52,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF3EEE6),
-              borderRadius: BorderRadius.circular(MessColors.radiusControl),
-            ),
+            borderRadius: BorderRadius.all(Radius.circular(14)),
           ),
-          const SizedBox(width: 14),
+          SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 140,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3EEE6),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  width: 90,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3EEE6),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
+                SkeletonShimmer(width: 140, height: 14),
+                SizedBox(height: 8),
+                SkeletonShimmer(width: 90, height: 10),
               ],
             ),
           ),

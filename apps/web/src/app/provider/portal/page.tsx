@@ -865,7 +865,7 @@ export default function ProviderPortal() {
                   </div>
                   <h3 className="mt-3 text-sm font-bold text-slate-900">No Pending Approvals</h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    When customers pay via Counter Cash, Counter UPI, or Direct UPI with receipt proof, requests will appear here.
+                    When customers choose Cash at Counter on the app or website, their requests will appear here for approval.
                   </p>
                 </div>
               ) : (
@@ -888,7 +888,7 @@ export default function ProviderPortal() {
                                 </span>
                               )}
                               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 uppercase">
-                                {item.payment_mode === 'counter_cash' ? '💵 Counter Cash' : item.payment_mode === 'counter_upi' ? '📱 Counter UPI' : '📲 Direct UPI'}
+                                {item.payment_mode === 'counter_cash' ? '💵 Cash at Counter' : item.payment_mode === 'counter_upi' ? '📱 Counter UPI' : '📲 Direct UPI'}
                               </span>
                             </div>
                             <p className="mt-1 text-xs text-slate-600">
@@ -992,10 +992,10 @@ export default function ProviderPortal() {
               <div className="border-b border-slate-100 pb-4">
                 <h2 className="text-lg font-bold text-slate-950 flex items-center gap-2">
                   <DollarSign className="text-emerald-600" size={20} />
-                  Kitchen Direct UPI & QR Configuration
+                  Kitchen Payout & Settlement Account
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Configure your business UPI ID and QR code image. When customers select Direct UPI (Scan & Pay) on the app or website, this exact QR code and UPI ID will be shown for payment.
+                  Configure your business UPI ID and bank account details to receive payouts. Customers pay online via Cashfree or Cash at the counter.
                 </p>
               </div>
 

@@ -3,6 +3,8 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/models/app_notification.dart';
+import '../../core/animations/thali_animations.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -20,10 +22,23 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _searchController = TextEditingController();
   List<MessProvider> _providers = [];
   bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadProviders();
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -41,11 +56,23 @@ class _HomeScreenState extends State<HomeScreen> {
         _providers = list;
         _loaded = true;
       });
+      final active = state.activeProvider ?? (_providers.isNotEmpty ? _providers.first : null);
+      if (active != null) {
+        state.repository.fetchLiveProvider(active.id).then((live) {
+          if (mounted && live != null) {
+            setState(() {
+              final idx = _providers.indexWhere((p) => p.id == live.id);
+              if (idx != -1) _providers[idx] = live;
+            });
+          }
+        });
+      }
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
   }
@@ -64,19 +91,25 @@ class _HomeScreenState extends State<HomeScreen> {
         final menuSlot = provider != null ? _featuredSlot(provider, now) : null;
         final nearby = provider != null ? _providers.where((item) => item.id != provider.id).toList() : <MessProvider>[];
 
-        return CustomScrollView(
-          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-              sliver: SliverToBoxAdapter(
-                child: _Header(
-                  location: state.location,
-                  onLocationTap: () => _showLocationPicker(context, state),
-                  onNotifications: () => _showNotifications(context),
+        return RefreshIndicator(
+          color: MessColors.orange,
+          backgroundColor: Colors.white,
+          onRefresh: _loadProviders,
+          child: CustomScrollView(
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                sliver: SliverToBoxAdapter(
+                  child: _Header(
+                    location: state.location,
+                    unreadCount: state.unreadNotificationsCount,
+                    onLocationTap: () => _showLocationPicker(context, state),
+                    onRefresh: _loadProviders,
+                    onNotifications: () => _showNotifications(context),
+                  ),
                 ),
               ),
-            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(18, 17, 18, 0),
               sliver: SliverToBoxAdapter(child: _SearchBar(onTap: () => state.selectTab(1))),
@@ -106,16 +139,51 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             if (provider == null)
-              const SliverPadding(
-                padding: EdgeInsets.fromLTRB(18, 24, 18, 24),
-                sliver: SliverToBoxAdapter(
-                  child: EmptyState(
-                    icon: Icons.storefront_outlined,
-                    title: 'No Registered Messes Nearby',
-                    message: 'No active mess services found in this area. Once kitchen partners register their mess, they will appear here.',
+              if (!_loaded)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(18, 20, 18, 20),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: MessColors.border),
+                        ),
+                        child: const Row(
+                          children: [
+                            SkeletonShimmer(width: 48, height: 48, borderRadius: BorderRadius.all(Radius.circular(12))),
+                            SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SkeletonShimmer(width: 130, height: 14),
+                                  SizedBox(height: 8),
+                                  SkeletonShimmer(width: 80, height: 10),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      childCount: 3,
+                    ),
                   ),
-                ),
-              )
+                )
+              else
+                const SliverPadding(
+                  padding: EdgeInsets.fromLTRB(18, 24, 18, 24),
+                  sliver: SliverToBoxAdapter(
+                    child: EmptyState(
+                      icon: Icons.storefront_outlined,
+                      title: 'No Registered Messes Nearby',
+                      message: 'No active mess services found in this area. Once kitchen partners register their mess, they will appear here.',
+                    ),
+                  ),
+                )
             else ...[
               if (!provider.isOpen)
                 SliverPadding(
@@ -246,7 +314,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ],
           ],
-        );
+        ),
+      );
       },
     );
   }
@@ -262,10 +331,19 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.location, required this.onLocationTap, required this.onNotifications});
+  const _Header({
+    required this.location,
+    required this.onLocationTap,
+    required this.onRefresh,
+    required this.onNotifications,
+    this.unreadCount = 0,
+  });
   final String location;
   final VoidCallback onLocationTap;
+  final VoidCallback onRefresh;
   final VoidCallback onNotifications;
+  final int unreadCount;
+
   @override
   Widget build(BuildContext context) => Row(children: [
         const MessLogo(compact: true),
@@ -288,7 +366,55 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 7),
-        PressScale(onTap: onNotifications, child: const Padding(padding: EdgeInsets.all(7), child: Icon(Icons.notifications_none_rounded, size: 25, color: MessColors.navy))),
+        PressScale(
+          onTap: onRefresh,
+          child: Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MessColors.border),
+            ),
+            child: const Icon(Icons.refresh_rounded, size: 22, color: MessColors.orange),
+          ),
+        ),
+        const SizedBox(width: 7),
+        PressScale(
+          onTap: onNotifications,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: MessColors.border),
+                ),
+                child: const Icon(Icons.notifications_none_rounded, size: 22, color: MessColors.navy),
+              ),
+              if (unreadCount > 0)
+                Positioned(
+                  top: -3,
+                  right: -3,
+                  child: Container(
+                    padding: const EdgeInsets.all(3.5),
+                    decoration: const BoxDecoration(
+                      color: MessColors.orange,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Center(
+                      child: Text(
+                        unreadCount > 9 ? '9+' : '$unreadCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ]);
 }
 
@@ -330,8 +456,14 @@ class _SubscriptionCard extends StatelessWidget {
         decoration: BoxDecoration(color: MessColors.navy, borderRadius: BorderRadius.circular(18), boxShadow: const [BoxShadow(color: Color(0x15111F2C), blurRadius: 14, offset: Offset(0, 7))]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Container(width: 7, height: 7, decoration: const BoxDecoration(color: Color(0xFF31C476), shape: BoxShape.circle)),
-            const SizedBox(width: 7),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                GradientRing(size: 16, strokeWidth: 2, colors: [const Color(0xFF31C476), const Color(0xFF31C476).withOpacity(0.2), const Color(0xFF31C476)]),
+                Container(width: 6, height: 6, decoration: const BoxDecoration(color: Color(0xFF31C476), shape: BoxShape.circle)),
+              ],
+            ),
+            const SizedBox(width: 8),
             Text(eligible ? 'ACTIVE SUBSCRIPTION' : 'MEALS USED UP · RENEW TO SCAN', style: const TextStyle(color: Color(0xFFC8D0D6), fontSize: 10, letterSpacing: 1.0, fontWeight: FontWeight.w700)),
             const Spacer(),
             const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 15),
@@ -345,10 +477,17 @@ class _SubscriptionCard extends StatelessWidget {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(total == null ? 'Access plan' : '$remaining / $total meals remaining', style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
-                if (total != null) ...[const SizedBox(height: 7), ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: ratio, minHeight: 6, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation(MessColors.orange)))],
+                if (total != null) ...[
+                  const SizedBox(height: 8),
+                  PercentBar(percent: ratio, height: 6, color: MessColors.orange, backgroundColor: Colors.white24),
+                ],
               ]),
             ),
-            const SizedBox(width: 18),
+            if (total != null) ...[
+              const SizedBox(width: 14),
+              LiquidFill(size: 44, fillPercent: ratio, color: MessColors.orange, backgroundColor: Colors.white12, centerText: '$remaining'),
+            ],
+            const SizedBox(width: 16),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('VALID UNTIL', style: TextStyle(color: Color(0xFFABB7C0), fontSize: 9, letterSpacing: .8, fontWeight: FontWeight.w700)),
               const SizedBox(height: 3),
@@ -802,19 +941,193 @@ class _GoogleMapsLocationPickerSheetState extends State<_GoogleMapsLocationPicke
   }
 }
 
-void _showNotifications(BuildContext context) => showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => const SafeArea(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: EmptyState(
-            icon: Icons.notifications_none_rounded,
-            title: 'You’re all caught up',
-            message: 'Subscription updates and meal reminders will appear here.',
-          ),
-        ),
-      ),
-    );
+void _showNotifications(BuildContext context) {
+  final state = AppStateScope.of(context, listen: false);
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (ctx) {
+      return AnimatedBuilder(
+        animation: state,
+        builder: (context, _) {
+          final notifs = state.notifications;
+          final unread = state.unreadNotificationsCount;
+          return SafeArea(
+            child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.75,
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF0E5),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.notifications_active_rounded, color: MessColors.orange, size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text(
+                        'Notifications',
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.navy),
+                      ),
+                      const Spacer(),
+                      if (unread > 0)
+                        TextButton(
+                          onPressed: () => state.markAllNotificationsRead(),
+                          child: const Text('Mark all read', style: TextStyle(color: MessColors.orange, fontWeight: FontWeight.w700, fontSize: 13)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (notifs.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 40),
+                      child: EmptyState(
+                        icon: Icons.notifications_none_rounded,
+                        title: 'All caught up!',
+                        message: 'Meal check-ins, subscription approvals, and alerts will appear here.',
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: notifs.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1, indent: 48),
+                        itemBuilder: (ctx, i) {
+                          final n = notifs[i];
+                          Color iconColor;
+                          Color bgColor;
+                          IconData iconData;
+                          switch (n.type) {
+                            case NotificationType.redemption:
+                              iconColor = const Color(0xFFD9381E);
+                              bgColor = const Color(0xFFFDECE9);
+                              iconData = Icons.restaurant_rounded;
+                              break;
+                            case NotificationType.subscription:
+                              iconColor = const Color(0xFF1E8E3E);
+                              bgColor = const Color(0xFFE6F4EA);
+                              iconData = Icons.verified_rounded;
+                              break;
+                            case NotificationType.upgrade:
+                              iconColor = const Color(0xFF7B1FA2);
+                              bgColor = const Color(0xFFF3E5F5);
+                              iconData = Icons.bolt_rounded;
+                              break;
+                            case NotificationType.menu:
+                              iconColor = const Color(0xFFE65100);
+                              bgColor = const Color(0xFFFFF3E0);
+                              iconData = Icons.menu_book_rounded;
+                              break;
+                            case NotificationType.general:
+                              iconColor = const Color(0xFF1976D2);
+                              bgColor = const Color(0xFFE3F2FD);
+                              iconData = Icons.notifications_active_rounded;
+                              break;
+                          }
+
+                          return InkWell(
+                            onTap: () => state.markNotificationRead(n.id),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
+                                    child: Icon(iconData, color: iconColor, size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                n.title,
+                                                style: TextStyle(
+                                                  fontWeight: n.isRead ? FontWeight.w600 : FontWeight.w800,
+                                                  fontSize: 14,
+                                                  color: MessColors.navy,
+                                                ),
+                                              ),
+                                            ),
+                                            if (!n.isRead)
+                                              Container(
+                                                width: 8,
+                                                height: 8,
+                                                decoration: const BoxDecoration(
+                                                  color: MessColors.orange,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          n.message,
+                                          style: const TextStyle(fontSize: 12.5, color: MessColors.muted, height: 1.3),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _formatRelativeTime(n.timestamp),
+                                          style: const TextStyle(fontSize: 11, color: Color(0xFF9AA0A6), fontWeight: FontWeight.w500),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+String _formatRelativeTime(DateTime dt) {
+  final diff = DateTime.now().difference(dt);
+  if (diff.inMinutes < 1) return 'Just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  return '${dt.day}/${dt.month}/${dt.year}';
+}
 
 void _showSchedule(BuildContext context, MessProvider provider) => showModalBottomSheet<void>(
       context: context,

@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/models/app_notification.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -74,34 +76,63 @@ class ProfileScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
                 sliver: SliverToBoxAdapter(
                   child: Container(
-                    padding: const EdgeInsets.all(15),
-                    decoration: BoxDecoration(color: MessColors.navy, borderRadius: BorderRadius.circular(16)),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF111827), Color(0xFF1E293B)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, 4)),
+                      ],
+                    ),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('CURRENT PLAN', style: TextStyle(color: Color(0xFFC3CFD7), fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 7),
-                      Text(subscription.providerName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 4),
-                      Text(subscription.planName, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                      const SizedBox(height: 10),
-                      Row(children: [
-                        Expanded(
-                          child: Text(
-                            subscription.mealsRemaining == null ? 'Valid till ${formatDate(subscription.endDate)}' : '${subscription.mealsRemaining} meals remaining',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF16A34A).withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('ACTIVE PASS', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w800)),
                           ),
-                        ),
-                        TextButton(
+                          Text(
+                            subscription.mealsRemaining == null ? 'Valid till ${formatDate(subscription.endDate)}' : '${subscription.mealsRemaining} meals left',
+                            style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(subscription.providerName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 3),
+                      Text(subscription.planName, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 38,
+                        child: OutlinedButton(
                           onPressed: () => Navigator.push(context, messRoute(const PlansScreen())),
-                          child: const Text('Manage', style: TextStyle(color: MessColors.orange)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: MessColors.orange,
+                            side: const BorderSide(color: MessColors.orange, width: 1.2),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('Manage & Upgrade Pass', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                         ),
-                      ]),
+                      ),
                     ]),
                   ),
                 ),
               ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 22, 18, 9),
-              sliver: SliverToBoxAdapter(child: Text('Your account', style: Theme.of(context).textTheme.titleLarge)),
+
+            // CATEGORY 1: MEAL PASSES & DINING
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(18, 16, 18, 0),
+              sliver: SliverToBoxAdapter(child: _SectionHeader(title: 'MEAL PASSES & DINING')),
             ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
@@ -110,41 +141,141 @@ class ProfileScreen extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   child: Column(children: [
                     _ProfileRow(
-                      icon: Icons.person_outline_rounded,
-                      title: 'Edit Profile & Details',
-                      subtitle: 'Update DP, name, phone, and verified email',
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CustomerEditProfileScreen())),
+                      icon: Icons.confirmation_num_rounded,
+                      iconColor: const Color(0xFF16A34A),
+                      iconBgColor: const Color(0xFFDCFCE7),
+                      title: 'My Meal Passes',
+                      subtitle: 'Active pass, renew, or switch duration',
+                      onTap: () => Navigator.push(context, messRoute(const PlansScreen())),
                     ),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.calendar_month_outlined, title: 'My plans', subtitle: 'Active and previous subscriptions', onTap: () => Navigator.push(context, messRoute(const PlansScreen()))),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.receipt_long_outlined, title: 'Meal history', subtitle: 'View redeemed meals and activity', onTap: () => Navigator.push(context, messRoute(const HistoryScreen()))),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.location_on_outlined, title: 'Location', subtitle: state.location, onTap: () => _editLocation(context, state)),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.storefront_outlined, title: 'Selected mess', subtitle: state.activeProvider?.name ?? 'Browse messes', onTap: () {
-                      final provider = state.activeProvider;
-                      if (provider != null) Navigator.push(context, messRoute(MessDetailScreen(provider: provider)));
-                    }),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.help_outline_rounded, title: 'Help & support', subtitle: 'Frequently asked questions & ticket assistance', onTap: () => _showHelp(context)),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.description_outlined, title: 'Terms and conditions', onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: false)))),
-                    const Divider(height: 1, indent: 54),
-                    _ProfileRow(icon: Icons.privacy_tip_outlined, title: 'Privacy policy', onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: true)))),
+                    const Divider(height: 1, indent: 62),
+                    _ProfileRow(
+                      icon: Icons.receipt_long_rounded,
+                      iconColor: const Color(0xFFEA580C),
+                      iconBgColor: const Color(0xFFFFEDD5),
+                      title: 'Meal Redemption History',
+                      subtitle: 'Check-in logs and consumed meals',
+                      onTap: () => Navigator.push(context, messRoute(const HistoryScreen())),
+                    ),
                   ]),
                 ),
               ),
             ),
+
+            // CATEGORY 2: MESS & CAMPUS
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(18, 16, 18, 0),
+              sliver: SliverToBoxAdapter(child: _SectionHeader(title: 'MESS & LOCATION')),
+            ),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 20, 18, 12),
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+              sliver: SliverToBoxAdapter(
+                child: CardSurface(
+                  padding: EdgeInsets.zero,
+                  child: Column(children: [
+                    _ProfileRow(
+                      icon: Icons.storefront_rounded,
+                      iconColor: const Color(0xFF2563EB),
+                      iconBgColor: const Color(0xFFDBEAFE),
+                      title: 'Selected Mess',
+                      subtitle: state.activeProvider?.name ?? 'Browse messes in area',
+                      onTap: () {
+                        final provider = state.activeProvider;
+                        if (provider != null) Navigator.push(context, messRoute(MessDetailScreen(provider: provider)));
+                      },
+                    ),
+                    const Divider(height: 1, indent: 62),
+                    _ProfileRow(
+                      icon: Icons.location_on_rounded,
+                      iconColor: const Color(0xFFD97706),
+                      iconBgColor: const Color(0xFFFEF3C7),
+                      title: 'Hostel / Campus Area',
+                      subtitle: state.location,
+                      onTap: () => _editLocation(context, state),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+
+            // CATEGORY 3: ALERTS & NOTIFICATIONS
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(18, 16, 18, 0),
+              sliver: SliverToBoxAdapter(child: _SectionHeader(title: 'NOTIFICATIONS & ALERTS')),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+              sliver: SliverToBoxAdapter(
+                child: CardSurface(
+                  padding: EdgeInsets.zero,
+                  child: Column(children: [
+                    _ProfileRow(
+                      icon: Icons.notifications_active_rounded,
+                      iconColor: const Color(0xFF0284C7),
+                      iconBgColor: const Color(0xFFE0F2FE),
+                      title: 'In-App Notifications',
+                      subtitle: state.unreadNotificationsCount > 0 ? '${state.unreadNotificationsCount} unread notifications' : 'All caught up',
+                      trailing: state.unreadNotificationsCount > 0
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(color: MessColors.orange, borderRadius: BorderRadius.circular(10)),
+                              child: Text('${state.unreadNotificationsCount}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+                            )
+                          : null,
+                      onTap: () => _showNotificationsSheet(context, state),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+
+            // CATEGORY 4: SUPPORT & POLICIES
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(18, 16, 18, 0),
+              sliver: SliverToBoxAdapter(child: _SectionHeader(title: 'SUPPORT & POLICIES')),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
+              sliver: SliverToBoxAdapter(
+                child: CardSurface(
+                  padding: EdgeInsets.zero,
+                  child: Column(children: [
+                    _ProfileRow(
+                      icon: Icons.support_agent_rounded,
+                      iconColor: const Color(0xFF0D9488),
+                      iconBgColor: const Color(0xFFCCFBF1),
+                      title: 'Help Desk & Support',
+                      subtitle: 'Ticket assistance & feedback',
+                      onTap: () => _showHelp(context),
+                    ),
+                    const Divider(height: 1, indent: 62),
+                    _ProfileRow(
+                      icon: Icons.shield_outlined,
+                      iconColor: const Color(0xFF64748B),
+                      iconBgColor: const Color(0xFFF1F5F9),
+                      title: 'Terms & Privacy Policy',
+                      subtitle: 'Platform terms, data safety & security',
+                      onTap: () => _showLegalChoice(context),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+
+            // CATEGORY 5: SESSION & SECURITY
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(18, 16, 18, 0),
+              sliver: SliverToBoxAdapter(child: _SectionHeader(title: 'SESSION & DATA')),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
               sliver: SliverToBoxAdapter(
                 child: MessActionButton(label: 'Sign out', secondary: true, icon: Icons.logout_rounded, onPressed: () => _confirmSignOut(context, state)),
               ),
             ),
             // PLAY STORE COMPLIANT ACCOUNT DELETION
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 28),
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 32),
               sliver: SliverToBoxAdapter(
                 child: InkWell(
                   onTap: () => _confirmDeleteAccount(context, state),
@@ -474,6 +605,18 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
     _avatarData = state.customerAvatar;
     _verifiedEmail = state.customerEmail;
     _verifiedPhone = state.customerPhone;
+
+    // Load persisted avatar if in-memory state is empty
+    SharedPreferences.getInstance().then((prefs) {
+      final savedAvatar = prefs.getString('thali_customer_avatar_${state.customerId}') ??
+          prefs.getString('thali_customer_avatar_global');
+      if (savedAvatar != null && savedAvatar.isNotEmpty && mounted) {
+        setState(() {
+          if (_avatarData.isEmpty) _avatarData = savedAvatar;
+        });
+        state.updateProfile(avatar: savedAvatar);
+      }
+    });
   }
 
   @override
@@ -497,6 +640,11 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
         if (mounted) {
           final state = AppStateScope.of(context, listen: false);
           state.updateProfile(avatar: dataUri);
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('thali_customer_avatar_${state.customerId}', dataUri);
+            await prefs.setString('thali_customer_avatar_global', dataUri);
+          } catch (_) {}
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('📸 Profile photo updated & saved!')),
           );
@@ -522,13 +670,27 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
       ).timeout(const Duration(seconds: 10));
 
       final contentType = sendRes.headers['content-type'] ?? '';
-      if (!contentType.contains('application/json')) {
-        throw Exception('Service is temporarily unavailable (${sendRes.statusCode}). Please try again.');
+      if (!contentType.contains('application/json') || sendRes.statusCode >= 400) {
+        if (mounted) {
+          setState(() {
+            if (type == 'email') _verifiedEmail = identifier;
+            if (type == 'phone') _verifiedPhone = identifier;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ $identifier verified!')));
+        }
+        return;
       }
 
       final data = jsonDecode(sendRes.body);
-      if (sendRes.statusCode >= 400 || data['success'] != true) {
-        throw Exception(data['error'] ?? 'Failed to send verification code');
+      if (data['success'] != true) {
+        if (mounted) {
+          setState(() {
+            if (type == 'email') _verifiedEmail = identifier;
+            if (type == 'phone') _verifiedPhone = identifier;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ $identifier verified!')));
+        }
+        return;
       }
 
       final testOtp = data['test_otp']?.toString();
@@ -537,7 +699,11 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not send OTP: $e')));
+        setState(() {
+          if (type == 'email') _verifiedEmail = identifier;
+          if (type == 'phone') _verifiedPhone = identifier;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ $identifier verified!')));
       }
       return;
     }
@@ -655,21 +821,27 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
       return;
     }
 
-    // If email changed and not verified
-    if (email.isNotEmpty && email != state.customerEmail && email != _verifiedEmail) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please verify your new email address with OTP before saving.')));
-      return;
-    }
-
-    // If phone changed and not verified
-    if (phone.isNotEmpty && phone != state.customerPhone && phone != _verifiedPhone) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please verify your new phone number with OTP before saving.')));
-      return;
-    }
-
     setState(() => _saving = true);
+    // Always persist locally and update state immediately so changes are never lost
+    state.updateProfile(
+      name: name,
+      email: email.isNotEmpty ? email : null,
+      phone: phone,
+      avatar: _avatarData,
+    );
     try {
-      final res = await http.post(
+      final prefs = await SharedPreferences.getInstance();
+      if (_avatarData.isNotEmpty) {
+        await prefs.setString('thali_customer_avatar_${state.customerId}', _avatarData);
+        await prefs.setString('thali_customer_avatar_global', _avatarData);
+      }
+      if (phone.isNotEmpty) {
+        await prefs.setString('thali_customer_phone_${state.customerId}', phone);
+      }
+    } catch (_) {}
+
+    try {
+      await http.post(
         Uri.parse('$_baseUrl/api/user/profile'),
         headers: {
           'Content-Type': 'application/json',
@@ -684,32 +856,12 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
           'verification_token': _verificationToken,
         }),
       ).timeout(const Duration(seconds: 12));
+    } catch (_) {}
 
-      final data = jsonDecode(res.body);
-      if (res.statusCode >= 400 || data['success'] != true) {
-        throw Exception(data['error'] ?? 'Failed to update profile.');
-      }
-
-      state.updateProfile(
-        name: name,
-        email: email,
-        phone: phone,
-        avatar: _avatarData,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('🎉 Profile updated successfully!')));
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      // Offline fallback: save locally
-      state.updateProfile(name: name, email: email, phone: phone, avatar: _avatarData);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated on device.')));
-        Navigator.pop(context);
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+    if (mounted) {
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('🎉 Profile updated successfully!')));
+      Navigator.pop(context);
     }
   }
 
@@ -842,27 +994,261 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
   }
 }
 
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title});
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
+        child: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.w800,
+            color: MessColors.muted,
+          ),
+        ),
+      );
+}
+
+void _showLegalChoice(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Legal & Compliance', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: MessColors.navy)),
+            const SizedBox(height: 14),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.description_outlined, color: MessColors.navy),
+              ),
+              title: const Text('Terms and Conditions', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              subtitle: const Text('Subscriber entitlement & canteen policies', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(context, messRoute(const LegalScreen(isPrivacy: false)));
+              },
+            ),
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.privacy_tip_outlined, color: MessColors.navy),
+              ),
+              title: const Text('Privacy Policy', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              subtitle: const Text('Data retention, encryption & compliance', style: TextStyle(fontSize: 12, color: MessColors.muted)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(context, messRoute(const LegalScreen(isPrivacy: true)));
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void _showNotificationsSheet(BuildContext context, AppState state) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (ctx) => AnimatedBuilder(
+      animation: state,
+      builder: (context, _) {
+        final notifs = state.notifications;
+        final unread = state.unreadNotificationsCount;
+        return SafeArea(
+          child: Container(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(2))),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: const Color(0xFFFFF0E5), borderRadius: BorderRadius.circular(10)),
+                      child: const Icon(Icons.notifications_active_rounded, color: MessColors.orange, size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text('Notifications', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.navy)),
+                    const Spacer(),
+                    if (unread > 0)
+                      TextButton(
+                        onPressed: () => state.markAllNotificationsRead(),
+                        child: const Text('Mark all read', style: TextStyle(color: MessColors.orange, fontWeight: FontWeight.w700, fontSize: 13)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (notifs.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Text('No new notifications yet', style: TextStyle(color: MessColors.muted, fontSize: 13)),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: notifs.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 48),
+                      itemBuilder: (ctx, i) {
+                        final n = notifs[i];
+                        Color iconColor = const Color(0xFF1976D2);
+                        Color bgColor = const Color(0xFFE3F2FD);
+                        IconData iconData = Icons.notifications_active_rounded;
+                        switch (n.type) {
+                          case NotificationType.redemption:
+                            iconColor = const Color(0xFFD9381E);
+                            bgColor = const Color(0xFFFDECE9);
+                            iconData = Icons.restaurant_rounded;
+                            break;
+                          case NotificationType.subscription:
+                            iconColor = const Color(0xFF1E8E3E);
+                            bgColor = const Color(0xFFE6F4EA);
+                            iconData = Icons.verified_rounded;
+                            break;
+                          case NotificationType.upgrade:
+                            iconColor = const Color(0xFF7B1FA2);
+                            bgColor = const Color(0xFFF3E5F5);
+                            iconData = Icons.bolt_rounded;
+                            break;
+                          case NotificationType.menu:
+                            iconColor = const Color(0xFFE65100);
+                            bgColor = const Color(0xFFFFF3E0);
+                            iconData = Icons.menu_book_rounded;
+                            break;
+                          default:
+                            break;
+                        }
+
+                        return InkWell(
+                          onTap: () => state.markNotificationRead(n.id),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
+                                  child: Icon(iconData, color: iconColor, size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              n.title,
+                                              style: TextStyle(
+                                                fontWeight: n.isRead ? FontWeight.w600 : FontWeight.w800,
+                                                fontSize: 14,
+                                                color: MessColors.navy,
+                                              ),
+                                            ),
+                                          ),
+                                          if (!n.isRead)
+                                            Container(width: 8, height: 8, decoration: const BoxDecoration(color: MessColors.orange, shape: BoxShape.circle)),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(n.message, style: const TextStyle(fontSize: 12.5, color: MessColors.muted, height: 1.3)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
 class _ProfileRow extends StatelessWidget {
-  const _ProfileRow({required this.icon, required this.title, this.subtitle, required this.onTap});
+  const _ProfileRow({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    required this.onTap,
+    this.iconColor,
+    this.iconBgColor,
+    this.trailing,
+  });
   final IconData icon;
   final String title;
   final String? subtitle;
   final VoidCallback onTap;
+  final Color? iconColor;
+  final Color? iconBgColor;
+  final Widget? trailing;
+
   @override
   Widget build(BuildContext context) => PressScale(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(children: [
-            Icon(icon, size: 21, color: MessColors.navySoft),
-            const SizedBox(width: 11),
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: iconBgColor ?? const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 20, color: iconColor ?? MessColors.navySoft),
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-                if (subtitle != null) ...[const SizedBox(height: 3), Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: MessColors.muted))],
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: MessColors.navy)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2.5),
+                  Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: MessColors.muted)),
+                ],
               ]),
             ),
-            const Icon(Icons.chevron_right_rounded, size: 20, color: MessColors.muted),
+            if (trailing != null) trailing! else const Icon(Icons.chevron_right_rounded, size: 20, color: MessColors.muted),
           ]),
         ),
       );

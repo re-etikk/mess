@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thali Design System Preview (UI/UX Pro Max)</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display+SC:wght@700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      background-color: var(--color-background);
+      color: var(--color-foreground);
+      padding: 40px 20px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+    header {
+      margin-bottom: 40px;
+      border-bottom: 2px solid var(--color-border);
+      padding-bottom: 24px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .badge-primary { background: #FFE8DF; color: var(--color-primary-dark); }
+    .badge-success { background: var(--color-success-light); color: var(--color-success); }
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--color-foreground);
+      margin-bottom: 8px;
+    }
+    p.lead {
+      color: var(--color-muted);
+      font-size: 16px;
+    }
+    section {
+      margin-bottom: 48px;
+    }
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .swatch {
+      background: var(--color-card);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .swatch-color {
+      height: 64px;
+      border-radius: var(--radius-md);
+      margin-bottom: 12px;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    .swatch-name { font-weight: 700; font-size: 14px; }
+    .swatch-hex { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--color-muted); }
+    
+    .card {
+      background: var(--color-card);
+      border: 1.5px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 24px;
+      border-radius: var(--radius-md);
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: all 180ms ease;
+    }
+    .btn-primary {
+      background: var(--color-primary);
+      color: #FFFFFF;
+      box-shadow: var(--shadow-brand);
+    }
+    .btn-primary:hover {
+      background: var(--color-primary-dark);
+      transform: translateY(-1px);
+    }
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid var(--color-border);
+      color: var(--color-foreground);
+    }
+    .btn-outline:hover {
+      background: var(--color-subtle);
+    }
+    .kitchen-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px;
+      border-radius: var(--radius-lg);
+      margin-bottom: 16px;
+    }
+    .kitchen-open {
+      background: var(--color-success-light);
+      border: 1.5px solid #86EFAC;
+      color: #15803D;
+    }
+    .kitchen-closed {
+      background: #1E293B;
+      border: 1.5px solid #475569;
+      color: #FFFFFF;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <span class="badge badge-primary">UI/UX Pro Max v2.0 Certified</span>
+      <h1>Thali Ecosystem Design Tokens</h1>
+      <p class="lead">Design tokens, color contracts, and component standards across Mobile Customer, Partner Hub, and Web.</p>
+    </header>
+
+    <section>
+      <h2>🎨 Core Color Palette</h2>
+      <div class="grid">
+        <div class="swatch">
+          <div class="swatch-color" style="background: #FF6B1A;"></div>
+          <div class="swatch-name">Thali Orange</div>
+          <div class="swatch-hex">#FF6B1A • Primary Brand</div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: #E94E12;"></div>
+          <div class="swatch-name">Deep Saffron</div>
+          <div class="swatch-hex">#E94E12 • Primary Dark</div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: #FAF6EE;"></div>
+          <div class="swatch-name">Warm Cream</div>
+          <div class="swatch-hex">#FAF6EE • Surface Canvas</div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: #111820;"></div>
+          <div class="swatch-name">Navy Charcoal</div>
+          <div class="swatch-hex">#111820 • Primary Ink</div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: #16A34A;"></div>
+          <div class="swatch-name">Emerald Green</div>
+          <div class="swatch-hex">#16A34A • Success Active</div>
+        </div>
+        <div class="swatch">
+          <div class="swatch-color" style="background: #DC2626;"></div>
+          <div class="swatch-name">Crimson Red</div>
+          <div class="swatch-hex">#DC2626 • Destructive / Off</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>⚡ Kitchen Operational States</h2>
+      <div class="kitchen-status kitchen-open">
+        <div>
+          <strong>🟢 KITCHEN OPEN TODAY</strong>
+          <p style="font-size: 12px; margin-top: 2px;">Serving meals today • QR scans active for students</p>
+        </div>
+        <span class="badge badge-success">ACTIVE</span>
+      </div>
+      <div class="kitchen-status kitchen-closed">
+        <div>
+          <strong>🔒 MESS CLOSED / OFF TODAY</strong>
+          <p style="font-size: 12px; margin-top: 2px; color: #94A3B8;">Dark shade shown • Scans paused today</p>
+        </div>
+        <span style="font-size: 11px; padding: 4px 8px; background: #334155; border-radius: 99px;">PAUSED</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>🔘 Interactive Buttons</h2>
+      <div style="display: flex; gap: 12px;">
+        <button class="btn btn-primary">Purchase Meal Pass</button>
+        <button class="btn btn-outline">View Menu Today</button>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

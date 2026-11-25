@@ -243,37 +243,7 @@ class PlatformStore {
       created_at: new Date().toISOString(),
     });
 
-    // Menus
-    this.menus.set(`${provId}_Daily_LUNCH`, {
-      id: `menu-${provId}-lunch`,
-      provider_id: provId,
-      day_of_week: 'Daily',
-      slot: 'LUNCH',
-      items_included: ['Dal Tadka', 'Steamed Basmati Rice', '4 Phulka Rotis', 'Seasonal Sabzi', 'Cucumber Salad', 'Papad'],
-      items_extra: [
-        { name: 'Paneer Butter Masala', price: 40, limit: 2 },
-        { name: 'Extra Roti (Set of 2)', price: 15, limit: 4 },
-        { name: 'Gulab Jamun (2 pcs)', price: 30, limit: 2 },
-        { name: 'Curd / Raita', price: 20, limit: 2 },
-      ],
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    });
-
-    this.menus.set(`${provId}_Daily_DINNER`, {
-      id: `menu-${provId}-dinner`,
-      provider_id: provId,
-      day_of_week: 'Daily',
-      slot: 'DINNER',
-      items_included: ['Mixed Dal', 'Jeera Rice', '4 Rotis', 'Aloo Gobi', 'Pickle'],
-      items_extra: [
-        { name: 'Shahi Paneer', price: 45, limit: 2 },
-        { name: 'Extra Roti (Set of 2)', price: 15, limit: 4 },
-        { name: 'Kheer Bowl', price: 35, limit: 1 },
-      ],
-      is_active: true,
-      updated_at: new Date().toISOString(),
-    });
+    // Menus will be populated dynamically from database / provider input
 
     // Platform Promo Codes
     this.promos.set('WELCOME10', {

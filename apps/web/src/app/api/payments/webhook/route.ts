@@ -1,6 +1,9 @@
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { handleCashfreeWebhook } from '@/app/api/payments/cashfree/webhook/route';
 
-/** Compatibility endpoint: payment events must be durably verified before acknowledgement. */
-export async function POST() {
-  return NextResponse.json({ error: 'Payment webhook processing is not configured; no entitlement was changed.' }, { status: 503 });
+export const dynamic = 'force-dynamic';
+
+/** Compatibility webhook endpoint routed to Cashfree signature verification & fulfillment. */
+export async function POST(req: NextRequest) {
+  return handleCashfreeWebhook(req);
 }

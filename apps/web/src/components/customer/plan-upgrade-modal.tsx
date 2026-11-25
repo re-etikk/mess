@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ArrowUpCircle, CheckCircle2, QrCode, Sparkles, X } from 'lucide-react';
+import { ArrowUpCircle, CheckCircle2, CreditCard, Sparkles, X } from 'lucide-react';
+import { launchCashfreeWebCheckout } from '@/lib/cashfree-client';
 
 interface ActiveSub {
   id: string;
@@ -25,24 +26,20 @@ export default function CustomerPlanUpgradeModal({
   const [loading, setLoading] = useState(false);
   const [quote, setQuote] = useState<any>(null);
   const [quoteError, setQuoteError] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'counter_cash' | 'direct_upi'>('counter_cash');
-  const [providerSettings, setProviderSettings] = useState<any>(null);
-  const [utr, setUtr] = useState('');
-  const [receiptUrl, setReceiptUrl] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'cashfree' | 'counter_cash'>('cashfree');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     if (!open || !providerId) return;
     setLoading(true);
-    Promise.all([
-      fetch(`/api/provider/plans?provider_id=${providerId}`).then((r) => r.json()).catch(() => ({})),
-      fetch(`/api/provider/payment-settings?provider_id=${providerId}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([pData, sData]) => {
-      setPlans(pData?.plans || []);
-      if (sData?.settings) setProviderSettings(sData.settings);
-      setLoading(false);
-    });
+    fetch(`/api/provider/plans?provider_id=${providerId}`)
+      .then((r) => r.json())
+      .catch(() => ({}))
+      .then((pData) => {
+        setPlans(pData?.plans || []);
+        setLoading(false);
+      });
   }, [open, providerId]);
 
   useEffect(() => {
@@ -62,7 +59,7 @@ export default function CustomerPlanUpgradeModal({
         if (!res.ok || !d.success) {
           setQuoteError(d.error || 'Failed to calculate quote');
         } else {
-          setQuote(d);
+          setQuote(d.quote || d);
         }
       })
       .catch(() => setQuoteError('Network error calculating upgrade difference'));
@@ -73,6 +70,34 @@ export default function CustomerPlanUpgradeModal({
     if (!selectedPlanId) return;
     setSubmitting(true);
     try {
+      if (paymentMode === 'cashfree') {
+        const selected = plans.find((p) => p.id === selectedPlanId);
+        const orderRes = await fetch('/api/payments/cashfree/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purpose: 'plan_upgrade',
+            provider_id: providerId || subscription.provider_id,
+            subscription_id: subscription.id,
+            target_plan_id: selectedPlanId,
+            plan_name: selected?.name,
+            plan_type: selected?.plan_type,
+            duration_days: selected?.duration_days || (selected?.duration_months ? selected.duration_months * 30 : 30),
+            meal_credits: selected?.meal_credits,
+            target_plan_price_paise: selected?.price_paise,
+          }),
+        });
+        const orderData = await orderRes.json().catch(() => ({}));
+        if (!orderRes.ok || !orderData.success || !orderData.payment_session_id) {
+          throw new Error(orderData.error || 'Unable to start Cashfree online checkout.');
+        }
+        await launchCashfreeWebCheckout({
+          paymentSessionId: orderData.payment_session_id,
+          environment: orderData.environment === 'production' ? 'production' : 'sandbox',
+        });
+        return;
+      }
+
       const res = await fetch('/api/subscription/upgrade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -80,8 +105,6 @@ export default function CustomerPlanUpgradeModal({
           subscription_id: subscription.id,
           target_plan_id: selectedPlanId,
           payment_mode: paymentMode,
-          utr_reference: utr.trim(),
-          receipt_url: receiptUrl.trim(),
         }),
       });
       const d = await res.json();
@@ -133,7 +156,7 @@ export default function CustomerPlanUpgradeModal({
                 <h4 className="text-lg font-black text-slate-900">Upgrade Request Submitted!</h4>
                 <p className="text-xs text-slate-600 max-w-sm mx-auto">
                   Your upgrade request has been sent to the mess partner. Pay the net difference of ₹
-                  {quote?.upgrade_payable_inr ?? 0} at the counter or via Direct UPI. Once verified by the mess, your upgraded pass will activate!
+                  {quote?.upgrade_payable_inr ?? 0} in cash at the mess counter. Once verified by the mess, your upgraded pass will activate!
                 </p>
                 <button
                   type="button"
@@ -221,69 +244,30 @@ export default function CustomerPlanUpgradeModal({
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setPaymentMode('counter_cash')}
-                      className={`p-2.5 rounded-xl border text-center font-bold transition ${
-                        paymentMode === 'counter_cash'
-                          ? 'border-purple-600 bg-purple-100 text-purple-900'
+                      onClick={() => setPaymentMode('cashfree')}
+                      className={`p-2.5 rounded-xl border text-center font-bold transition flex flex-col items-center gap-1 ${
+                        paymentMode === 'cashfree'
+                          ? 'border-orange-600 bg-orange-50 text-orange-900'
                           : 'border-slate-200 bg-white text-slate-700'
                       }`}
                     >
-                      💵 Pay on Counter
+                      <CreditCard size={15} />
+                      <span>Pay Online (Cashfree)</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPaymentMode('direct_upi')}
-                      className={`p-2.5 rounded-xl border text-center font-bold transition ${
-                        paymentMode === 'direct_upi'
-                          ? 'border-purple-600 bg-purple-100 text-purple-900'
+                      onClick={() => setPaymentMode('counter_cash')}
+                      className={`p-2.5 rounded-xl border text-center font-bold transition flex flex-col items-center gap-1 ${
+                        paymentMode === 'counter_cash'
+                          ? 'border-amber-600 bg-amber-50 text-amber-900'
                           : 'border-slate-200 bg-white text-slate-700'
                       }`}
                     >
-                      📲 Direct UPI QR
+                      <span>💵</span>
+                      <span>Pay Cash at Counter</span>
                     </button>
                   </div>
                 </div>
-
-                {paymentMode === 'direct_upi' && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
-                    <div className="text-center">
-                      <div className="mx-auto w-32 h-32 rounded-lg border bg-white p-1.5 flex items-center justify-center">
-                        {providerSettings?.upi_qr_url ? (
-                          <img
-                            src={providerSettings.upi_qr_url}
-                            alt="Mess UPI QR"
-                            className="max-h-full max-w-full object-contain"
-                          />
-                        ) : (
-                          <QrCode size={40} className="text-purple-600" />
-                        )}
-                      </div>
-                      <p className="mt-1 font-mono font-bold text-slate-800">
-                        {providerSettings?.upi_id || 'Pay at mess counter'}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-slate-700">12-Digit UTR Ref</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. 430129384912"
-                        value={utr}
-                        onChange={(e) => setUtr(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-semibold text-slate-700">Receipt Image Link</label>
-                      <input
-                        type="url"
-                        placeholder="https://... (Receipt image)"
-                        value={receiptUrl}
-                        onChange={(e) => setReceiptUrl(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-slate-300 p-2"
-                      />
-                    </div>
-                  </div>
-                )}
 
                 <div className="pt-2">
                   <button

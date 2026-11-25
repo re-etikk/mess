@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/animations/thali_animations.dart';
 import '../../core/theme/mess_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 
@@ -240,7 +241,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: MessColors.orange))
+                ? const Center(child: SpinnerArc(size: 38, color: MessColors.orange))
                 : _messages.isEmpty
                     ? Center(
                         child: Padding(

@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
+const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
+
+function getFallbackClient() {
+  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 function displayClock(value?: string | null): string {
   if (!value) return '';
@@ -27,8 +38,13 @@ export async function GET(req: NextRequest) {
   const dietary = params.get('dietary')?.trim().toLowerCase();
 
   try {
-    const admin = getAdminClient();
-    const supabase = admin || (await createClient());
+    let supabase = getAdminClient();
+    if (!supabase) {
+      try {
+        supabase = await createClient();
+      } catch (_) {}
+    }
+    supabase = supabase || getFallbackClient();
 
     let providersQuery = supabase
       .from('providers')
@@ -144,26 +160,61 @@ export async function GET(req: NextRequest) {
           };
         });
 
-      // Group menus by slot for mobile app
+      // Merge platformStore plans
+      for (const [, sp] of platformStore.plans.entries()) {
+        if (sp.provider_id === pId && sp.is_active !== false) {
+          if (!pPlans.some((p) => p.id === sp.id || p.name.toLowerCase() === sp.name.toLowerCase())) {
+            pPlans.push({
+              id: sp.id,
+              provider_id: pId,
+              name: sp.name,
+              description: sp.description,
+              plan_type: sp.plan_type,
+              duration_days: sp.duration_days,
+              duration_months: Math.max(1, Math.round(sp.duration_days / 30)),
+              meal_credits: sp.meal_credits,
+              price_paise: sp.price_paise,
+              price: sp.price_paise / 100,
+            });
+          }
+        }
+      }
+
+      // Group menus by slot for mobile app, merging platformStore dishes
       const menus = pSlots.map((slot) => {
+        const slotNameUpper = slot.name.toUpperCase();
+        const storeMenu = platformStore.menus.get(`${pId}_Daily_${slotNameUpper}`);
         const slotItems = pItems.filter((item) =>
           item.meal_slot_id === slot.id ||
           (item.description && item.description.toLowerCase().includes(slot.name.toLowerCase()))
         );
 
+        const dbIncluded = slotItems.filter((item) => !item.is_add_on).map((item) => item.name);
+        const storeIncluded = storeMenu?.items_included || [];
+        const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeIncluded;
+
+        const dbExtra = slotItems.filter((item) => item.is_add_on).map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: Number(item.price_paise || 0) / 100,
+          price_paise: Number(item.price_paise || 0),
+        }));
+        const storeExtra = (storeMenu?.items_extra || []).map((e) => ({
+          id: `ext-${e.name.toLowerCase().replace(/\s+/g, '-')}`,
+          name: e.name,
+          price: e.price || 30,
+          price_paise: Math.round((e.price || 30) * 100),
+        }));
+        const combinedExtra = dbExtra.length > 0 ? dbExtra : storeExtra;
+
         return {
           id: slot.id,
-          slot: slot.name.toUpperCase(),
+          slot: slotNameUpper,
           slot_id: slot.id,
           starts_at_local: slot.starts_at_local,
           ends_at_local: slot.ends_at_local,
-          items_included: slotItems.filter((item) => !item.is_add_on).map((item) => item.name),
-          items_extra: slotItems.filter((item) => item.is_add_on).map((item) => ({
-            id: item.id,
-            name: item.name,
-            price: Number(item.price_paise || 0) / 100,
-            price_paise: Number(item.price_paise || 0),
-          })),
+          items_included: combinedIncluded,
+          items_extra: combinedExtra,
           items: slotItems,
         };
       });

@@ -9,12 +9,13 @@ import {
   CheckCircle2,
   Clock,
   Coins,
+  CreditCard,
   MapPin,
   QrCode,
   ShieldCheck,
   Store,
-  Wallet,
 } from 'lucide-react';
+import { launchCashfreeWebCheckout } from '@/lib/cashfree-client';
 
 interface Plan {
   id: string;
@@ -53,10 +54,7 @@ export default function JoinMessPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'counter_cash' | 'counter_upi' | 'direct_upi'>('counter_cash');
-  const [providerPaymentSettings, setProviderPaymentSettings] = useState<{ upi_id?: string; upi_name?: string; upi_qr_url?: string } | null>(null);
-  const [utrReference, setUtrReference] = useState('');
-  const [receiptUrl, setReceiptUrl] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'cashfree' | 'counter_cash'>('cashfree');
 
   const [error, setError] = useState('');
   const [successData, setSuccessData] = useState<any>(null);
@@ -70,15 +68,10 @@ export default function JoinMessPage() {
       setLoading(true);
       setError('');
       try {
-        const [provRes, plansRes, paymentRes] = await Promise.all([
+        const [provRes, plansRes] = await Promise.all([
           fetch(`/api/providers`).then((r) => r.json()).catch(() => ({})),
           fetch(`/api/provider/plans?provider_id=${providerId}`).then((r) => r.json()).catch(() => ({})),
-          fetch(`/api/provider/payment-settings?provider_id=${providerId}`).then((r) => r.json()).catch(() => ({})),
         ]);
-
-        if (paymentRes?.settings) {
-          setProviderPaymentSettings(paymentRes.settings);
-        }
 
         if (cancelled) return;
 
@@ -124,6 +117,36 @@ export default function JoinMessPage() {
     setError('');
 
     try {
+      if (paymentMode === 'cashfree') {
+        const orderRes = await fetch('/api/payments/cashfree/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purpose: 'subscription_purchase',
+            provider_id: provider?.id || providerId,
+            plan_id: selectedPlanId,
+            customer_phone: phone.trim(),
+            customer_name: name.trim(),
+            customer_email: email.trim(),
+            plan_type: selectedPlan?.plan_type,
+            plan_name: selectedPlan?.name,
+            duration_days: selectedPlan?.duration_days || (selectedPlan?.duration_months ? selectedPlan.duration_months * 30 : 30),
+            meal_credits: selectedPlan?.meal_credits,
+            price_paise: selectedPlan?.price_paise,
+          }),
+        });
+        const orderData = await orderRes.json().catch(() => ({}));
+        if (!orderRes.ok || !orderData.success || !orderData.payment_session_id) {
+          setError(orderData.error || 'Unable to start Cashfree online checkout. You can choose Pay on Counter instead.');
+          return;
+        }
+        await launchCashfreeWebCheckout({
+          paymentSessionId: orderData.payment_session_id,
+          environment: orderData.environment === 'production' ? 'production' : 'sandbox',
+        });
+        return;
+      }
+
       const res = await fetch('/api/subscription/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -134,8 +157,6 @@ export default function JoinMessPage() {
           customer_name: name.trim(),
           customer_email: email.trim(),
           payment_mode: paymentMode,
-          utr_reference: utrReference.trim(),
-          receipt_url: receiptUrl.trim(),
         }),
       });
 
@@ -146,8 +167,8 @@ export default function JoinMessPage() {
       } else {
         setSuccessData(data);
       }
-    } catch {
-      setError('Network error registering subscription. Please check your connection.');
+    } catch (err: any) {
+      setError(err?.message || 'Network error registering subscription. Please check your connection.');
     } finally {
       setSubmitting(false);
     }
@@ -199,7 +220,7 @@ export default function JoinMessPage() {
             <div className="flex justify-between items-center text-slate-700">
               <span className="font-semibold">Payment Mode:</span>
               <span className="font-bold text-slate-900 uppercase">
-                {paymentMode === 'counter_cash' ? 'Cash at Counter' : paymentMode === 'counter_upi' ? 'UPI QR at Counter' : 'Direct UPI (Scan & Pay)'}
+                Cash at Counter
               </span>
             </div>
             <div className="flex justify-between items-center text-slate-700">
@@ -214,7 +235,7 @@ export default function JoinMessPage() {
             </p>
             <ol className="list-decimal list-inside space-y-1 text-slate-300 text-[11px] leading-5">
               <li>Visit the mess counter at meal timing (Lunch / Dinner).</li>
-              <li>Pay ₹{selectedPlan ? (selectedPlan.price_paise / 100) : 0} via Cash or Counter UPI.</li>
+              <li>Pay ₹{selectedPlan ? (selectedPlan.price_paise / 100) : 0} in Cash at the counter.</li>
               <li>Scan the daily Mess QR on your mobile app or tell your registered number.</li>
             </ol>
           </div>
@@ -422,6 +443,31 @@ export default function JoinMessPage() {
 
               <div className="mt-4 space-y-3">
                 <label
+                  onClick={() => setPaymentMode('cashfree')}
+                  className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
+                    paymentMode === 'cashfree'
+                      ? 'border-orange-600 bg-orange-50/60 ring-2 ring-orange-600/20'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMode"
+                    checked={paymentMode === 'cashfree'}
+                    onChange={() => setPaymentMode('cashfree')}
+                    className="h-4 w-4 accent-orange-600"
+                  />
+                  <CreditCard className="h-5 w-5 text-orange-600 shrink-0" />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold text-slate-900">Pay Online via Cashfree</p>
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">INSTANT</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">UPI, Cards, Netbanking &amp; Wallets · Instant pass activation.</p>
+                  </div>
+                </label>
+
+                <label
                   onClick={() => setPaymentMode('counter_cash')}
                   className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
                     paymentMode === 'counter_cash'
@@ -438,113 +484,11 @@ export default function JoinMessPage() {
                   />
                   <Coins className="h-5 w-5 text-amber-700 shrink-0" />
                   <div>
-                    <p className="text-xs font-bold text-slate-900">Pay on Counter (Cash)</p>
-                    <p className="text-[11px] text-slate-500">Pay physical cash directly at the mess counter.</p>
-                  </div>
-                </label>
-
-                <label
-                  onClick={() => setPaymentMode('counter_upi')}
-                  className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
-                    paymentMode === 'counter_upi'
-                      ? 'border-amber-600 bg-amber-50/50 ring-2 ring-amber-600/20'
-                      : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="paymentMode"
-                    checked={paymentMode === 'counter_upi'}
-                    onChange={() => setPaymentMode('counter_upi')}
-                    className="h-4 w-4 accent-amber-600"
-                  />
-                  <Wallet className="h-5 w-5 text-emerald-700 shrink-0" />
-                  <div>
-                    <p className="text-xs font-bold text-slate-900">Pay via Counter UPI QR</p>
-                    <p className="text-[11px] text-slate-500">Scan the provider’s UPI QR standee at the counter.</p>
-                  </div>
-                </label>
-
-                <label
-                  onClick={() => setPaymentMode('direct_upi')}
-                  className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
-                    paymentMode === 'direct_upi'
-                      ? 'border-purple-600 bg-purple-50/50 ring-2 ring-purple-600/20'
-                      : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="paymentMode"
-                    checked={paymentMode === 'direct_upi'}
-                    onChange={() => setPaymentMode('direct_upi')}
-                    className="h-4 w-4 accent-purple-600"
-                  />
-                  <QrCode className="h-5 w-5 text-purple-700 shrink-0" />
-                  <div>
-                    <p className="text-xs font-bold text-slate-900">Direct UPI (Scan & Pay Online)</p>
-                    <p className="text-[11px] text-slate-500">Scan mess partner’s UPI QR now and submit UTR / receipt.</p>
+                    <p className="text-xs font-bold text-slate-900">Pay Cash at Mess Counter</p>
+                    <p className="text-[11px] text-slate-500">Pay physical cash directly at the mess counter for staff approval.</p>
                   </div>
                 </label>
               </div>
-
-              {/* Direct UPI details panel */}
-              {paymentMode === 'direct_upi' && (
-                <div className="mt-4 rounded-2xl border border-purple-200 bg-purple-50/60 p-4 space-y-4">
-                  <div className="text-center">
-                    <p className="text-xs font-bold text-purple-900">Mess Partner UPI QR</p>
-                    <div className="mt-2 mx-auto w-44 h-44 rounded-xl border border-purple-200 bg-white p-2 flex items-center justify-center shadow-sm">
-                      {providerPaymentSettings?.upi_qr_url ? (
-                        <img
-                          src={providerPaymentSettings.upi_qr_url}
-                          alt="Mess UPI QR"
-                          className="max-h-full max-w-full object-contain rounded"
-                        />
-                      ) : (
-                        <div className="text-center">
-                          <QrCode size={56} className="mx-auto text-purple-600" />
-                          <p className="mt-1 text-[10px] font-mono text-slate-600">{providerPaymentSettings?.upi_id || 'Scan at counter'}</p>
-                        </div>
-                      )}
-                    </div>
-                    {providerPaymentSettings?.upi_id && (
-                      <p className="mt-2 text-xs font-mono font-bold text-slate-800">
-                        UPI: {providerPaymentSettings.upi_id}
-                      </p>
-                    )}
-                    {providerPaymentSettings?.upi_name && (
-                      <p className="text-[11px] text-slate-600">Payee: {providerPaymentSettings.upi_name}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-3 pt-2 border-t border-purple-200/80">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800">
-                        UPI Reference / UTR Number (12 Digits)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. 430129384912"
-                        value={utrReference}
-                        onChange={(e) => setUtrReference(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-xs text-slate-900 outline-none focus:border-purple-600 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-800">
-                        Payment Receipt Screenshot Link / URL
-                      </label>
-                      <input
-                        type="url"
-                        placeholder="https://... (Link to receipt image or proof)"
-                        value={receiptUrl}
-                        onChange={(e) => setReceiptUrl(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-slate-300 p-2.5 text-xs text-slate-900 outline-none focus:border-purple-600"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* STATUS / NOTICE ALERTS */}
@@ -564,13 +508,17 @@ export default function JoinMessPage() {
                 <CheckCircle2 size={18} />
                 <span>
                   {submitting
-                    ? 'Registering Pass...'
+                    ? (paymentMode === 'cashfree' ? 'Opening Cashfree Checkout...' : 'Registering Pass...')
+                    : paymentMode === 'cashfree'
+                    ? `Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} Online (Cashfree)`
                     : `Confirm Pass · Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} on Counter`}
                 </span>
               </button>
 
               <p className="text-center text-[11px] text-slate-500">
-                Instant registration. You will pay directly to {provider?.display_name || 'the mess'} at the counter.
+                {paymentMode === 'cashfree'
+                  ? `Secured by Cashfree Payments. Instant pass activation for ${provider?.display_name || 'the mess'}.`
+                  : `Instant registration. You will pay directly to ${provider?.display_name || 'the mess'} at the counter.`}
               </p>
             </div>
           </form>

@@ -315,12 +315,12 @@ class _PaymentSettingsScreenState extends State<PaymentSettingsScreen> {
               padding: const EdgeInsets.all(18),
               children: [
                 Text(
-                  'Counter Payment Reception',
+                  'Payout & Settlement Account',
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Setup your UPI ID, custom Payment QR photo, and Bank details so customers can pay directly on counter or through scan & pay.',
+                  'Setup your bank details and UPI ID to receive Cashfree payouts from online customer payments.',
                   style: TextStyle(color: muted, fontSize: 13, height: 1.4),
                 ),
                 const SizedBox(height: 20),
