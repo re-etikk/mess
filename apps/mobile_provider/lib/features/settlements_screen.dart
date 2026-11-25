@@ -345,7 +345,9 @@ class _SettlementsPayoutScreenState extends State<SettlementsPayoutScreen> with 
     final plan = item['plan_name']?.toString() ?? 'Meal Pass';
     final amount = item['amount_inr'] ?? (item['price_inr'] ?? 0);
     final mode = item['payment_mode']?.toString() ?? 'counter_upi';
-    final isUpi = mode.toLowerCase().contains('upi');
+    final modeLower = mode.toLowerCase();
+    final isOnline = modeLower.contains('online') || modeLower.contains('cashfree');
+    final isUpi = !isOnline && modeLower.contains('upi');
     final txnId = item['transaction_id']?.toString() ?? item['utr_reference']?.toString() ?? 'TXN-${item['id'].toString().substring(0, 8).toUpperCase()}';
     final utr = item['utr_reference']?.toString() ?? '';
     final receiptUrl = item['receipt_url']?.toString() ?? '';
@@ -364,8 +366,18 @@ class _SettlementsPayoutScreenState extends State<SettlementsPayoutScreen> with 
               children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor: isUpi ? const Color(0xFF0F766E).withOpacity(0.12) : const Color(0xFFD97706).withOpacity(0.12),
-                  child: Icon(isUpi ? Icons.qr_code_2 : Icons.payments_outlined, color: isUpi ? const Color(0xFF0F766E) : const Color(0xFFD97706), size: 18),
+                  backgroundColor: isOnline
+                      ? const Color(0xFF16A34A).withOpacity(0.12)
+                      : (isUpi ? const Color(0xFF0F766E).withOpacity(0.12) : const Color(0xFFD97706).withOpacity(0.12)),
+                  child: Icon(
+                    isOnline
+                        ? Icons.credit_card_rounded
+                        : (isUpi ? Icons.qr_code_2 : Icons.payments_outlined),
+                    color: isOnline
+                        ? const Color(0xFF16A34A)
+                        : (isUpi ? const Color(0xFF0F766E) : const Color(0xFFD97706)),
+                    size: 18,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -409,15 +421,19 @@ class _SettlementsPayoutScreenState extends State<SettlementsPayoutScreen> with 
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: isUpi ? const Color(0xFFE0F2FE) : const Color(0xFFFEF3C7),
+                    color: isOnline
+                        ? const Color(0xFFDCFCE7)
+                        : (isUpi ? const Color(0xFFE0F2FE) : const Color(0xFFFEF3C7)),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    isUpi ? 'UPI QR' : 'Cash',
+                    isOnline ? 'Cashfree Online' : (isUpi ? 'UPI QR' : 'Cash'),
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
-                      color: isUpi ? const Color(0xFF0369A1) : const Color(0xFFB45309),
+                      color: isOnline
+                          ? const Color(0xFF15803D)
+                          : (isUpi ? const Color(0xFF0369A1) : const Color(0xFFB45309)),
                     ),
                   ),
                 ),

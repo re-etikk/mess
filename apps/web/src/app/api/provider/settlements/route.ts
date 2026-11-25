@@ -47,14 +47,35 @@ export async function GET(req: NextRequest) {
         .order('created_at', { ascending: false });
 
       if (!error && dbSubs) {
+        const subIds = dbSubs.map((s: any) => s.id);
+        const cfTxBySubId = new Map<string, { gateway_order_id?: string; gateway_payment_id?: string }>();
+        if (subIds.length > 0) {
+          try {
+            const { data: cfTxs } = await admin
+              .from('payment_transactions')
+              .select('subscription_id, gateway_order_id, gateway_payment_id, status')
+              .in('subscription_id', subIds)
+              .eq('gateway_name', 'cashfree')
+              .eq('status', 'succeeded');
+            if (cfTxs) {
+              for (const tx of cfTxs) {
+                if (tx.subscription_id) {
+                  cfTxBySubId.set(tx.subscription_id, tx);
+                }
+              }
+            }
+          } catch {}
+        }
+
         for (const sub of dbSubs) {
           seenIds.add(sub.id);
           const profile = Array.isArray(sub.profiles) ? sub.profiles[0] : sub.profiles;
           const pricePaise = Number(sub.price_paid_paise || 0);
+          const cfTx = cfTxBySubId.get(sub.id);
           allItems.push({
             id: sub.id,
-            transaction_id: `TXN-${sub.id.slice(0, 8).toUpperCase()}`,
-            utr_reference: '',
+            transaction_id: cfTx?.gateway_payment_id || cfTx?.gateway_order_id || `TXN-${sub.id.slice(0, 8).toUpperCase()}`,
+            utr_reference: cfTx?.gateway_order_id || '',
             provider_id: sub.provider_id,
             customer_id: sub.customer_id,
             customer_name: profile?.display_name || 'Subscriber',
@@ -63,7 +84,7 @@ export async function GET(req: NextRequest) {
             plan_type: sub.plan_type_snapshot || 'fixed_period',
             amount_inr: pricePaise / 100,
             status: sub.status === 'active' ? 'paid' : sub.status,
-            payment_mode: 'counter_upi',
+            payment_mode: cfTx ? 'online_cashfree' : 'counter_upi',
             receipt_url: '',
             created_at: sub.created_at,
             paid_at: sub.payment_verified_at || sub.created_at,
@@ -80,10 +101,11 @@ export async function GET(req: NextRequest) {
     if (sub.provider_id === providerId && !seenIds.has(id)) {
       seenIds.add(id);
       const isApproved = sub.status === 'active';
+      const cfRef = (sub as any).cashfree_payment_id || (sub as any).cashfree_order_id || '';
       allItems.push({
         id: sub.id,
-        transaction_id: (sub as any).utr_reference ? `UTR-${(sub as any).utr_reference}` : `TXN-${sub.id.slice(0, 8).toUpperCase()}`,
-        utr_reference: (sub as any).utr_reference || '',
+        transaction_id: cfRef || ((sub as any).utr_reference ? `UTR-${(sub as any).utr_reference}` : `TXN-${sub.id.slice(0, 8).toUpperCase()}`),
+        utr_reference: (sub as any).utr_reference || (sub as any).cashfree_order_id || '',
         provider_id: sub.provider_id,
         customer_id: sub.customer_id,
         customer_name: sub.customer_name || 'Subscriber',
@@ -93,7 +115,7 @@ export async function GET(req: NextRequest) {
         plan_type: sub.plan_type,
         amount_inr: (sub.price_paid_paise || 0) / 100,
         status: isApproved ? 'paid' : sub.status,
-        payment_mode: sub.payment_mode || 'counter_upi',
+        payment_mode: sub.payment_mode === 'online' || cfRef ? 'online_cashfree' : (sub.payment_mode || 'counter_upi'),
         receipt_url: (sub as any).receipt_url || '',
         created_at: sub.created_at,
         paid_at: (sub as any).activated_at || sub.created_at,
@@ -115,7 +137,8 @@ export async function GET(req: NextRequest) {
   for (const item of paid) {
     const amt = item.amount_inr || 0;
     totalCollected += amt;
-    if (String(item.payment_mode).toLowerCase().includes('cash')) {
+    const modeLower = String(item.payment_mode || '').toLowerCase();
+    if (modeLower === 'cash' || modeLower === 'counter_cash') {
       cashCollected += amt;
     } else {
       upiCollected += amt;
