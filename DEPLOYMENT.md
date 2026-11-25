@@ -40,6 +40,9 @@ This guide details the step-by-step deployment and operational configuration for
    NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
    SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
    QR_HMAC_SECRET="your-32-character-high-entropy-secret"
+   RESEND_API_KEY="your-resend-api-key"
+   RESEND_FROM_EMAIL="Thali <noreply@your-verified-domain>"
+   FAST2SMS_API_KEY="your-fast2sms-api-key"
    PAYMENT_GATEWAY_PROVIDER="razorpay"
    RAZORPAY_KEY_ID="rzp_live_yourKeyId"
    RAZORPAY_KEY_SECRET="yourRazorpayLiveSecret"
@@ -50,6 +53,14 @@ This guide details the step-by-step deployment and operational configuration for
    DEFAULT_PER_KM_DELIVERY_FEE_INR=10
    DEFAULT_RIDER_PAYOUT_PERCENT=85
    ```
+   For production SMS OTP, add `FAST2SMS_API_KEY` as a **server-side** environment
+   variable in Vercel (or your hosting provider), then redeploy. Get the API key
+   from the Fast2SMS dashboard; never put it in a mobile app or a `NEXT_PUBLIC_*`
+   variable. Confirm the Fast2SMS account/API access, available balance, and any
+   sender/template or DLT requirements for the route you use. A wallet recharge
+   alone does not configure the app or guarantee that the provider will accept
+   OTP requests. Production will report a send failure rather than return the
+   OTP when no provider delivers it.
 3. **Verify Deployment:**
    - Check public routes: `/` (Discovery), `/provider/[id]` (Plan details), `/customer/dashboard` (Live QR), `/provider/portal` (Scanner), `/rider/portal` (Fleet), `/admin/dashboard` (Admin).
 

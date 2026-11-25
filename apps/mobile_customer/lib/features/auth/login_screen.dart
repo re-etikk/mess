@@ -21,7 +21,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final List<TextEditingController> _otpControllers = List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _otpFocus = List.generate(6, (_) => FocusNode());
 
-  bool _isPhoneMode = false;
   bool _isPasswordMode = false;
   bool _isOtpStep = false;
   bool _verified = false;
@@ -68,15 +67,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _sendOtp() async {
     final id = _identifierController.text.trim();
     if (id.isEmpty) {
-      setState(() => _error = _isPhoneMode ? 'Enter your 10-digit phone number.' : 'Enter your email address.');
+      setState(() => _error = 'Enter your email address.');
       return;
     }
-    if (!_isPhoneMode && !id.contains('@')) {
+    if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(id)) {
       setState(() => _error = 'Enter a valid email address.');
-      return;
-    }
-    if (_isPhoneMode && id.replaceAll(RegExp(r'\D'), '').length < 10) {
-      setState(() => _error = 'Enter a valid 10-digit mobile number.');
       return;
     }
 
@@ -239,13 +234,12 @@ class _LoginScreenState extends State<LoginScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_isPasswordMode || _isPhoneMode)
+        if (_isPasswordMode)
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: InkWell(
               onTap: () => setState(() {
                 _isPasswordMode = false;
-                _isPhoneMode = false;
                 _error = null;
               }),
               child: Row(
@@ -253,7 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Icon(Icons.chevron_left_rounded, size: 22, color: ThaliColors.ink),
                   const SizedBox(width: 4),
                   Text(
-                    _isPasswordMode ? 'Sign in with password' : 'Continue with Phone',
+                    'Sign in with password',
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ThaliColors.ink),
                   ),
                 ],
@@ -261,17 +255,16 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         Text(
-          _isPhoneMode ? 'Mobile Number' : 'Email Address',
+          'Email Address',
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: ThaliColors.ink),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: _identifierController,
-          keyboardType: _isPhoneMode ? TextInputType.phone : TextInputType.emailAddress,
+          keyboardType: TextInputType.emailAddress,
           onChanged: (_) => setState(() => _error = null),
           decoration: InputDecoration(
-            hintText: _isPhoneMode ? 'Enter 10-digit mobile number' : 'Enter your email address',
-            prefixText: _isPhoneMode ? '+91 ' : null,
+            hintText: 'Enter your email address',
           ),
         ),
         if (_isPasswordMode) ...[
@@ -328,22 +321,10 @@ class _LoginScreenState extends State<LoginScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _AuthOptionTile(
-              icon: Icons.phone_outlined,
-              label: _isPhoneMode ? 'Use Email' : 'Phone OTP',
-              onTap: () => setState(() {
-                _isPhoneMode = !_isPhoneMode;
-                _isPasswordMode = false;
-                _identifierController.clear();
-                _error = null;
-              }),
-            ),
-            const SizedBox(width: 12),
-            _AuthOptionTile(
               icon: Icons.lock_outline_rounded,
               label: _isPasswordMode ? 'Email OTP' : 'Password',
               onTap: () => setState(() {
                 _isPasswordMode = !_isPasswordMode;
-                _isPhoneMode = false;
                 _error = null;
               }),
             ),
@@ -383,7 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const Icon(Icons.chevron_left_rounded, size: 22, color: ThaliColors.ink),
               const SizedBox(width: 4),
               Text(
-                _isPhoneMode ? 'Verify your phone' : 'Verify your email',
+                'Verify your email',
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: ThaliColors.ink),
               ),
             ],

@@ -5,6 +5,21 @@ import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
+async function findAuthUserByEmail(
+  admin: NonNullable<ReturnType<typeof getAdminClient>>,
+  email: string
+) {
+  const perPage = 200;
+  for (let page = 1; page <= 100; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) throw error;
+    const user = data.users.find((candidate) => candidate.email?.toLowerCase() === email);
+    if (user) return user;
+    if (data.users.length < perPage) return null;
+  }
+  throw new Error('Unable to complete email account lookup.');
+}
+
 export async function POST(req: NextRequest) {
   let body: any = {};
   try {
@@ -22,9 +37,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Identifier and OTP code are required.' }, { status: 400 });
   }
 
-  const isEmail = raw.includes('@');
-  const cleanPhone = raw.replace(/\D/g, '');
-  const identifier = isEmail ? raw.toLowerCase() : cleanPhone.slice(-10);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+    return NextResponse.json({ success: false, error: 'A valid email address is required. Phone OTP is disabled.' }, { status: 400 });
+  }
+  const identifier = raw.toLowerCase();
 
   const admin = getAdminClient();
   if (!admin) {
@@ -88,48 +104,50 @@ export async function POST(req: NextRequest) {
 
     // Resolve or provision real Supabase user + profile for passwordless OTP login
     let userId: string | null = null;
-    let resolvedEmail = isEmail ? identifier : `${identifier}@phone.thali.store`;
+    const resolvedEmail = identifier;
     let profile: any = null;
     let providerInfo: any = null;
 
-    if (isEmail) {
-      const { data: existingProf } = await admin
-        .from('profiles')
-        .select('*')
-        .ilike('email', identifier)
-        .maybeSingle()
-        .then((r) => r, () => ({ data: null }));
-      if (existingProf) {
-        userId = existingProf.id;
-        profile = existingProf;
-      }
-      if (!userId) {
-        const { data: usersList } = await admin.auth.admin.listUsers({ perPage: 200 });
-        const matched = usersList?.users?.find((u) => u.email?.toLowerCase() === identifier);
-        if (matched) userId = matched.id;
-      }
+    const { data: existingProfiles, error: profileLookupError } = await admin
+      .from('profiles')
+      .select('*')
+      .eq('email', identifier)
+      .limit(2);
+    if (profileLookupError) throw profileLookupError;
+
+    if (existingProfiles?.length === 1) {
+      profile = existingProfiles[0];
+      userId = profile.id;
     } else {
-      const { data: existingProf } = await admin
-        .from('profiles')
-        .select('*')
-        .ilike('phone_e164', `%${identifier}%`)
-        .limit(1)
-        .maybeSingle();
-      if (existingProf) {
-        userId = existingProf.id;
-        profile = existingProf;
+      const existingUser = await findAuthUserByEmail(admin, identifier);
+      if (existingUser) userId = existingUser.id;
+      if (existingProfiles?.length) {
+        profile = existingProfiles.find((candidate: any) => candidate.id === userId) || null;
       }
+    }
+
+    if (existingProfiles?.length && !userId) {
+      return NextResponse.json(
+        { success: false, error: 'This email has conflicting account records. Please contact support.' },
+        { status: 409 }
+      );
     }
 
     if (!userId) {
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email: resolvedEmail,
         email_confirm: true,
-        phone: isEmail ? undefined : `+91${identifier}`,
         user_metadata: { role: requestedRole, auth_method: 'otp' },
       });
       if (!createErr && created?.user) {
         userId = created.user.id;
+      } else {
+        const existingUser = await findAuthUserByEmail(admin, identifier);
+        if (existingUser) {
+          userId = existingUser.id;
+        } else if (createErr) {
+          throw createErr;
+        }
       }
     }
 
@@ -142,23 +160,39 @@ export async function POST(req: NextRequest) {
       if (pRow) {
         profile = pRow;
       } else {
-        const { data: ins } = await admin
+        const { data: ins, error: insertProfileError } = await admin
           .from('profiles')
           .insert({
             id: userId,
             display_name: '',
-            phone_e164: isEmail ? null : `+91${identifier}`,
+            email: resolvedEmail,
             locale: 'en-IN',
             timezone: 'Asia/Kolkata',
           })
           .select('*')
           .single();
         profile = ins;
+        if (insertProfileError) {
+          const { data: concurrentProfile, error: reloadProfileError } = await admin
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+          if (reloadProfileError || !concurrentProfile) throw insertProfileError;
+          profile = concurrentProfile;
+        }
       }
-      // Best-effort save email column if migration ran
-      if (isEmail) {
-        await admin.from('profiles').update({ email: resolvedEmail }).eq('id', userId).then(() => null, () => null);
-      }
+    }
+
+    if (profile?.email !== resolvedEmail) {
+      const { data: updatedProfile, error: profileUpdateError } = await admin
+        .from('profiles')
+        .update({ email: resolvedEmail })
+        .eq('id', userId)
+        .select('*')
+        .maybeSingle();
+      if (profileUpdateError) throw profileUpdateError;
+      if (updatedProfile) profile = updatedProfile;
     }
 
     // Ensure role exists
@@ -216,7 +250,7 @@ export async function POST(req: NextRequest) {
       user: {
         id: userId,
         email: profile?.email || resolvedEmail,
-        phone: profile?.phone_e164 || (isEmail ? '' : `+91${identifier}`),
+        phone: profile?.phone_e164 || '',
         name: profile?.display_name || '',
         role: requestedRole,
         provider_id: providerInfo?.id || null,
