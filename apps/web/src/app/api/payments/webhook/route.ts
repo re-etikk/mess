@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { handleCashfreeWebhook } from '@/app/api/payments/cashfree/webhook/route';
+import { handleCashfreeWebhook } from '@/lib/cashfree-webhook-handler';
 
 export const dynamic = 'force-dynamic';
 
