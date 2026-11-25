@@ -24,7 +24,7 @@ class CheckoutScreen extends StatefulWidget {
 class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _termsAccepted = true;
   bool _busy = false;
-  String _paymentMethod = 'Pay on Counter (Cash / Counter UPI)';
+  String _paymentMethod = 'Pay Online (Cashfree)';
   Map<String, dynamic>? _paymentSettings;
   String _receiptImageUri = '';
 
@@ -165,7 +165,54 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
     setState(() => _busy = true);
     try {
+      final isCashfree = _paymentMethod.contains('Cashfree');
       final isDirectUpi = _paymentMethod.contains('Direct UPI');
+
+      if (isCashfree) {
+        final purpose = widget.plan == null
+            ? 'add_ons'
+            : (widget.plan!.type == SubscriptionType.dailyMeal
+                ? 'single_meal_purchase'
+                : 'subscription_purchase');
+
+        await state.payWithCashfree(
+          purpose: purpose,
+          provider: widget.provider,
+          plan: widget.plan,
+          slotId: widget.slotId,
+          addOnsPaise: _extrasTotal * 100,
+        );
+
+        if (widget.addOns.isNotEmpty) {
+          state.recordAddOnPayment(providerName: widget.provider.name, addOns: widget.addOns);
+        }
+
+        if (!mounted) return;
+        setState(() => _busy = false);
+
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.verified_rounded, color: MessColors.green, size: 46),
+            title: const Text('Payment Successful!'),
+            content: Text(
+              '₹$_total paid securely via Cashfree.\n\nYour meal pass at ${widget.provider.name} is now active and ready to scan at the counter!',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+                child: const Text('View Meal Passes'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       final mode = isDirectUpi ? 'direct_upi' : 'counter_cash';
 
       if (widget.plan != null) {
@@ -212,11 +259,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     } on RepositoryException catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message), backgroundColor: const Color(0xFFC0392B)),
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to complete request. Please verify your connection.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to complete request. Please verify your connection.'), backgroundColor: Color(0xFFC0392B)),
+      );
     }
   }
 
@@ -224,6 +275,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget build(BuildContext context) {
     final plan = widget.plan;
     final slot = widget.slotId == null ? null : widget.provider.mealSlots.where((s) => s.id == widget.slotId).firstOrNull;
+    final isCashfree = _paymentMethod.contains('Cashfree');
     final isDirectUpi = _paymentMethod.contains('Direct UPI');
 
     final upiId = _paymentSettings?['upi_id'] ?? 'thalipay@upi';
@@ -272,20 +324,32 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               padding: EdgeInsets.zero,
               child: Column(
                 children: [
-                  for (final method in ['Pay on Counter (Cash / Counter UPI)', 'Direct UPI (Scan & Pay at Counter)'])
+                  for (final method in [
+                    'Pay Online (Cashfree)',
+                    'Pay on Counter (Cash / Counter UPI)',
+                    'Direct UPI (Scan & Pay at Counter)',
+                  ])
                     RadioListTile<String>(
                       value: method,
                       groupValue: _paymentMethod,
                       onChanged: (value) => setState(() => _paymentMethod = value!),
                       activeColor: MessColors.orangeDark,
-                      title: Text(method, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      title: Text(method, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                       subtitle: Text(
-                        method.contains('Cash') ? 'Pay physical cash to mess staff' : 'Scan provider UPI QR and upload receipt',
+                        method.contains('Cashfree')
+                            ? 'UPI, Cards, Netbanking & Wallets · Instant activation'
+                            : (method.contains('Cash')
+                                ? 'Pay physical cash to mess staff'
+                                : 'Scan provider UPI QR and upload receipt'),
                         style: const TextStyle(fontSize: 11, color: MessColors.muted),
                       ),
                       secondary: Icon(
-                        method.contains('Cash') ? Icons.payments_outlined : Icons.qr_code_scanner_rounded,
-                        color: MessColors.navy,
+                        method.contains('Cashfree')
+                            ? Icons.credit_card_rounded
+                            : (method.contains('Cash')
+                                ? Icons.payments_outlined
+                                : Icons.qr_code_scanner_rounded),
+                        color: method.contains('Cashfree') ? MessColors.green : MessColors.navy,
                       ),
                     ),
                 ],
@@ -293,8 +357,40 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ),
             const SizedBox(height: 16),
 
+            if (isCashfree)
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 20),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Secured by Cashfree Payments',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF14532D)),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            'Pay via PhonePe, Google Pay, Paytm, Debit/Credit Card, or Netbanking. Your pass activates immediately after payment.',
+                            style: TextStyle(fontSize: 11.5, height: 1.4, color: Color(0xFF166534)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )
             // If Direct UPI selected: show Provider's QR Code & Receipt Upload
-            if (isDirectUpi)
+            else if (isDirectUpi)
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -522,7 +618,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ),
             const SizedBox(height: 8),
             MessActionButton(
-              label: isDirectUpi ? 'Submit Payment Receipt · ₹$_total' : 'Confirm & Pay on Counter · ₹$_total',
+              label: isCashfree
+                  ? 'Pay ₹$_total Online (Cashfree)'
+                  : (isDirectUpi ? 'Submit Payment Receipt · ₹$_total' : 'Confirm & Pay on Counter · ₹$_total'),
               loading: _busy,
               onPressed: _payAndConfirm,
             ),

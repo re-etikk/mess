@@ -33,7 +33,7 @@ export async function rejectUnimplementedRedemption(
   try {
     // 2. Authenticate the customer
     const bearer = req.headers.get('authorization');
-    let user: { id: string } | null = null;
+    let user: { id: string; email?: string } | null = null;
     const admin = getAdminClient();
 
     if (bearer?.startsWith('Bearer ')) {
@@ -154,13 +154,15 @@ export async function rejectUnimplementedRedemption(
         );
       }
       try {
-        addPartnerNotification({
-          provider_id: qrVerification.providerId,
-          type: 'redemption',
-          title: 'Meal Redeemed 🍽️',
-          message: `${user.email?.split('@')[0] || 'Student'} redeemed ${(qrVerification.slot || 'lunch').toUpperCase()}`,
-          customer_name: user.email?.split('@')[0] || 'Student',
-        });
+        if (qrVerification.providerId) {
+          addPartnerNotification({
+            provider_id: qrVerification.providerId,
+            type: 'redemption',
+            title: 'Meal Redeemed 🍽️',
+            message: `${user.email?.split('@')[0] || 'Student'} redeemed ${(qrVerification.slot || 'lunch').toUpperCase()}`,
+            customer_name: user.email?.split('@')[0] || 'Student',
+          });
+        }
       } catch (_) {}
       return NextResponse.json({ success: true, ...data }, { status: 200 });
     }

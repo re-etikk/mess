@@ -34,7 +34,7 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
   MealPlan? _selectedPlan;
   Map<String, dynamic>? _quote;
   String? _quoteError;
-  String _paymentMode = 'counter_cash'; // 'counter_cash' or 'direct_upi'
+  String _paymentMode = 'cashfree'; // 'cashfree', 'counter_cash', or 'direct_upi'
   Map<String, dynamic>? _paymentSettings;
 
   final _utrCtrl = TextEditingController();
@@ -105,6 +105,47 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
     setState(() => _submitting = true);
     final state = AppStateScope.of(context, listen: false);
     try {
+      if (_paymentMode == 'cashfree') {
+        final targetProvider = _provider ??
+            MessProvider(
+              id: widget.subscription.providerId,
+              name: widget.subscription.providerName,
+              area: '',
+              distanceMeters: 0,
+              description: '',
+              isOpen: true,
+              mealSlots: const [],
+              plans: _availablePlans,
+            );
+
+        await state.payWithCashfree(
+          purpose: 'plan_upgrade',
+          provider: targetProvider,
+          plan: _selectedPlan,
+          currentSub: widget.subscription,
+        );
+
+        if (!mounted) return;
+        Navigator.pop(context);
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.verified_rounded, color: MessColors.green, size: 48),
+            title: const Text('Plan Upgraded Instantly!'),
+            content: Text(
+              'Payment via Cashfree succeeded!\n\nYour meal pass has been upgraded to ${_selectedPlan!.name} at ${targetProvider.name} and is active immediately.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Awesome'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       await state.requestPlanUpgrade(
         subscriptionId: widget.subscription.id,
         targetPlanId: _selectedPlan!.id,
@@ -329,16 +370,25 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
                     children: [
                       Expanded(
                         child: ChoiceChip(
-                          label: const Center(child: Text('💵 Pay on Counter')),
+                          label: const Center(child: Text('💳 Cashfree')),
+                          selected: _paymentMode == 'cashfree',
+                          selectedColor: const Color(0xFFDCFCE7),
+                          onSelected: (v) => setState(() => _paymentMode = 'cashfree'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('💵 Counter')),
                           selected: _paymentMode == 'counter_cash',
                           selectedColor: const Color(0xFFFFD199),
                           onSelected: (v) => setState(() => _paymentMode = 'counter_cash'),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: ChoiceChip(
-                          label: const Center(child: Text('📱 Scan & Pay (UPI)')),
+                          label: const Center(child: Text('📱 UPI QR')),
                           selected: _paymentMode == 'direct_upi',
                           selectedColor: const Color(0xFFFFD199),
                           onSelected: (v) => setState(() => _paymentMode = 'direct_upi'),
@@ -421,7 +471,9 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
                     child: _submitting
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                         : Text(
-                            'Request Upgrade · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}',
+                            _paymentMode == 'cashfree'
+                                ? 'Pay & Upgrade Instantly · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}'
+                                : 'Request Upgrade · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}',
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                           ),
                   ),

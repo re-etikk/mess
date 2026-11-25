@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ArrowUpCircle, CheckCircle2, QrCode, Sparkles, X } from 'lucide-react';
+import { ArrowUpCircle, CheckCircle2, CreditCard, QrCode, Sparkles, X } from 'lucide-react';
+import { launchCashfreeWebCheckout } from '@/lib/cashfree-client';
 
 interface ActiveSub {
   id: string;
@@ -25,7 +26,7 @@ export default function CustomerPlanUpgradeModal({
   const [loading, setLoading] = useState(false);
   const [quote, setQuote] = useState<any>(null);
   const [quoteError, setQuoteError] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'counter_cash' | 'direct_upi'>('counter_cash');
+  const [paymentMode, setPaymentMode] = useState<'cashfree' | 'counter_cash' | 'direct_upi'>('cashfree');
   const [providerSettings, setProviderSettings] = useState<any>(null);
   const [utr, setUtr] = useState('');
   const [receiptUrl, setReceiptUrl] = useState('');
@@ -62,7 +63,7 @@ export default function CustomerPlanUpgradeModal({
         if (!res.ok || !d.success) {
           setQuoteError(d.error || 'Failed to calculate quote');
         } else {
-          setQuote(d);
+          setQuote(d.quote || d);
         }
       })
       .catch(() => setQuoteError('Network error calculating upgrade difference'));
@@ -73,6 +74,34 @@ export default function CustomerPlanUpgradeModal({
     if (!selectedPlanId) return;
     setSubmitting(true);
     try {
+      if (paymentMode === 'cashfree') {
+        const selected = plans.find((p) => p.id === selectedPlanId);
+        const orderRes = await fetch('/api/payments/cashfree/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purpose: 'plan_upgrade',
+            provider_id: providerId || subscription.provider_id,
+            subscription_id: subscription.id,
+            target_plan_id: selectedPlanId,
+            plan_name: selected?.name,
+            plan_type: selected?.plan_type,
+            duration_days: selected?.duration_days || (selected?.duration_months ? selected.duration_months * 30 : 30),
+            meal_credits: selected?.meal_credits,
+            target_plan_price_paise: selected?.price_paise,
+          }),
+        });
+        const orderData = await orderRes.json().catch(() => ({}));
+        if (!orderRes.ok || !orderData.success || !orderData.payment_session_id) {
+          throw new Error(orderData.error || 'Unable to start Cashfree online checkout.');
+        }
+        await launchCashfreeWebCheckout({
+          paymentSessionId: orderData.payment_session_id,
+          environment: orderData.environment === 'production' ? 'production' : 'sandbox',
+        });
+        return;
+      }
+
       const res = await fetch('/api/subscription/upgrade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -218,28 +247,42 @@ export default function CustomerPlanUpgradeModal({
 
                 <div>
                   <label className="block font-bold text-slate-800 mb-1">Payment Method</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMode('cashfree')}
+                      className={`p-2.5 rounded-xl border text-center font-bold transition flex flex-col items-center gap-1 ${
+                        paymentMode === 'cashfree'
+                          ? 'border-orange-600 bg-orange-50 text-orange-900'
+                          : 'border-slate-200 bg-white text-slate-700'
+                      }`}
+                    >
+                      <CreditCard size={15} />
+                      <span>Cashfree Online</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMode('counter_cash')}
-                      className={`p-2.5 rounded-xl border text-center font-bold transition ${
+                      className={`p-2.5 rounded-xl border text-center font-bold transition flex flex-col items-center gap-1 ${
                         paymentMode === 'counter_cash'
                           ? 'border-purple-600 bg-purple-100 text-purple-900'
                           : 'border-slate-200 bg-white text-slate-700'
                       }`}
                     >
-                      💵 Pay on Counter
+                      <span>💵</span>
+                      <span>Counter</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMode('direct_upi')}
-                      className={`p-2.5 rounded-xl border text-center font-bold transition ${
+                      className={`p-2.5 rounded-xl border text-center font-bold transition flex flex-col items-center gap-1 ${
                         paymentMode === 'direct_upi'
                           ? 'border-purple-600 bg-purple-100 text-purple-900'
                           : 'border-slate-200 bg-white text-slate-700'
                       }`}
                     >
-                      📲 Direct UPI QR
+                      <span>📲</span>
+                      <span>Direct UPI</span>
                     </button>
                   </div>
                 </div>

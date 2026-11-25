@@ -9,12 +9,14 @@ import {
   CheckCircle2,
   Clock,
   Coins,
+  CreditCard,
   MapPin,
   QrCode,
   ShieldCheck,
   Store,
   Wallet,
 } from 'lucide-react';
+import { launchCashfreeWebCheckout } from '@/lib/cashfree-client';
 
 interface Plan {
   id: string;
@@ -53,7 +55,7 @@ export default function JoinMessPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [paymentMode, setPaymentMode] = useState<'counter_cash' | 'counter_upi' | 'direct_upi'>('counter_cash');
+  const [paymentMode, setPaymentMode] = useState<'cashfree' | 'counter_cash' | 'counter_upi' | 'direct_upi'>('cashfree');
   const [providerPaymentSettings, setProviderPaymentSettings] = useState<{ upi_id?: string; upi_name?: string; upi_qr_url?: string } | null>(null);
   const [utrReference, setUtrReference] = useState('');
   const [receiptUrl, setReceiptUrl] = useState('');
@@ -124,6 +126,36 @@ export default function JoinMessPage() {
     setError('');
 
     try {
+      if (paymentMode === 'cashfree') {
+        const orderRes = await fetch('/api/payments/cashfree/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            purpose: 'subscription_purchase',
+            provider_id: provider?.id || providerId,
+            plan_id: selectedPlanId,
+            customer_phone: phone.trim(),
+            customer_name: name.trim(),
+            customer_email: email.trim(),
+            plan_type: selectedPlan?.plan_type,
+            plan_name: selectedPlan?.name,
+            duration_days: selectedPlan?.duration_days || (selectedPlan?.duration_months ? selectedPlan.duration_months * 30 : 30),
+            meal_credits: selectedPlan?.meal_credits,
+            price_paise: selectedPlan?.price_paise,
+          }),
+        });
+        const orderData = await orderRes.json().catch(() => ({}));
+        if (!orderRes.ok || !orderData.success || !orderData.payment_session_id) {
+          setError(orderData.error || 'Unable to start Cashfree online checkout. You can choose Pay on Counter instead.');
+          return;
+        }
+        await launchCashfreeWebCheckout({
+          paymentSessionId: orderData.payment_session_id,
+          environment: orderData.environment === 'production' ? 'production' : 'sandbox',
+        });
+        return;
+      }
+
       const res = await fetch('/api/subscription/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -146,8 +178,8 @@ export default function JoinMessPage() {
       } else {
         setSuccessData(data);
       }
-    } catch {
-      setError('Network error registering subscription. Please check your connection.');
+    } catch (err: any) {
+      setError(err?.message || 'Network error registering subscription. Please check your connection.');
     } finally {
       setSubmitting(false);
     }
@@ -422,6 +454,31 @@ export default function JoinMessPage() {
 
               <div className="mt-4 space-y-3">
                 <label
+                  onClick={() => setPaymentMode('cashfree')}
+                  className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
+                    paymentMode === 'cashfree'
+                      ? 'border-orange-600 bg-orange-50/60 ring-2 ring-orange-600/20'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="paymentMode"
+                    checked={paymentMode === 'cashfree'}
+                    onChange={() => setPaymentMode('cashfree')}
+                    className="h-4 w-4 accent-orange-600"
+                  />
+                  <CreditCard className="h-5 w-5 text-orange-600 shrink-0" />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold text-slate-900">Pay Online via Cashfree</p>
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">INSTANT</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">UPI, Cards, Netbanking &amp; Wallets · Instant pass activation.</p>
+                  </div>
+                </label>
+
+                <label
                   onClick={() => setPaymentMode('counter_cash')}
                   className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
                     paymentMode === 'counter_cash'
@@ -564,13 +621,17 @@ export default function JoinMessPage() {
                 <CheckCircle2 size={18} />
                 <span>
                   {submitting
-                    ? 'Registering Pass...'
+                    ? (paymentMode === 'cashfree' ? 'Opening Cashfree Checkout...' : 'Registering Pass...')
+                    : paymentMode === 'cashfree'
+                    ? `Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} Online (Cashfree)`
                     : `Confirm Pass · Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} on Counter`}
                 </span>
               </button>
 
               <p className="text-center text-[11px] text-slate-500">
-                Instant registration. You will pay directly to {provider?.display_name || 'the mess'} at the counter.
+                {paymentMode === 'cashfree'
+                  ? `Secured by Cashfree Payments. Instant pass activation for ${provider?.display_name || 'the mess'}.`
+                  : `Instant registration. You will pay directly to ${provider?.display_name || 'the mess'} at the counter.`}
               </p>
             </div>
           </form>

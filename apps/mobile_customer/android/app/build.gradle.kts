@@ -21,7 +21,7 @@ android {
 
     defaultConfig {
         applicationId = "com.dabbabox.smart_tiffin_customer"
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(flutter.minSdkVersion, 21)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

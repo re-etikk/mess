@@ -30,6 +30,20 @@ abstract interface class MessRepository {
     ActiveSubscription? currentSub,
     MealPlan? targetPlan,
   });
+  Future<Map<String, dynamic>> createCashfreeOrder({
+    required String purpose,
+    required String providerId,
+    required String customerId,
+    String? customerName,
+    String? customerEmail,
+    String? customerPhone,
+    MealPlan? plan,
+    String? subscriptionId,
+    ActiveSubscription? currentSub,
+    String? slotId,
+    int addOnsPaise = 0,
+  });
+  Future<Map<String, dynamic>> verifyCashfreePayment({required String orderId});
 }
 
 class RepositoryException implements Exception {

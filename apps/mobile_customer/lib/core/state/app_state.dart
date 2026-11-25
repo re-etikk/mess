@@ -7,6 +7,7 @@ import '../models/mess_models.dart';
 import '../models/app_notification.dart';
 import '../repositories/http_mess_repository.dart';
 import '../repositories/mess_repository.dart';
+import '../services/cashfree_payment_service.dart';
 import '../services/customer_auth_service.dart';
 
 class AppState extends ChangeNotifier {
@@ -429,6 +430,89 @@ class AppState extends ChangeNotifier {
       type: NotificationType.upgrade,
     );
     return res;
+  }
+
+  Future<Map<String, dynamic>> payWithCashfree({
+    required String purpose,
+    required MessProvider provider,
+    MealPlan? plan,
+    String? slotId,
+    ActiveSubscription? currentSub,
+    int addOnsPaise = 0,
+  }) async {
+    final order = await repository.createCashfreeOrder(
+      purpose: purpose,
+      providerId: provider.id,
+      customerId: customerId,
+      customerName: customerName,
+      customerEmail: customerEmail,
+      customerPhone: customerPhone,
+      plan: plan,
+      subscriptionId: currentSub?.id,
+      currentSub: currentSub,
+      slotId: slotId,
+      addOnsPaise: addOnsPaise,
+    );
+
+    final orderId = order['order_id']?.toString() ?? '';
+    final paymentSessionId = order['payment_session_id']?.toString() ?? '';
+    final environment = order['environment']?.toString() ?? 'sandbox';
+
+    if (orderId.isEmpty || paymentSessionId.isEmpty) {
+      throw const RepositoryException(
+        'Cashfree session ID was not returned by server.',
+        code: 'invalid_cashfree_session',
+      );
+    }
+
+    final paidOrderId = await CashfreePaymentService.startCheckout(
+      orderId: orderId,
+      paymentSessionId: paymentSessionId,
+      environment: environment,
+    );
+
+    final verified = await repository.verifyCashfreePayment(orderId: paidOrderId);
+
+    final now = DateTime.now();
+    if (plan != null) {
+      if (plan.type == SubscriptionType.dailyMeal) {
+        _dailyMeal = DailyMealEntitlement(
+          id: verified['order_id']?.toString() ?? 'daily-cf-${now.microsecondsSinceEpoch}',
+          providerId: provider.id,
+          providerName: provider.name,
+          slotId: slotId ?? plan.slotIds.first,
+          date: now,
+          paidAmount: plan.price,
+          isPaid: true,
+        );
+      } else {
+        final subMap = verified['subscription'] as Map<String, dynamic>?;
+        _activeSubscription = ActiveSubscription(
+          id: subMap?['id']?.toString() ?? order['subscription_id']?.toString() ?? 'sub-cf-${now.microsecondsSinceEpoch}',
+          providerId: provider.id,
+          providerName: provider.name,
+          planName: plan.name,
+          type: plan.type,
+          startDate: now,
+          endDate: plan.expiryFrom(now),
+          slotIds: plan.slotIds,
+          totalMeals: plan.type == SubscriptionType.mealTracker ? plan.includedMeals : null,
+          mealsUsed: 0,
+        );
+        _dailyMeal = null;
+      }
+      selectedProviderId = provider.id;
+    }
+
+    clearAddOns();
+    addNotification(
+      title: 'Online Payment Successful! 🎉',
+      message: '₹${verified['amount_inr'] ?? plan?.price ?? ''} paid via Cashfree for ${plan?.name ?? provider.name}. Your pass is now active!',
+      type: purpose == 'plan_upgrade' ? NotificationType.upgrade : NotificationType.subscription,
+    );
+    notifyListeners();
+    await _persistSession();
+    return verified;
   }
 
   Future<ActiveSubscription> purchasePlanDemo(MealPlan plan) => purchasePlan(plan);

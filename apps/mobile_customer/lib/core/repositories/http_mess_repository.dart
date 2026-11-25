@@ -529,6 +529,93 @@ class HttpMessRepository implements MessRepository {
   }
 
   @override
+  Future<Map<String, dynamic>> createCashfreeOrder({
+    required String purpose,
+    required String providerId,
+    required String customerId,
+    String? customerName,
+    String? customerEmail,
+    String? customerPhone,
+    MealPlan? plan,
+    String? subscriptionId,
+    ActiveSubscription? currentSub,
+    String? slotId,
+    int addOnsPaise = 0,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/payments/cashfree/create-order');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'purpose': purpose,
+            'provider_id': providerId,
+            'customer_id': customerId,
+            if (customerName != null && customerName.isNotEmpty) 'customer_name': customerName,
+            if (customerEmail != null && customerEmail.isNotEmpty) 'customer_email': customerEmail,
+            if (customerPhone != null && customerPhone.isNotEmpty) 'customer_phone': customerPhone,
+            if (plan != null) ...{
+              'plan_id': plan.id,
+              'target_plan_id': plan.id,
+              'plan_name': plan.name,
+              'plan_type': plan.type == SubscriptionType.mealTracker
+                  ? 'meal_credits'
+                  : (plan.type == SubscriptionType.dailyMeal ? 'daily' : 'fixed_period'),
+              'duration_days': plan.durationDays,
+              'meal_credits': plan.includedMeals,
+              'price_paise': plan.price * 100,
+              'target_plan_price_paise': plan.price * 100,
+            },
+            if (subscriptionId != null && subscriptionId.isNotEmpty) 'subscription_id': subscriptionId,
+            if (currentSub != null)
+              'current_subscription': {
+                'providerId': currentSub.providerId,
+                'planName': currentSub.planName,
+                'type': currentSub.type == SubscriptionType.mealTracker ? 'meal_credits' : 'fixed_period',
+                'startDate': currentSub.startDate.toIso8601String(),
+                'endDate': currentSub.endDate.toIso8601String(),
+                'mealsRemaining': currentSub.mealsRemaining,
+                'totalMeals': currentSub.totalMeals,
+                'price': 2400,
+              },
+            if (slotId != null && slotId.isNotEmpty) 'slot': slotId.toUpperCase(),
+            if (addOnsPaise > 0) 'add_ons_paise': addOnsPaise,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    }
+    throw RepositoryException(
+      data['error']?.toString() ?? 'Unable to initialize Cashfree payment.',
+      code: data['code']?.toString() ?? 'cashfree_order_failed',
+    );
+  }
+
+  @override
+  Future<Map<String, dynamic>> verifyCashfreePayment({required String orderId}) async {
+    final uri = Uri.parse('$baseUrl/api/payments/cashfree/verify');
+    final response = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'order_id': orderId}),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      return data;
+    }
+    throw RepositoryException(
+      data['error']?.toString() ?? 'Payment verification failed.',
+      code: data['code']?.toString() ?? 'cashfree_verify_failed',
+    );
+  }
+
+  @override
   Future<DailyMealEntitlement> purchaseDailyMeal({required MealPlan plan, required String slotId, required String customerId}) async {
     final now = DateTime.now();
     final fallbackEntitlement = DailyMealEntitlement(
