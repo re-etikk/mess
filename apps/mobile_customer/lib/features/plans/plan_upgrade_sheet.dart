@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/models/mess_models.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/mess_theme.dart';
@@ -34,34 +32,21 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
   MealPlan? _selectedPlan;
   Map<String, dynamic>? _quote;
   String? _quoteError;
-  String _paymentMode = 'cashfree'; // 'cashfree', 'counter_cash', or 'direct_upi'
-  Map<String, dynamic>? _paymentSettings;
-
-  final _utrCtrl = TextEditingController();
-  final _receiptCtrl = TextEditingController();
+  String _paymentMode = 'cashfree'; // 'cashfree' or 'counter_cash'
 
   @override
   void initState() {
     super.initState();
-    _loadPlansAndSettings();
+    _loadPlans();
   }
 
-  @override
-  void dispose() {
-    _utrCtrl.dispose();
-    _receiptCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadPlansAndSettings() async {
+  Future<void> _loadPlans() async {
     final state = AppStateScope.of(context, listen: false);
     try {
       final p = await state.getProvider(widget.subscription.providerId);
-      final settings = await state.fetchPaymentSettings(widget.subscription.providerId);
       if (mounted) {
         setState(() {
           _provider = p;
-          _paymentSettings = settings;
           // Filter out current plan if matched, show others
           _availablePlans = (p?.plans ?? []).where((pl) => pl.name != widget.subscription.planName).toList();
           if (_availablePlans.isEmpty && (p?.plans.isNotEmpty == true)) {
@@ -149,9 +134,7 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
       await state.requestPlanUpgrade(
         subscriptionId: widget.subscription.id,
         targetPlanId: _selectedPlan!.id,
-        paymentMode: _paymentMode,
-        receiptUrl: _receiptCtrl.text.trim(),
-        utrReference: _utrCtrl.text.trim(),
+        paymentMode: 'counter_cash',
         currentSub: widget.subscription,
         targetPlan: _selectedPlan,
       );
@@ -164,7 +147,7 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
           title: const Text('Upgrade Request Submitted!'),
           content: Text(
             'Your upgrade request to ${_selectedPlan!.name} has been sent to ${_provider?.name ?? "the mess"}.\n\n'
-            'Please pay the difference of ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan!.price).toString()} at the mess counter or via UPI. Once confirmed, your new pass will be activated with fresh validity!',
+            'Please pay the difference of ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan!.price).toString()} in Cash at the mess counter. Once confirmed, your new pass will be activated!',
           ),
           actions: [
             FilledButton(
@@ -370,95 +353,23 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
                     children: [
                       Expanded(
                         child: ChoiceChip(
-                          label: const Center(child: Text('💳 Cashfree')),
+                          label: const Center(child: Text('💳 Pay Online (Cashfree)')),
                           selected: _paymentMode == 'cashfree',
                           selectedColor: const Color(0xFFDCFCE7),
                           onSelected: (v) => setState(() => _paymentMode = 'cashfree'),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: ChoiceChip(
-                          label: const Center(child: Text('💵 Counter')),
+                          label: const Center(child: Text('💵 Cash at Counter')),
                           selected: _paymentMode == 'counter_cash',
                           selectedColor: const Color(0xFFFFD199),
                           onSelected: (v) => setState(() => _paymentMode = 'counter_cash'),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('📱 UPI QR')),
-                          selected: _paymentMode == 'direct_upi',
-                          selectedColor: const Color(0xFFFFD199),
-                          onSelected: (v) => setState(() => _paymentMode = 'direct_upi'),
-                        ),
-                      ),
                     ],
                   ),
-
-                  // If Direct UPI, show Mess QR & Receipt Upload
-                  if (_paymentMode == 'direct_upi') ...[
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: MessColors.border),
-                      ),
-                      child: Column(
-                        children: [
-                          const Text('Mess Partner Counter UPI', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: MessColors.ink)),
-                          const SizedBox(height: 8),
-                          if (_paymentSettings?['upi_qr_url'] != null && _paymentSettings!['upi_qr_url'].toString().startsWith('http'))
-                            Image.network(
-                              _paymentSettings!['upi_qr_url'],
-                              height: 160,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => _renderDynamicQr(),
-                            )
-                          else
-                            _renderDynamicQr(),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'UPI ID: ${_paymentSettings?['upi_id'] ?? "thalipay@upi"}',
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: MessColors.ink),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.copy, size: 16, color: MessColors.orange),
-                                onPressed: () {
-                                  Clipboard.setData(ClipboardData(text: _paymentSettings?['upi_id'] ?? 'thalipay@upi'));
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('UPI ID copied to clipboard!')));
-                                },
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          TextField(
-                            controller: _utrCtrl,
-                            decoration: const InputDecoration(
-                              hintText: 'UTR / Transaction Reference (12 digits)',
-                              prefixIcon: Icon(Icons.receipt_long),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _receiptCtrl,
-                            decoration: const InputDecoration(
-                              hintText: 'Screenshot Image URL or Receipt Note',
-                              prefixIcon: Icon(Icons.link),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
 
                   const SizedBox(height: 20),
                   FilledButton(
@@ -473,31 +384,13 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
                         : Text(
                             _paymentMode == 'cashfree'
                                 ? 'Pay & Upgrade Instantly · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}'
-                                : 'Request Upgrade · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}',
+                                : 'Request Upgrade (Pay Cash) · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}',
                             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                           ),
                   ),
                 ],
               ),
             ),
-    );
-  }
-
-  Widget _renderDynamicQr() {
-    final upi = _paymentSettings?['upi_id'] ?? 'thalipay@upi';
-    final name = _paymentSettings?['upi_name'] ?? 'Mess Counter';
-    final amount = _quote?['upgrade_payable_inr'] ?? 100;
-    final payload = 'upi://pay?pa=$upi&pn=${Uri.encodeComponent(name)}&am=$amount&cu=INR';
-
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-      child: QrImageView(
-        data: payload,
-        version: QrVersions.auto,
-        size: 140,
-        backgroundColor: Colors.white,
-      ),
     );
   }
 
