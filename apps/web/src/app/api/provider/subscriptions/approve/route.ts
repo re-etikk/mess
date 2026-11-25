@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore } from '@/lib/platform-service';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { sendCustomerInvoiceEmail } from '@/lib/notifications';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,12 +81,47 @@ export async function POST(req: NextRequest) {
       platformStore.notifications.set(notifId, {
         id: notifId,
         customer_id: storeSub.customer_id,
-        title: 'Payment Confirmed & Pass Activated!',
+        title: 'Payment Confirmed & Pass Activated',
         message: `Your payment for ${storeSub.plan_name} has been verified by the mess counter. Your pass is now active!`,
         notification_type: 'system',
         is_read: false,
         created_at: now.toISOString(),
       });
+    }
+
+    // Send confirmed invoice email when cash subscription is approved
+    if (admin) {
+      try {
+        const [{ data: subRow }, { data: provRow }] = await Promise.all([
+          admin
+            .from('subscriptions')
+            .select('id,customer_id,plan_name_snapshot,price_paid_paise,starts_at,expires_at,packaging_preference,promo_code,discount_paise')
+            .eq('id', subscriptionId)
+            .maybeSingle(),
+          admin.from('providers').select('display_name').eq('id', providerId).maybeSingle(),
+        ]);
+        if (subRow?.customer_id) {
+          const { data: prof } = await admin.from('profiles').select('display_name,email').eq('id', subRow.customer_id).maybeSingle();
+          const custEmail = prof?.email || storeSub?.customer_email || '';
+          if (custEmail && custEmail.includes('@')) {
+            await sendCustomerInvoiceEmail({
+              to: custEmail,
+              customerName: prof?.display_name || storeSub?.customer_name || 'Subscriber',
+              providerName: provRow?.display_name || 'Thali Mess Kitchen',
+              planName: subRow.plan_name_snapshot || storeSub?.plan_name || 'Meal Pass',
+              subscriptionId,
+              amountInr: Number(subRow.price_paid_paise || 0) / 100,
+              discountInr: Number(subRow.discount_paise || 0) / 100,
+              promoCode: subRow.promo_code || undefined,
+              paymentMode: 'counter_cash',
+              paymentStatus: 'Cash Paid & Pass Activated',
+              startsAtIso: subRow.starts_at || now.toISOString(),
+              expiresAtIso: subRow.expires_at || now.toISOString(),
+              packagingPreference: subRow.packaging_preference || 'reusable_tiffin',
+            }).catch(() => null);
+          }
+        }
+      } catch {}
     }
 
     // If this was an upgrade, cancel/archive old subscription

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+
 import '../../core/models/mess_models.dart';
-import '../../core/state/app_state.dart';
-import '../../core/theme/mess_theme.dart';
+import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
+import '../../core/widgets/mess_widgets.dart';
 
 class PlanUpgradeSheet extends StatefulWidget {
   const PlanUpgradeSheet({super.key, required this.subscription});
@@ -12,7 +13,7 @@ class PlanUpgradeSheet extends StatefulWidget {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: ThaliColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -28,11 +29,11 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
   bool _loading = true;
   bool _submitting = false;
   MessProvider? _provider;
-  List<MealPlan> _availablePlans = [];
+  List<MealPlan> _availablePlans = const [];
   MealPlan? _selectedPlan;
   Map<String, dynamic>? _quote;
   String? _quoteError;
-  String _paymentMode = 'cashfree'; // 'cashfree' or 'counter_cash'
+  String _paymentMode = 'cashfree_online'; // Option B only
 
   @override
   void initState() {
@@ -44,22 +45,17 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
     final state = AppStateScope.of(context, listen: false);
     try {
       final p = await state.getProvider(widget.subscription.providerId);
-      if (mounted) {
-        setState(() {
-          _provider = p;
-          // Filter out current plan if matched, show others
-          _availablePlans = (p?.plans ?? []).where((pl) => pl.name != widget.subscription.planName).toList();
-          if (_availablePlans.isEmpty && (p?.plans.isNotEmpty == true)) {
-            _availablePlans = p!.plans;
-          }
-          if (_availablePlans.isNotEmpty) {
-            _selectedPlan = _availablePlans.first;
-          }
-          _loading = false;
-        });
-        if (_selectedPlan != null) {
-          _fetchQuote(_selectedPlan!);
-        }
+      if (!mounted) return;
+      final candidates = (p?.plans ?? []).where((pl) => pl.name != widget.subscription.planName).toList();
+      final plans = candidates.isNotEmpty ? candidates : (p?.plans ?? const <MealPlan>[]);
+      setState(() {
+        _provider = p;
+        _availablePlans = plans;
+        _selectedPlan = plans.isNotEmpty ? plans.first : null;
+        _loading = false;
+      });
+      if (_selectedPlan != null) {
+        await _fetchQuote(_selectedPlan!);
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -73,7 +69,7 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
     });
     final state = AppStateScope.of(context, listen: false);
     try {
-      final q = await state.getUpgradeQuote(
+      final q = await state.repository.getUpgradeQuote(
         subscriptionId: widget.subscription.id,
         targetPlanId: targetPlan.id,
         currentSub: widget.subscription,
@@ -81,7 +77,9 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
       );
       if (mounted) setState(() => _quote = q);
     } catch (e) {
-      if (mounted) setState(() => _quoteError = e.toString().replaceAll('RepositoryException: ', ''));
+      if (mounted) {
+        setState(() => _quoteError = e.toString().replaceFirst('RepositoryException: ', ''));
+      }
     }
   }
 
@@ -89,8 +87,9 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
     if (_selectedPlan == null) return;
     setState(() => _submitting = true);
     final state = AppStateScope.of(context, listen: false);
+
     try {
-      if (_paymentMode == 'cashfree') {
+      if (_paymentMode == 'cashfree_online') {
         final targetProvider = _provider ??
             MessProvider(
               id: widget.subscription.providerId,
@@ -102,58 +101,57 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
               mealSlots: const [],
               plans: _availablePlans,
             );
-
         await state.payWithCashfree(
           purpose: 'plan_upgrade',
           provider: targetProvider,
           plan: _selectedPlan,
           currentSub: widget.subscription,
         );
-
         if (!mounted) return;
         Navigator.pop(context);
         showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            icon: const Icon(Icons.verified_rounded, color: MessColors.green, size: 48),
-            title: const Text('Plan Upgraded Instantly!'),
+            backgroundColor: ThaliColors.card,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            icon: const Icon(Icons.verified_rounded, color: ThaliColors.green, size: 46),
+            title: const Text('Plan Upgraded', style: TextStyle(fontWeight: FontWeight.w800)),
             content: Text(
-              'Payment via Cashfree succeeded!\n\nYour meal pass has been upgraded to ${_selectedPlan!.name} at ${targetProvider.name} and is active immediately.',
+              'Payment via Cashfree succeeded. Your pass is now upgraded to ${_selectedPlan!.name} at ${targetProvider.name}.',
+              textAlign: TextAlign.center,
             ),
             actions: [
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Awesome'),
-              ),
+              MessActionButton(label: 'Done', height: 44, onPressed: () => Navigator.pop(ctx)),
             ],
           ),
         );
         return;
       }
 
-      await state.requestPlanUpgrade(
+      await state.repository.requestPlanUpgrade(
         subscriptionId: widget.subscription.id,
         targetPlanId: _selectedPlan!.id,
         paymentMode: 'counter_cash',
         currentSub: widget.subscription,
         targetPlan: _selectedPlan,
       );
+      await state.refreshSubscriptionsFromServer();
       if (!mounted) return;
       Navigator.pop(context);
+      final payable = _quote?['upgrade_payable_inr'] ?? _selectedPlan!.price;
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          icon: const Icon(Icons.check_circle_rounded, color: MessColors.green, size: 48),
-          title: const Text('Upgrade Request Submitted!'),
+          backgroundColor: ThaliColors.card,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          icon: const Icon(Icons.check_circle_rounded, color: ThaliColors.green, size: 46),
+          title: const Text('Upgrade Requested', style: TextStyle(fontWeight: FontWeight.w800)),
           content: Text(
-            'Your upgrade request to ${_selectedPlan!.name} has been sent to ${_provider?.name ?? "the mess"}.\n\n'
-            'Please pay the difference of ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan!.price).toString()} in Cash at the mess counter. Once confirmed, your new pass will be activated!',
+            'Upgrade request to ${_selectedPlan!.name} sent. Please pay ₹$payable cash at ${_provider?.name ?? widget.subscription.providerName} counter for activation.',
+            textAlign: TextAlign.center,
           ),
           actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Got it'),
-            ),
+            MessActionButton(label: 'Got it', height: 44, onPressed: () => Navigator.pop(ctx)),
           ],
         ),
       );
@@ -161,261 +159,179 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceAll('RepositoryException: ', '')), backgroundColor: const Color(0xFFC0392B)),
+        SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final payableInr = (_quote?['upgrade_payable_inr'] as num?)?.toInt() ?? _selectedPlan?.price ?? 0;
+
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: 20,
+        top: 14,
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       child: _loading
-          ? const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: MessColors.orange)))
+          ? const SizedBox(
+              height: 220,
+              child: ThaliLoadingView(label: 'Calculating upgrade quote...'),
+            )
           : SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: const Color(0xFFEDE9FE), borderRadius: BorderRadius.circular(10)),
-                        child: const Icon(Icons.upgrade_rounded, color: Color(0xFF7C3AED), size: 24),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Upgrade Your Meal Pass', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: MessColors.ink)),
-                            Text('Switch to flexi tracker or higher duration', style: TextStyle(color: MessColors.muted, fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                      IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Current Pass Info
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(12), border: Border.all(color: MessColors.border)),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.credit_card_outlined, color: MessColors.muted, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Current Pass: ${widget.subscription.planName}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: MessColors.ink)),
-                              Text('Valid until: ${widget.subscription.endDate.day}/${widget.subscription.endDate.month}/${widget.subscription.endDate.year}', style: const TextStyle(fontSize: 11.5, color: MessColors.muted)),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(6)),
-                          child: const Text('ACTIVE', style: TextStyle(color: Color(0xFF166534), fontWeight: FontWeight.w800, fontSize: 10)),
-                        ),
-                      ],
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
                     ),
                   ),
-
                   const SizedBox(height: 16),
-                  const Text('Select New Target Plan', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: MessColors.ink)),
-                  const SizedBox(height: 8),
-
+                  const Text(
+                    'Upgrade Your Plan',
+                    style: TextStyle(fontSize: 18.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Current plan: ${widget.subscription.planName}',
+                    style: const TextStyle(fontSize: 12.5, color: ThaliColors.muted),
+                  ),
+                  const SizedBox(height: 16),
                   if (_availablePlans.isEmpty)
-                    const Text('No other plans available for this kitchen.', style: TextStyle(color: MessColors.muted, fontSize: 13))
-                  else
+                    const CardSurface(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        'No alternate plans are configured for this kitchen yet.',
+                        style: TextStyle(color: ThaliColors.muted, fontSize: 13),
+                      ),
+                    )
+                  else ...[
                     ..._availablePlans.map((plan) {
-                      final isSelected = _selectedPlan?.id == plan.id;
+                      final active = _selectedPlan?.id == plan.id;
                       return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: InkWell(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: CardSurface(
                           onTap: () {
                             setState(() => _selectedPlan = plan);
                             _fetchQuote(plan);
                           },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: isSelected ? const Color(0xFFFAF5FF) : Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isSelected ? const Color(0xFF7C3AED) : MessColors.border,
-                                width: isSelected ? 1.8 : 1.0,
+                          color: active ? ThaliColors.primarySoft : ThaliColors.card,
+                          borderColor: active ? ThaliColors.primary : ThaliColors.stroke,
+                          padding: const EdgeInsets.all(13),
+                          child: Row(
+                            children: [
+                              Icon(
+                                active ? Icons.radio_button_checked : Icons.radio_button_off,
+                                color: active ? ThaliColors.primary : ThaliColors.muted,
+                                size: 20,
                               ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-                                  color: isSelected ? const Color(0xFF7C3AED) : MessColors.muted,
-                                  size: 20,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(plan.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                                    Text(plan.durationLabel, style: const TextStyle(fontSize: 12, color: ThaliColors.muted)),
+                                  ],
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(plan.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: MessColors.ink)),
-                                      Text('${plan.durationDays} Days · ${plan.type == SubscriptionType.mealTracker ? "${plan.includedMeals} Meals" : "Daily Unlimited"}', style: const TextStyle(fontSize: 11.5, color: MessColors.muted)),
-                                    ],
-                                  ),
-                                ),
-                                Text('₹${plan.price}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: MessColors.ink)),
-                              ],
-                            ),
+                              ),
+                              Text(
+                                rupee(plan.price),
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: ThaliColors.ink),
+                              ),
+                            ],
                           ),
                         ),
                       );
                     }),
-
-                  const SizedBox(height: 12),
-
-                  // Pro-Rata Price Quote Breakdown
-                  if (_quoteError != null)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFFCA5A5)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.info_outline, color: Color(0xFFDC2626), size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _quoteError!,
-                              style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B)),
+                    if (_quoteError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Text(_quoteError!, style: const TextStyle(fontSize: 12.5, color: ThaliColors.red)),
+                      )
+                    else if (_quote != null) ...[
+                      CardSurface(
+                        color: ThaliColors.scaffold,
+                        padding: const EdgeInsets.all(13),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Prorated Upgrade Difference', style: TextStyle(fontSize: 13, color: ThaliColors.body)),
+                            Text(
+                              rupee(payableInr),
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ThaliColors.primary),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (_quote != null)
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFDF4FF),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFF0ABFC)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.auto_awesome, color: Color(0xFF9333EA), size: 18),
-                              const SizedBox(width: 8),
-                              const Text('Pro-Rata OTT Upgrade Calculation', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Color(0xFF701A75))),
-                            ],
-                          ),
-                          const Divider(height: 16, color: Color(0xFFF0ABFC)),
-                          _quoteRow('New Plan Price', '₹${_quote!['target_plan_price_inr']}'),
-                          _quoteRow(
-                            'Unused Current Pass Credit',
-                            '-₹${_quote!['residual_credit_inr']}',
-                            isGreen: true,
-                            note: '(${_quote!['days_remaining'] ?? 0} days remaining credited)',
-                          ),
-                          const Divider(height: 16, color: Color(0xFFF0ABFC)),
-                          Row(
-                            children: [
-                              const Text('Net Upgrade Payable Today', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: MessColors.ink)),
-                              const Spacer(),
-                              Text('₹${_quote!['upgrade_payable_inr']}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: Color(0xFF9333EA))),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  const SizedBox(height: 16),
-                  const Text('Payment Mode', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: MessColors.ink)),
-                  const SizedBox(height: 8),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('💳 Pay Online (Cashfree)')),
-                          selected: _paymentMode == 'cashfree',
-                          selectedColor: const Color(0xFFDCFCE7),
-                          onSelected: (v) => setState(() => _paymentMode = 'cashfree'),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('💵 Cash at Counter')),
-                          selected: _paymentMode == 'counter_cash',
-                          selectedColor: const Color(0xFFFFD199),
-                          onSelected: (v) => setState(() => _paymentMode = 'counter_cash'),
-                        ),
-                      ),
+                      const SizedBox(height: 14),
                     ],
-                  ),
-
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: _submitting ? null : _submitUpgrade,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF7C3AED),
-                      minimumSize: const Size.fromHeight(50),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    const Text(
+                      'Payment Method',
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
                     ),
-                    child: _submitting
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Text(
-                            _paymentMode == 'cashfree'
-                                ? 'Pay & Upgrade Instantly · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}'
-                                : 'Request Upgrade (Pay Cash) · ₹${(_quote?['upgrade_payable_inr'] ?? _selectedPlan?.price ?? 0).toString()}',
-                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-                          ),
-                  ),
+                    const SizedBox(height: 8),
+                    _payOption(
+                      value: 'cashfree_online',
+                      title: 'Cashfree Online (UPI / Cards)',
+                      subtitle: 'Instant plan upgrade verification',
+                      icon: Icons.bolt_rounded,
+                    ),
+                    const SizedBox(height: 8),
+                    _payOption(
+                      value: 'counter_cash',
+                      title: 'Pay Cash at Counter',
+                      subtitle: 'Kitchen approves upgrade once paid at counter',
+                      icon: Icons.payments_outlined,
+                    ),
+                    const SizedBox(height: 18),
+                    MessActionButton(
+                      label: _paymentMode == 'cashfree_online' ? 'Pay ${rupee(payableInr)} & Upgrade' : 'Request Cash Upgrade',
+                      loading: _submitting,
+                      onPressed: _selectedPlan == null ? null : _submitUpgrade,
+                    ),
+                  ],
                 ],
               ),
             ),
     );
   }
 
-  Widget _quoteRow(String label, String value, {bool isGreen = false, String? note}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+  Widget _payOption({
+    required String value,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final active = _paymentMode == value;
+    return CardSurface(
+      onTap: () => setState(() => _paymentMode = value),
+      color: active ? ThaliColors.primarySoft : ThaliColors.card,
+      borderColor: active ? ThaliColors.primary : ThaliColors.stroke,
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Icon(icon, size: 20, color: active ? ThaliColors.primary : ThaliColors.muted),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: const TextStyle(fontSize: 12.5, color: MessColors.ink)),
-                if (note != null) Text(note, style: const TextStyle(fontSize: 11, color: MessColors.green, fontWeight: FontWeight.w600)),
+                Text(title, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
+                Text(subtitle, style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted)),
               ],
             ),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 13.5,
-              color: isGreen ? MessColors.green : MessColors.ink,
-            ),
+          Icon(
+            active ? Icons.radio_button_checked : Icons.radio_button_off,
+            size: 20,
+            color: active ? ThaliColors.primary : ThaliColors.muted,
           ),
         ],
       ),

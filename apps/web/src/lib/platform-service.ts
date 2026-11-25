@@ -143,6 +143,7 @@ class PlatformStore {
   promos: Map<string, PromoCode> = new Map();
   announcements: Map<string, Announcement> = new Map();
   notifications: Map<string, CustomerNotification> = new Map();
+  dailyMealEvents: Map<string, any> = new Map();
   chatMessages: any[] = [];
 
   constructor() {
@@ -262,6 +263,16 @@ class PlatformStore {
       code: 'STUDENT50',
       title: 'Flat ₹50 Off',
       description: 'Flat ₹50 off on student flexi meal packs.',
+      flat_discount_paise: 5000,
+      min_order_paise: 50000,
+      is_active: true,
+    });
+
+    this.promos.set('THALI50', {
+      id: 'promo-thali50',
+      code: 'THALI50',
+      title: 'Save ₹50 with THALI50',
+      description: 'Flat ₹50 off on meal subscriptions of ₹500 or more.',
       flat_discount_paise: 5000,
       min_order_paise: 50000,
       is_active: true,

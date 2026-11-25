@@ -1,6 +1,7 @@
 import { getAdminClient } from './supabase/admin';
 import { platformStore } from './platform-service';
 import { addPartnerNotification } from './partner-notifications';
+import { sendCustomerInvoiceEmail } from './notifications';
 import { cashfreeOrderStore, type PendingCashfreeOrderMeta } from './cashfree';
 
 export interface FulfillCashfreeOrderInput {
@@ -198,12 +199,47 @@ export async function fulfillCashfreePaidOrder(
     platformStore.notifications.set(notifId, {
       id: notifId,
       customer_id: customerId,
-      title: 'Online Payment Successful! 🎉',
+      title: 'Online Payment Successful',
       message: `₹${amountInr.toFixed(0)} received via Cashfree for ${planName}. Your meal pass is active right away!`,
       notification_type: 'system',
       is_read: false,
       created_at: now.toISOString(),
     });
+  }
+
+  let recipientEmail = (meta as any)?.customer_email || tags.cust_email || '';
+  if (!recipientEmail && admin && customerId) {
+    try {
+      const { data: prof } = await admin.from('profiles').select('email').eq('id', customerId).maybeSingle();
+      if (prof?.email) recipientEmail = prof.email;
+      if (!recipientEmail) {
+        const { data: authU } = await admin.auth.admin.getUserById(customerId);
+        if (authU?.user?.email) recipientEmail = authU.user.email;
+      }
+    } catch {}
+  }
+
+  if (recipientEmail && recipientEmail.includes('@')) {
+    let resolvedProviderName = (meta as any)?.provider_name || 'Thali Mess Kitchen';
+    if (admin && providerId) {
+      try {
+        const { data: provRow } = await admin.from('providers').select('display_name').eq('id', providerId).maybeSingle();
+        if (provRow?.display_name) resolvedProviderName = provRow.display_name;
+      } catch {}
+    }
+    await sendCustomerInvoiceEmail({
+      to: recipientEmail,
+      customerName,
+      providerName: resolvedProviderName,
+      planName,
+      subscriptionId: subscriptionId || input.orderId,
+      amountInr,
+      paymentMode: 'cashfree_online',
+      paymentStatus: 'Paid & Active',
+      startsAtIso: now.toISOString(),
+      expiresAtIso: (activatedSub?.expires_at as string) || new Date(now.getTime() + 30 * 86400000).toISOString(),
+      transactionRef: input.cfPaymentId || input.orderId,
+    }).catch(() => null);
   }
 
   return {

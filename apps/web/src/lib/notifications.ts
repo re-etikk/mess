@@ -75,8 +75,8 @@ Ab aap Thali Partner App ya Web Portal me login karke daily QR generate kar sakt
           subject: `Your mess "${params.provider_name}" is verified on Thali`,
           text: messageText,
           html: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-              <h2 style="color: #0f172a; margin-top: 0;">🎉 Congratulations! Your mess is verified.</h2>
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e4e4e7; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #18181b; margin-top: 0;">Your kitchen is verified on Thali</h2>
               <p style="color: #475569; font-size: 15px; line-height: 1.6;">
                 Namaste! Your kitchen <strong>${params.provider_name}</strong> has been reviewed and approved by the Thali operations team.
               </p>
@@ -258,4 +258,98 @@ export async function sendEmailNotification(params: {
   } catch (err: any) {
     return { success: false, error: err.message || 'Unknown network error' };
   }
+}
+
+export interface CustomerInvoiceEmailParams {
+  to: string;
+  customerName: string;
+  providerName: string;
+  planName: string;
+  subscriptionId: string;
+  amountInr: number;
+  discountInr?: number;
+  promoCode?: string;
+  paymentMode: string;
+  paymentStatus: string;
+  startsAtIso: string;
+  expiresAtIso: string;
+  packagingPreference?: string;
+  transactionRef?: string;
+}
+
+export async function sendCustomerInvoiceEmail(
+  params: CustomerInvoiceEmailParams
+): Promise<{ success: boolean; error?: string }> {
+  const email = (params.to || '').trim();
+  if (!email || !email.includes('@')) {
+    return { success: false, error: 'Customer email missing' };
+  }
+
+  const fmtDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata',
+      });
+    } catch {
+      return iso.slice(0, 10);
+    }
+  };
+
+  const payLabel =
+    params.paymentMode === 'counter_cash'
+      ? 'Pay Cash at Counter'
+      : 'Cashfree Online (UPI / Cards)';
+  const pkgLabel =
+    params.packagingPreference === 'disposable'
+      ? 'Disposable Container'
+      : params.packagingPreference === 'dine_in'
+      ? 'Dine-in / Counter Pickup'
+      : 'Reusable Tiffin';
+
+  const invoiceNo = `THL-${params.subscriptionId.slice(0, 8).toUpperCase()}`;
+  const discountRow =
+    params.discountInr && params.discountInr > 0
+      ? `<tr><td style="padding:8px 0;color:#52525c;">Promo Discount${params.promoCode ? ` (${params.promoCode})` : ''}</td><td style="padding:8px 0;text-align:right;color:#16a34a;font-weight:700;">-₹${Math.round(params.discountInr)}</td></tr>`
+      : '';
+
+  const html = `
+    <div style="font-family:Urbanist,Arial,sans-serif;max-width:600px;margin:0 auto;background:#fafafa;padding:24px;">
+      <div style="background:#ffffff;border:1px solid #e4e4e7;border-radius:16px;overflow:hidden;">
+        <div style="background:#e95f35;padding:22px 24px;color:#ffffff;">
+          <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;opacity:0.9;">Thali Subscription Invoice</div>
+          <h1 style="margin:6px 0 2px;font-size:22px;font-weight:800;">${params.providerName}</h1>
+          <div style="font-size:13px;opacity:0.92;">Invoice #${invoiceNo}</div>
+        </div>
+        <div style="padding:24px;color:#18181b;">
+          <p style="margin:0 0 14px;font-size:14px;color:#52525c;">
+            Hi <strong>${params.customerName || 'Subscriber'}</strong>, thank you for subscribing via Thali. Your meal pass details are below.
+          </p>
+          <div style="background:#fff3ee;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:13px;color:#a83b1c;font-weight:700;">
+            Status: ${params.paymentStatus}
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+            <tr><td style="padding:8px 0;color:#71717b;border-bottom:1px solid #f4f4f5;">Meal Plan</td><td style="padding:8px 0;text-align:right;font-weight:700;border-bottom:1px solid #f4f4f5;">${params.planName}</td></tr>
+            <tr><td style="padding:8px 0;color:#71717b;border-bottom:1px solid #f4f4f5;">Validity Period</td><td style="padding:8px 0;text-align:right;font-weight:600;border-bottom:1px solid #f4f4f5;">${fmtDate(params.startsAtIso)} - ${fmtDate(params.expiresAtIso)}</td></tr>
+            <tr><td style="padding:8px 0;color:#71717b;border-bottom:1px solid #f4f4f5;">Tiffin / Packaging</td><td style="padding:8px 0;text-align:right;font-weight:600;border-bottom:1px solid #f4f4f5;">${pkgLabel}</td></tr>
+            <tr><td style="padding:8px 0;color:#71717b;border-bottom:1px solid #f4f4f5;">Payment Method</td><td style="padding:8px 0;text-align:right;font-weight:600;border-bottom:1px solid #f4f4f5;">${payLabel}</td></tr>
+            ${params.transactionRef ? `<tr><td style="padding:8px 0;color:#71717b;border-bottom:1px solid #f4f4f5;">Reference ID</td><td style="padding:8px 0;text-align:right;font-weight:600;border-bottom:1px solid #f4f4f5;">${params.transactionRef}</td></tr>` : ''}
+            ${discountRow}
+            <tr><td style="padding:14px 0 4px;font-size:16px;font-weight:800;">Total Amount</td><td style="padding:14px 0 4px;text-align:right;font-size:18px;font-weight:800;color:#e95f35;">₹${Math.round(params.amountInr)}</td></tr>
+          </table>
+          <p style="margin:20px 0 0;font-size:12px;color:#71717b;">
+            Manage daily meals, skips, or pauses anytime inside the Thali app. Need help? Contact support@thali.store.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return sendEmailNotification({
+    to: email,
+    subject: `Thali Invoice #${invoiceNo} — ${params.planName} at ${params.providerName}`,
+    html,
+  });
 }

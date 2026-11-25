@@ -64,12 +64,14 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
     final state = AppStateScope.of(context, listen: false);
     if (state.customerId.isNotEmpty) return state.customerId;
     if (state.customerEmail.isNotEmpty) return state.customerEmail.replaceAll('@', '_').replaceAll('.', '_');
-    return 'student_guest';
+    return '';
   }
 
   String _getCustomerName() {
     final state = AppStateScope.of(context, listen: false);
-    return state.customerName.isNotEmpty ? state.customerName : 'Student';
+    if (state.customerName.isNotEmpty) return state.customerName;
+    if (state.customerEmail.isNotEmpty) return state.customerEmail.split('@').first;
+    return 'Thali User';
   }
 
   String _getCacheKey() {
@@ -218,7 +220,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.providerName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            const Text('Mess Partner Chat', style: TextStyle(color: MessColors.green, fontSize: 11, fontWeight: FontWeight.w600)),
+            const Text('Thali Partner Chat', style: TextStyle(color: MessColors.green, fontSize: 11, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -233,7 +235,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                 Icon(Icons.lock_rounded, size: 13, color: Color(0xFF0F766E)),
                 SizedBox(width: 6),
                 Text(
-                  'End-to-End Encrypted (AES-256) · Direct Kitchen Chat',
+                  'Direct Kitchen Chat',
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0F766E)),
                 ),
               ],
@@ -241,7 +243,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: SpinnerArc(size: 38, color: MessColors.orange))
+                ? const Center(child: SpinnerArc(size: 34, color: MessColors.orange))
                 : _messages.isEmpty
                     ? Center(
                         child: Padding(
@@ -251,7 +253,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                             children: [
                               const Icon(Icons.chat_bubble_outline_rounded, size: 54, color: MessColors.muted),
                               const SizedBox(height: 14),
-                              Text('Chat with ${widget.providerName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: MessColors.ink)),
+                              Text('Chat with ${widget.providerName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ThaliColors.ink)),
                               const SizedBox(height: 6),
                               const Text(
                                 'Ask about today\'s special menu, timing adjustments, delivery details, or payment questions.',
@@ -309,7 +311,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                                   Text(
                                     msg['message']?.toString() ?? '',
                                     style: TextStyle(
-                                      color: isCustomer ? Colors.white : MessColors.ink,
+                                      color: isCustomer ? Colors.white : ThaliColors.ink,
                                       fontSize: 14,
                                       height: 1.3,
                                     ),

@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
             plan_type: sub.plan_type_snapshot || 'fixed_period',
             amount_inr: pricePaise / 100,
             status: sub.status === 'active' ? 'paid' : sub.status,
-            payment_mode: cfTx ? 'online_cashfree' : 'counter_upi',
+            payment_mode: cfTx ? 'online_cashfree' : 'counter_cash',
             receipt_url: '',
             created_at: sub.created_at,
             paid_at: sub.payment_verified_at || sub.created_at,

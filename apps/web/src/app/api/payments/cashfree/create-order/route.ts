@@ -54,6 +54,13 @@ export async function POST(req: NextRequest) {
       meal_credits,
       price_paise,
       add_ons_paise = 0,
+      discount_paise = 0,
+      promo_code = '',
+      selected_slots = {},
+      repeat_days = [1, 2, 3, 4, 5, 6, 7],
+      packaging_preference = 'reusable_tiffin',
+      delivery_instructions = '',
+      starts_at: requestedStart,
       slot = 'LUNCH',
       current_subscription,
     } = body;
@@ -125,9 +132,12 @@ export async function POST(req: NextRequest) {
           ? 1
           : null;
 
-    let payablePaise =
+    let payablePaise = Math.max(
+      100,
       (Number(plan?.price_paise || price_paise) || 0) +
-      (Number(add_ons_paise) || 0);
+        (Number(add_ons_paise) || 0) -
+        (Number(discount_paise) || 0)
+    );
 
     // Handle OTT pro-rata upgrade calculation if purpose === 'plan_upgrade'
     let upgradeFromSubId = '';
@@ -246,23 +256,38 @@ export async function POST(req: NextRequest) {
       );
 
       if (admin && isUuid.test(resolvedCustomerId) && isUuid.test(resolvedProviderId) && isUuid.test(effectivePlanId)) {
+        const startIso = requestedStart ? new Date(requestedStart).toISOString() : now.toISOString();
+        const baseSubRow = {
+          id: createdSubId,
+          customer_id: resolvedCustomerId,
+          provider_id: resolvedProviderId,
+          plan_id: effectivePlanId,
+          status: 'pending_payment',
+          plan_type_snapshot:
+            effectivePlanType === 'meal_credits' ? 'meal_credits' : 'fixed_period',
+          plan_name_snapshot: effectivePlanName,
+          terms_version_snapshot: 'v2.0-cashfree',
+          price_paid_paise: payablePaise,
+          initial_meal_credits: initialCredits,
+          remaining_meal_credits: initialCredits,
+          starts_at: startIso,
+          expires_at: expiresAt.toISOString(),
+        };
         try {
-          await admin.from('subscriptions').insert({
-            id: createdSubId,
-            customer_id: resolvedCustomerId,
-            provider_id: resolvedProviderId,
-            plan_id: effectivePlanId,
-            status: 'pending_payment',
-            plan_type_snapshot:
-              effectivePlanType === 'meal_credits' ? 'meal_credits' : 'fixed_period',
-            plan_name_snapshot: effectivePlanName,
-            terms_version_snapshot: 'v1.0-cashfree',
-            price_paid_paise: payablePaise,
-            initial_meal_credits: initialCredits,
-            remaining_meal_credits: initialCredits,
-            starts_at: now.toISOString(),
-            expires_at: expiresAt.toISOString(),
+          const resExt = await admin.from('subscriptions').insert({
+            ...baseSubRow,
+            duration_days: durDays,
+            selected_slots: selected_slots || {},
+            repeat_days: Array.isArray(repeat_days) && repeat_days.length > 0 ? repeat_days : [1, 2, 3, 4, 5, 6, 7],
+            packaging_preference: packaging_preference || 'reusable_tiffin',
+            delivery_instructions: delivery_instructions || null,
+            promo_code: promo_code || null,
+            discount_paise: Number(discount_paise || 0),
+            payment_mode: 'cashfree_online',
           });
+          if (resExt.error) {
+            await admin.from('subscriptions').insert(baseSubRow);
+          }
         } catch (err) {
           console.warn('DB error creating pending subscription for Cashfree:', err);
         }
