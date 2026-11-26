@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -180,7 +181,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
       setState(() {
         _appliedPromo = '';
         _discountInr = 0;
-        _promoMessage = e.toString().replaceFirst('RepositoryException: ', '');
+        _promoMessage = friendlyCustomerError(e, action: 'apply promo');
       });
     } finally {
       if (mounted) setState(() => _applyingPromo = false);
@@ -246,7 +247,9 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'complete subscription'))),
+        );
       }
     } finally {
       if (mounted) setState(() => _submitting = false);

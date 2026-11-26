@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/theme/thali_partner_theme.dart';
 import '../core/widgets/partner_widgets.dart';
@@ -84,6 +85,9 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
       final res = await ProviderApiService.sendOtp(identifier: id, purpose: 'signin');
       if (!mounted) return;
       _startTimer();
+      for (final c in _otpCtrls) {
+        c.clear();
+      }
       setState(() {
         _isOtpStep = true;
         _testOtpHint = res['test_otp']?.toString();
@@ -92,13 +96,14 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
         if (mounted) _otpFocus.first.requestFocus();
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) setState(() => _error = ProviderApiService.friendlyError(e, action: 'send code'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _verifyOtp() async {
+    if (_loading) return;
     final code = _otpCode;
     if (code.length != 6) {
       setState(() => _error = 'Enter the full 6-digit verification code.');
@@ -117,7 +122,7 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
       showPartnerNotice(context, 'Signed in to ${session.businessName}');
       widget.onLoginSuccess(session);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) setState(() => _error = ProviderApiService.friendlyError(e, action: 'verify code'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -140,7 +145,7 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
       showPartnerNotice(context, 'Signed in to ${session.businessName}');
       widget.onLoginSuccess(session);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) setState(() => _error = ProviderApiService.friendlyError(e, action: 'sign in'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -297,13 +302,21 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                               focusNode: _otpFocus[idx],
                               keyboardType: TextInputType.number,
                               textAlign: TextAlign.center,
-                              maxLength: 1,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: ThaliColors.ink),
                               decoration: const InputDecoration(counterText: '', contentPadding: EdgeInsets.zero),
                               onChanged: (v) {
-                                if (v.isNotEmpty && idx < 5) {
+                                final digits = v.replaceAll(RegExp(r'\D'), '');
+                                if (digits.length > 1) {
+                                  for (int j = 0; j < 6 && j < digits.length; j++) {
+                                    _otpCtrls[j].text = digits[j];
+                                  }
+                                  _otpFocus[digits.length.clamp(0, 6) - 1].requestFocus();
+                                  return;
+                                }
+                                if (digits.isNotEmpty && idx < 5) {
                                   _otpFocus[idx + 1].requestFocus();
-                                } else if (v.isEmpty && idx > 0) {
+                                } else if (digits.isEmpty && idx > 0) {
                                   _otpFocus[idx - 1].requestFocus();
                                 }
                               },
@@ -470,7 +483,7 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
       Navigator.popUntil(context, (route) => route.isFirst);
     } catch (e) {
       if (mounted) {
-        showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'register kitchen'), isError: true);
       }
     } finally {
       if (mounted) setState(() => _submitting = false);

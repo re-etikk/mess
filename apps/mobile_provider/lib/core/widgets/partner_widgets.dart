@@ -382,14 +382,18 @@ class SlotIconTile extends StatelessWidget {
     final s = slot.toLowerCase();
     final asset = s.contains('breakfast')
         ? 'assets/images/ui/icon_breakfast.svg'
-        : s.contains('dinner')
-            ? 'assets/images/ui/icon_dinner.svg'
-            : 'assets/images/ui/icon_lunch.svg';
+        : s.contains('snack')
+            ? 'assets/images/ui/icon_snacks.svg'
+            : s.contains('dinner')
+                ? 'assets/images/ui/icon_dinner.svg'
+                : 'assets/images/ui/icon_lunch.svg';
     final bg = s.contains('breakfast')
         ? ThaliColors.breakfastTile
-        : s.contains('dinner')
-            ? ThaliColors.dinnerTile
-            : ThaliColors.lunchTile;
+        : s.contains('snack')
+            ? ThaliColors.snacksTile
+            : s.contains('dinner')
+                ? ThaliColors.dinnerTile
+                : ThaliColors.lunchTile;
 
     return Container(
       width: size + 8,

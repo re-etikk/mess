@@ -19,11 +19,13 @@ class PartnerOverviewTab extends StatefulWidget {
     required this.session,
     required this.onSignOut,
     required this.onSwitchTab,
+    this.onSessionUpdated,
   });
 
   final ProviderSession session;
   final VoidCallback onSignOut;
   final ValueChanged<int> onSwitchTab;
+  final ValueChanged<ProviderSession>? onSessionUpdated;
 
   @override
   State<PartnerOverviewTab> createState() => _PartnerOverviewTabState();
@@ -74,7 +76,9 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
         _unreadNotifs = unread;
       });
     } catch (e) {
-      if (mounted) showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+      if (mounted) {
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'load dashboard'), isError: true);
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -90,7 +94,9 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
       if (!mounted) return;
       showPartnerNotice(context, nextOpen ? 'Kitchen marked Open for today' : 'Kitchen marked Closed for today');
     } catch (e) {
-      if (mounted) showPartnerNotice(context, '$e', isError: true);
+      if (mounted) {
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update status'), isError: true);
+      }
     }
   }
 
@@ -177,7 +183,13 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
                   PressScale(
                     onTap: () => Navigator.push(
                       context,
-                      partnerRoute(PartnerMoreScreen(session: widget.session, onSignOut: widget.onSignOut)),
+                      partnerRoute(
+                        PartnerMoreScreen(
+                          session: widget.session,
+                          onSignOut: widget.onSignOut,
+                          onSessionUpdated: widget.onSessionUpdated,
+                        ),
+                      ),
                     ),
                     child: Container(
                       width: 36,

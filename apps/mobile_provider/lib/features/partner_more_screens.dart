@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../services/provider_api_service.dart';
 import 'customer_chats_screen.dart';
 import 'delivery_staff_screen.dart';
+import 'edit_kitchen_profile_screen.dart';
 import 'kitchen_queue_screen.dart';
 import 'notifications_screen.dart';
 import 'payment_settings_screen.dart';
@@ -16,13 +17,91 @@ import 'pending_approvals_screen.dart';
 import 'reviews_screen.dart';
 import 'settlements_screen.dart';
 
-class PartnerMoreScreen extends StatelessWidget {
-  const PartnerMoreScreen({super.key, required this.session, required this.onSignOut});
+class PartnerMoreScreen extends StatefulWidget {
+  const PartnerMoreScreen({
+    super.key,
+    required this.session,
+    required this.onSignOut,
+    this.onSessionUpdated,
+  });
   final ProviderSession session;
   final VoidCallback onSignOut;
+  final ValueChanged<ProviderSession>? onSessionUpdated;
+
+  @override
+  State<PartnerMoreScreen> createState() => _PartnerMoreScreenState();
+}
+
+class _PartnerMoreScreenState extends State<PartnerMoreScreen> {
+  late ProviderSession _session;
+  String? _logoPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = widget.session;
+    _loadLogo();
+  }
+
+  Future<void> _loadLogo() async {
+    try {
+      final prof = await ProviderApiService.fetchProviderProfile(_session.providerId);
+      if (!mounted) return;
+      final logo = prof['logo_path']?.toString();
+      if (logo != null && logo.isNotEmpty) {
+        setState(() => _logoPath = logo);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _openEditProfile() async {
+    final res = await Navigator.push<Map<String, dynamic>>(
+      context,
+      partnerRoute(EditKitchenProfileScreen(session: _session)),
+    );
+    if (res != null && mounted) {
+      final updated = ProviderSession(
+        token: _session.token,
+        refreshToken: _session.refreshToken,
+        userId: _session.userId,
+        email: res['public_email']?.toString().isNotEmpty == true ? res['public_email'].toString() : _session.email,
+        providerId: _session.providerId,
+        businessName: res['display_name']?.toString().isNotEmpty == true ? res['display_name'].toString() : _session.businessName,
+        locality: res['locality']?.toString() ?? _session.locality,
+        city: res['city']?.toString() ?? _session.city,
+      );
+      setState(() {
+        _session = updated;
+        final lp = res['logo_path']?.toString();
+        if (lp != null && lp.isNotEmpty) _logoPath = lp;
+      });
+      widget.onSessionUpdated?.call(updated);
+    }
+  }
+
+  Widget _kitchenAvatar() {
+    final p = (_logoPath ?? '').trim();
+    if (p.startsWith('data:image/')) {
+      try {
+        return ClipOval(
+          child: SizedBox(width: 52, height: 52, child: Image.memory(base64Decode(p.split(',').last), fit: BoxFit.cover)),
+        );
+      } catch (_) {}
+    } else if (p.startsWith('http')) {
+      return ClipOval(
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Image.network(p, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ThaliLogoMark(size: 46, whiteContainer: true)),
+        ),
+      );
+    }
+    return const ThaliLogoMark(size: 46, whiteContainer: true);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final session = _session;
     return Scaffold(
       backgroundColor: ThaliColors.scaffold,
       appBar: AppBar(title: const Text('Kitchen Hub & Settings')),
@@ -31,9 +110,10 @@ class PartnerMoreScreen extends StatelessWidget {
         children: [
           CardSurface(
             padding: const EdgeInsets.all(16),
+            onTap: _openEditProfile,
             child: Row(
               children: [
-                const ThaliLogoMark(size: 46, whiteContainer: true),
+                _kitchenAvatar(),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
@@ -58,6 +138,11 @@ class PartnerMoreScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+                IconButton(
+                  tooltip: 'Edit Kitchen Profile',
+                  onPressed: _openEditProfile,
+                  icon: const Icon(Icons.edit_outlined, size: 20, color: ThaliColors.primary),
+                ),
               ],
             ),
           ),
@@ -73,6 +158,13 @@ class PartnerMoreScreen extends StatelessWidget {
             child: Column(
               children: [
                 _item(
+                  icon: Icons.storefront_outlined,
+                  title: 'Edit Kitchen Profile',
+                  accent: true,
+                  onTap: _openEditProfile,
+                ),
+                const Divider(height: 1),
+                _item(
                   icon: Icons.kitchen_rounded,
                   title: 'Live Kitchen Queue',
                   accent: true,
@@ -81,7 +173,7 @@ class PartnerMoreScreen extends StatelessWidget {
                 const Divider(height: 1),
                 _item(
                   icon: Icons.delivery_dining_rounded,
-                  title: 'My Delivery Staff (/rider Link)',
+                  title: 'My Delivery Staff',
                   accent: true,
                   onTap: () => Navigator.push(context, partnerRoute(DeliveryStaffScreen(session: session))),
                 ),
@@ -184,7 +276,7 @@ class PartnerMoreScreen extends StatelessWidget {
             color: ThaliColors.red,
             onPressed: () {
               Navigator.pop(context);
-              onSignOut();
+              widget.onSignOut();
             },
           ),
         ],
@@ -273,9 +365,9 @@ class PartnerMoreScreen extends StatelessWidget {
                   setSheetState(() => sending = true);
                   try {
                     await ProviderApiService.submitSupportTicket(
-                      name: session.businessName,
-                      email: session.email,
-                      phone: session.providerId,
+                      name: _session.businessName,
+                      email: _session.email,
+                      phone: _session.providerId,
                       role: 'provider',
                       subject: subjectCtrl.text.trim(),
                       message: msgCtrl.text.trim(),
@@ -284,7 +376,7 @@ class PartnerMoreScreen extends StatelessWidget {
                     if (context.mounted) showPartnerNotice(context, 'Support ticket submitted.');
                   } catch (e) {
                     setSheetState(() => sending = false);
-                    if (context.mounted) showPartnerNotice(context, '$e', isError: true);
+                    if (context.mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'submit ticket'), isError: true);
                   }
                 },
               ),
@@ -417,7 +509,7 @@ class _SubscribersScreenState extends State<SubscribersScreen> {
                       }
                     } catch (e) {
                       setSheetState(() => saving = false);
-                      if (mounted) showPartnerNotice(context, '$e', isError: true);
+                      if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'add subscriber'), isError: true);
                     }
                   },
                 ),
@@ -558,15 +650,17 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
   bool _loading = true;
   bool _saving = false;
 
-  final Map<String, bool> _enabled = {'breakfast': true, 'lunch': true, 'dinner': true};
+  final Map<String, bool> _enabled = {'breakfast': true, 'lunch': true, 'snacks': false, 'dinner': true};
   final Map<String, TextEditingController> _startCtrls = {
     'breakfast': TextEditingController(text: '07:30 AM'),
     'lunch': TextEditingController(text: '12:00 PM'),
+    'snacks': TextEditingController(text: '04:30 PM'),
     'dinner': TextEditingController(text: '07:30 PM'),
   };
   final Map<String, TextEditingController> _endCtrls = {
     'breakfast': TextEditingController(text: '10:00 AM'),
     'lunch': TextEditingController(text: '03:00 PM'),
+    'snacks': TextEditingController(text: '06:30 PM'),
     'dinner': TextEditingController(text: '10:30 PM'),
   };
 
@@ -592,7 +686,7 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
     try {
       final t = await ProviderApiService.fetchTimings(widget.session.providerId);
       if (!mounted) return;
-      for (final slot in ['breakfast', 'lunch', 'dinner']) {
+      for (final slot in ['breakfast', 'lunch', 'snacks', 'dinner']) {
         final cfg = t[slot];
         if (cfg is Map) {
           _enabled[slot] = cfg['enabled'] != false;
@@ -611,7 +705,7 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
       await ProviderApiService.updateTimings(
         providerId: widget.session.providerId,
         timings: {
-          for (final slot in ['breakfast', 'lunch', 'dinner'])
+          for (final slot in ['breakfast', 'lunch', 'snacks', 'dinner'])
             slot: {
               'enabled': _enabled[slot] == true,
               'start': _startCtrls[slot]!.text.trim(),
@@ -621,7 +715,7 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
       );
       if (mounted) showPartnerNotice(context, 'Meal service hours updated.');
     } catch (e) {
-      if (mounted) showPartnerNotice(context, '$e', isError: true);
+      if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'save timings'), isError: true);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -678,14 +772,22 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
                 physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                 children: [
-                  ...['breakfast', 'lunch', 'dinner'].map((slot) {
+                  ...['breakfast', 'lunch', 'snacks', 'dinner'].map((slot) {
                     final title = slot[0].toUpperCase() + slot.substring(1);
                     final defStart = slot == 'breakfast'
                         ? const TimeOfDay(hour: 7, minute: 30)
-                        : (slot == 'lunch' ? const TimeOfDay(hour: 12, minute: 0) : const TimeOfDay(hour: 19, minute: 30));
+                        : slot == 'lunch'
+                            ? const TimeOfDay(hour: 12, minute: 0)
+                            : slot == 'snacks'
+                                ? const TimeOfDay(hour: 16, minute: 30)
+                                : const TimeOfDay(hour: 19, minute: 30);
                     final defEnd = slot == 'breakfast'
                         ? const TimeOfDay(hour: 10, minute: 0)
-                        : (slot == 'lunch' ? const TimeOfDay(hour: 15, minute: 0) : const TimeOfDay(hour: 22, minute: 30));
+                        : slot == 'lunch'
+                            ? const TimeOfDay(hour: 15, minute: 0)
+                            : slot == 'snacks'
+                                ? const TimeOfDay(hour: 18, minute: 30)
+                                : const TimeOfDay(hour: 22, minute: 30);
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: CardSurface(
@@ -1000,7 +1102,7 @@ class _KitchenSettingsQuickCardState extends State<_KitchenSettingsQuickCard> {
     } catch (e) {
       if (mounted) {
         setState(() => _supportsDelivery = prev);
-        showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update delivery setting'), isError: true);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1025,7 +1127,7 @@ class _KitchenSettingsQuickCardState extends State<_KitchenSettingsQuickCard> {
       showPartnerNotice(context, 'Kitchen cover photo updated.');
     } catch (e) {
       if (mounted) {
-        showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update cover photo'), isError: true);
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1063,13 +1165,7 @@ class _KitchenSettingsQuickCardState extends State<_KitchenSettingsQuickCard> {
               ),
               const SizedBox(width: 12),
               const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Kitchen Cover Photo', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
-                    Text('Shown to diners in Explore', style: TextStyle(fontSize: 11.5, color: ThaliColors.muted)),
-                  ],
-                ),
+                child: Text('Kitchen Cover Photo', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
               ),
               OutlinedButton(
                 onPressed: _busy ? null : _pickAndUploadPhoto,
@@ -1096,15 +1192,11 @@ class _KitchenSettingsQuickCardState extends State<_KitchenSettingsQuickCard> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Self Delivery Available', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
-                    Text(
-                      _loading ? 'Checking setting...' : (_supportsDelivery ? 'Customers see Self Delivery' : 'Off · Pickup & Dine-in only'),
-                      style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted),
-                    ),
-                  ],
+                child: Text(
+                  _loading
+                      ? 'Self Delivery'
+                      : (_supportsDelivery ? 'Self Delivery · On' : 'Self Delivery · Pickup only'),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: ThaliColors.ink),
                 ),
               ),
               Switch.adaptive(

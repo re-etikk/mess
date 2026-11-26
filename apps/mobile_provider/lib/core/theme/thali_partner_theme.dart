@@ -44,6 +44,7 @@ class ThaliColors {
 
   static const Color breakfastTile = Color(0xFFFFF5EB);
   static const Color lunchTile = Color(0xFFFEF9E7);
+  static const Color snacksTile = Color(0xFFFFF1E6);
   static const Color dinnerTile = Color(0xFFEFF6FF);
 }
 

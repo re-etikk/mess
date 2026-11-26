@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -103,7 +104,9 @@ class _ProfileLocationSetupScreenState extends State<ProfileLocationSetupScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'save location'))),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

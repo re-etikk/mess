@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/repositories/mess_repository.dart';
 import '../../core/services/customer_auth_service.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -65,7 +66,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(friendlyCustomerError(e, action: 'create account'))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);

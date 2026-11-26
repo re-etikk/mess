@@ -6,6 +6,7 @@ import { generateCounterQRToken, getIndiaDateString } from '@/lib/crypto';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 async function getClientSafe() {
   const db = getAdminClient();
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
         .then((r) => r, () => ({ data: [] as any[] })),
     ]);
 
-    const slots = dbSlots ?? [];
+    const slots = (dbSlots ?? []).filter((s: any) => String(s.name || '').trim().toLowerCase() !== 'all');
     const localTime = new Intl.DateTimeFormat('en-GB', {
       timeZone: provider?.timezone || 'Asia/Kolkata',
       hour: '2-digit',

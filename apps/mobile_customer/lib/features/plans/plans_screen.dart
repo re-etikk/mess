@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -566,7 +567,7 @@ class _ManageSubscriptionScreenState extends State<ManageSubscriptionScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'save settings'))),
         );
       }
     } finally {
@@ -596,7 +597,7 @@ class _ManageSubscriptionScreenState extends State<ManageSubscriptionScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'save settings'))),
         );
       }
     } finally {
@@ -1054,7 +1055,7 @@ class _PauseSubscriptionScreenState extends State<_PauseSubscriptionScreen> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+        SnackBar(content: Text(friendlyCustomerError(e, action: 'pause plan'))),
       );
     }
   }
@@ -1293,7 +1294,7 @@ class _CancelSubscriptionScreenState extends State<_CancelSubscriptionScreen> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+        SnackBar(content: Text(friendlyCustomerError(e, action: 'pause plan'))),
       );
     }
   }

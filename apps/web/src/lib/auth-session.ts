@@ -256,6 +256,41 @@ export function sanitizePostgrestSearch(input: string): string {
     .slice(0, 80);
 }
 
+export function publicErrorMessage(
+  err: unknown,
+  fallback = 'Something went wrong. Please try again.'
+): string {
+  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : String((err as any)?.message || '');
+  const trimmed = msg.trim();
+  if (!trimmed) return fallback;
+  const lower = trimmed.toLowerCase();
+  const technicalMarkers = [
+    'permission denied',
+    'relation ',
+    'column ',
+    'constraint',
+    'violates',
+    'duplicate key',
+    'syntax error',
+    'pgrst',
+    '42501',
+    '42p01',
+    '23505',
+    'jwt',
+    'fetch failed',
+    'econn',
+    'etimedout',
+    'supabase',
+    'postgres',
+    'sql',
+    'invalid input syntax',
+  ];
+  if (technicalMarkers.some((m) => lower.includes(m)) || trimmed.length > 180) {
+    return fallback;
+  }
+  return trimmed;
+}
+
 export function isAllowedMediaUrl(url: string): boolean {
   const trimmed = (url || '').trim();
   if (!trimmed) return true;

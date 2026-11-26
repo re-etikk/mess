@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { getAdminClient, noStoreFetch } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
-import { ensurePlanSlotsLinked } from '@/lib/auth-session';
+import { ensurePlanSlotsLinked, publicErrorMessage } from '@/lib/auth-session';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
+const SLOT_ORDER: Record<string, number> = { breakfast: 1, lunch: 2, snacks: 3, dinner: 4 };
+
+const DEFAULT_SLOTS = [
+  { name: 'breakfast', starts_at_local: '07:30:00', ends_at_local: '10:00:00' },
+  { name: 'lunch', starts_at_local: '12:00:00', ends_at_local: '15:30:00' },
+  { name: 'snacks', starts_at_local: '16:30:00', ends_at_local: '18:30:00' },
+  { name: 'dinner', starts_at_local: '19:30:00', ends_at_local: '22:30:00' },
+];
 
 async function getDbClient() {
   const admin = getAdminClient();
@@ -18,11 +28,7 @@ async function getDbClient() {
   }
 }
 
-const DEFAULT_SLOTS = [
-  { name: 'breakfast', starts_at_local: '07:30:00', ends_at_local: '10:00:00' },
-  { name: 'lunch', starts_at_local: '12:00:00', ends_at_local: '15:30:00' },
-  { name: 'dinner', starts_at_local: '19:30:00', ends_at_local: '22:30:00' },
-];
+void noStoreFetch;
 
 export async function GET(req: NextRequest) {
   const params = new URL(req.url).searchParams;
@@ -43,16 +49,18 @@ export async function GET(req: NextRequest) {
       client.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', providerId).eq('active', true),
     ]);
 
-    let slots = dbSlots ?? [];
-    // If no slots exist yet in DB, use default slots
+    let slots = (dbSlots ?? []).filter((s) => String(s.name || '').trim().toLowerCase() !== 'all');
+    // If no slots exist yet in DB, use default slots (breakfast, lunch, dinner)
     if (slots.length === 0) {
-      slots = DEFAULT_SLOTS.map((s) => ({
+      slots = DEFAULT_SLOTS.filter((s) => s.name !== 'snacks').map((s) => ({
         id: `slot-${s.name}-${providerId.slice(0, 8)}`,
         name: s.name,
         starts_at_local: s.starts_at_local,
         ends_at_local: s.ends_at_local,
         active: true,
       }));
+    } else {
+      slots.sort((a, b) => (SLOT_ORDER[String(a.name).toLowerCase()] ?? 99) - (SLOT_ORDER[String(b.name).toLowerCase()] ?? 99));
     }
 
     let itemsQuery = client.from('menu_items').select('*').eq('provider_id', providerId);
@@ -72,31 +80,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Merge with platformStore items
-    const storeLunchKey = `${providerId}_Daily_LUNCH`;
-    const storeDinnerKey = `${providerId}_Daily_DINNER`;
-    const storeBreakfastKey = `${providerId}_Daily_BREAKFAST`;
-    const storeLunch = platformStore.menus.get(storeLunchKey);
-    const storeDinner = platformStore.menus.get(storeDinnerKey);
-    const storeBreakfast = platformStore.menus.get(storeBreakfastKey);
-
     const menus = slots.filter((slot) => !slotFilter || slot.id === slotFilter).map((slot) => {
       const slotNameUpper = slot.name.toUpperCase();
-      let storeMenu = null;
-      if (slotNameUpper === 'LUNCH') storeMenu = storeLunch;
-      else if (slotNameUpper === 'DINNER') storeMenu = storeDinner;
-      else if (slotNameUpper === 'BREAKFAST') storeMenu = storeBreakfast;
+      const storeMenu = platformStore.menus.get(`${providerId}_Daily_${slotNameUpper}`);
 
       const slotItems = items.filter((item) =>
         item.meal_slot_id === slot.id ||
-        (item.description && item.description.toLowerCase().includes(slot.name.toLowerCase()))
+        (!item.meal_slot_id && item.description && item.description.toLowerCase().includes(slot.name.toLowerCase()))
       );
 
       const dbIncluded = slotItems
         .filter((item) => !item.is_add_on && item.active !== false && !item.name?.toLowerCase().includes('test'))
         .map((item) => item.name);
       const storeIncluded = (storeMenu?.items_included || []).filter((name: string) => !name.toLowerCase().includes('test'));
-      const combinedIncluded = storeIncluded.length > 0 ? storeIncluded : dbIncluded;
+      const combinedIncluded = dbIncluded.length > 0 ? dbIncluded : storeIncluded;
 
       const dbExtra = slotItems
         .filter((item) => item.is_add_on && item.active !== false && !item.name?.toLowerCase().includes('test'))
@@ -199,54 +196,41 @@ export async function POST(req: NextRequest) {
     }
 
     let slotId = input.slot_id;
-    const slotName = (input.slot || 'lunch').toLowerCase();
+    const slotName = (input.slot || 'lunch').trim().toLowerCase();
+    if (slotName === 'all') {
+      return NextResponse.json({ success: false, error: 'Choose Breakfast, Lunch, Snacks, or Dinner.' }, { status: 400 });
+    }
     const dayOfWeek = input.day_of_week || 'Daily';
     const itemKind = input.item_kind || (input.is_extra ? 'addon' : 'included');
     const priceVal = input.price || (input.price_paise ? input.price_paise / 100 : 30);
 
-    // Update platformStore immediately for 100% reliable persistence
-    const slotKey = `${input.provider_id}_${dayOfWeek}_${slotName.toUpperCase()}`;
-    let storeMenu = platformStore.menus.get(slotKey);
-    if (!storeMenu) {
-      storeMenu = {
-        id: `menu-${input.provider_id}-${dayOfWeek}-${slotName}`,
-        provider_id: input.provider_id,
-        day_of_week: dayOfWeek,
-        slot: slotName.toUpperCase(),
-        items_included: [],
-        items_extra: [],
-        items_unavailable: [],
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      };
-      platformStore.menus.set(slotKey, storeMenu);
-    }
-
-    if (input.is_extra) {
-      storeMenu.items_extra = storeMenu.items_extra.filter((x) => x.name.toLowerCase() !== itemName.toLowerCase());
-      storeMenu.items_extra.push({ name: itemName, price: priceVal, limit: input.max_quantity || 5, is_available: true });
-    } else {
-      if (!storeMenu.items_included.some((x) => x.toLowerCase() === itemName.toLowerCase())) {
-        storeMenu.items_included.push(itemName);
-      }
-    }
-
     if (db) {
       try {
         if (!slotId) {
-          const { data: existingSlot } = await db
+          const { data: existingSlot, error: slotLookupError } = await db
             .from('meal_slots')
-            .select('id')
+            .select('id,active')
             .eq('provider_id', input.provider_id)
-            .eq('active', true)
             .ilike('name', slotName)
+            .limit(1)
             .maybeSingle();
+
+          if (slotLookupError) {
+            console.error('Meal slot lookup error:', slotLookupError.message);
+            return NextResponse.json(
+              { success: false, error: publicErrorMessage(slotLookupError, 'Could not load meal slot. Please try again.') },
+              { status: 503 }
+            );
+          }
 
           if (existingSlot) {
             slotId = existingSlot.id;
+            if (existingSlot.active === false) {
+              await db.from('meal_slots').update({ active: true, updated_at: new Date().toISOString() }).eq('id', existingSlot.id);
+            }
           } else {
             const defaultSlot = DEFAULT_SLOTS.find((s) => s.name === slotName) || DEFAULT_SLOTS[1];
-            const { data: newSlot } = await db
+            const { data: newSlot, error: slotCreateErr } = await db
               .from('meal_slots')
               .insert({
                 provider_id: input.provider_id,
@@ -257,7 +241,14 @@ export async function POST(req: NextRequest) {
               })
               .select('id')
               .single();
-            slotId = newSlot?.id;
+            if (slotCreateErr || !newSlot) {
+              console.error('Meal slot create error:', slotCreateErr?.message);
+              return NextResponse.json(
+                { success: false, error: publicErrorMessage(slotCreateErr, 'Could not create meal slot. Please try again.') },
+                { status: 503 }
+              );
+            }
+            slotId = newSlot.id;
           }
         }
 
@@ -278,19 +269,79 @@ export async function POST(req: NextRequest) {
           .insert({ ...baseInsert, day_of_week: dayOfWeek, item_kind: itemKind })
           .select('*')
           .single();
-        const data = !extRes.error
-          ? extRes.data
-          : (await db.from('menu_items').insert(baseInsert).select('*').single()).data;
+
+        let savedItem = extRes.data;
+        if (extRes.error) {
+          const baseRes = await db.from('menu_items').insert(baseInsert).select('*').single();
+          if (baseRes.error || !baseRes.data) {
+            console.error('Menu item DB insert error:', baseRes.error?.message || extRes.error.message);
+            return NextResponse.json(
+              { success: false, error: publicErrorMessage(baseRes.error || extRes.error, 'Could not save dish right now. Please try again.') },
+              { status: 503 }
+            );
+          }
+          savedItem = baseRes.data;
+        }
 
         const adminClient = getAdminClient();
         if (adminClient) {
           await ensurePlanSlotsLinked(adminClient, input.provider_id);
         }
 
-        return NextResponse.json({ success: true, item: data || { name: itemName } }, { status: 201 });
-      } catch (err) {
-        console.warn('DB menu insert fallback:', err);
+        const slotKey = `${input.provider_id}_${dayOfWeek}_${slotName.toUpperCase()}`;
+        let storeMenu = platformStore.menus.get(slotKey);
+        if (!storeMenu) {
+          storeMenu = {
+            id: `menu-${input.provider_id}-${dayOfWeek}-${slotName}`,
+            provider_id: input.provider_id,
+            day_of_week: dayOfWeek,
+            slot: slotName.toUpperCase(),
+            items_included: [],
+            items_extra: [],
+            items_unavailable: [],
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          };
+          platformStore.menus.set(slotKey, storeMenu);
+        }
+        if (input.is_extra) {
+          storeMenu.items_extra = storeMenu.items_extra.filter((x) => x.name.toLowerCase() !== itemName.toLowerCase());
+          storeMenu.items_extra.push({ name: itemName, price: priceVal, limit: input.max_quantity || 5, is_available: true });
+        } else if (!storeMenu.items_included.some((x) => x.toLowerCase() === itemName.toLowerCase())) {
+          storeMenu.items_included.push(itemName);
+        }
+
+        return NextResponse.json({ success: true, item: savedItem || { name: itemName } }, { status: 201 });
+      } catch (err: any) {
+        console.error('DB menu insert failed:', err?.message);
+        return NextResponse.json(
+          { success: false, error: publicErrorMessage(err, 'Could not save dish right now. Please try again.') },
+          { status: 503 }
+        );
       }
+    }
+
+    const slotKey = `${input.provider_id}_${dayOfWeek}_${slotName.toUpperCase()}`;
+    let storeMenu = platformStore.menus.get(slotKey);
+    if (!storeMenu) {
+      storeMenu = {
+        id: `menu-${input.provider_id}-${dayOfWeek}-${slotName}`,
+        provider_id: input.provider_id,
+        day_of_week: dayOfWeek,
+        slot: slotName.toUpperCase(),
+        items_included: [],
+        items_extra: [],
+        items_unavailable: [],
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      };
+      platformStore.menus.set(slotKey, storeMenu);
+    }
+    if (input.is_extra) {
+      storeMenu.items_extra = storeMenu.items_extra.filter((x) => x.name.toLowerCase() !== itemName.toLowerCase());
+      storeMenu.items_extra.push({ name: itemName, price: priceVal, limit: input.max_quantity || 5, is_available: true });
+    } else if (!storeMenu.items_included.some((x) => x.toLowerCase() === itemName.toLowerCase())) {
+      storeMenu.items_included.push(itemName);
     }
 
     return NextResponse.json({ success: true, item: { name: itemName, price: priceVal } }, { status: 201 });
@@ -309,12 +360,25 @@ export async function POST(req: NextRequest) {
 
     if (db) {
       try {
-        if (input.item_id) {
-          await db.from('menu_items').delete().eq('id', input.item_id).eq('provider_id', input.provider_id);
-        } else if (itemName) {
-          await db.from('menu_items').delete().eq('provider_id', input.provider_id).ilike('name', itemName);
+        const res = input.item_id
+          ? await db.from('menu_items').delete().eq('id', input.item_id).eq('provider_id', input.provider_id)
+          : itemName
+            ? await db.from('menu_items').delete().eq('provider_id', input.provider_id).ilike('name', itemName)
+            : { error: null };
+        if (res.error) {
+          console.error('Menu item delete error:', res.error.message);
+          return NextResponse.json(
+            { success: false, error: publicErrorMessage(res.error, 'Could not remove item. Please try again.') },
+            { status: 503 }
+          );
         }
-      } catch (_) {}
+      } catch (err: any) {
+        console.error('Menu item delete exception:', err?.message);
+        return NextResponse.json(
+          { success: false, error: publicErrorMessage(err, 'Could not remove item. Please try again.') },
+          { status: 503 }
+        );
+      }
     }
     return NextResponse.json({ success: true, message: 'Item removed successfully.' });
   }
@@ -337,12 +401,25 @@ export async function POST(req: NextRequest) {
 
     if (db) {
       try {
-        if (input.item_id) {
-          await db.from('menu_items').update({ active: isAvail }).eq('id', input.item_id).eq('provider_id', input.provider_id);
-        } else if (itemName) {
-          await db.from('menu_items').update({ active: isAvail }).eq('provider_id', input.provider_id).ilike('name', itemName);
+        const res = input.item_id
+          ? await db.from('menu_items').update({ active: isAvail }).eq('id', input.item_id).eq('provider_id', input.provider_id)
+          : itemName
+            ? await db.from('menu_items').update({ active: isAvail }).eq('provider_id', input.provider_id).ilike('name', itemName)
+            : { error: null };
+        if (res.error) {
+          console.error('Menu availability update error:', res.error.message);
+          return NextResponse.json(
+            { success: false, error: publicErrorMessage(res.error, 'Could not update availability. Please try again.') },
+            { status: 503 }
+          );
         }
-      } catch (_) {}
+      } catch (err: any) {
+        console.error('Menu availability update exception:', err?.message);
+        return NextResponse.json(
+          { success: false, error: publicErrorMessage(err, 'Could not update availability. Please try again.') },
+          { status: 503 }
+        );
+      }
     }
     return NextResponse.json({ success: true, message: 'Availability updated successfully.' });
   }

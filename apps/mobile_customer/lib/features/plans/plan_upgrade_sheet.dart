@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -78,7 +79,7 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
       if (mounted) setState(() => _quote = q);
     } catch (e) {
       if (mounted) {
-        setState(() => _quoteError = e.toString().replaceFirst('RepositoryException: ', ''));
+        setState(() => _quoteError = friendlyCustomerError(e, action: 'load upgrade quote'));
       }
     }
   }
@@ -159,7 +160,7 @@ class _PlanUpgradeSheetState extends State<PlanUpgradeSheet> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+        SnackBar(content: Text(friendlyCustomerError(e, action: 'upgrade plan'))),
       );
     }
   }

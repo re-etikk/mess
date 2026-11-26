@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { getAdminClient, noStoreFetch } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
+const SLOT_ORDER: Record<string, number> = { breakfast: 1, lunch: 2, snacks: 3, dinner: 4 };
 
 function getFallbackClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) return null;
   return createSupabaseClient(url, anon, {
+    global: { fetch: noStoreFetch },
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
@@ -42,15 +46,19 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     try {
       const { data: provider } = await db
         .from('providers')
-        .select('id,display_name,description,address_line1,locality,city,public_phone,public_email,cover_path,supports_pickup,supports_delivery,status')
+        .select('id,display_name,description,address_line1,locality,city,public_phone,public_email,cover_path,logo_path,supports_pickup,supports_delivery,status')
         .eq('id', providerId)
         .maybeSingle();
 
       if (provider) {
-        const [{ data: slots }, { data: dbItems }] = await Promise.all([
+        const [{ data: rawSlots }, { data: dbItems }] = await Promise.all([
           db.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', provider.id).order('starts_at_local'),
           db.from('menu_items').select('id,name,description,category,dietary_type,price_paise,meal_slot_id,is_add_on,max_quantity,active,day_of_week,item_kind').eq('provider_id', provider.id).eq('active', true).order('name'),
         ]);
+
+        const slots = (rawSlots ?? [])
+          .filter((s) => String(s.name || '').trim().toLowerCase() !== 'all')
+          .sort((a, b) => (SLOT_ORDER[String(a.name).toLowerCase()] ?? 99) - (SLOT_ORDER[String(b.name).toLowerCase()] ?? 99));
 
         let filteredItems = dbItems ?? [];
         if (dayFilter && dayFilter !== 'Daily') {
@@ -58,10 +66,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           filteredItems = dayMatched;
         }
 
-        if (slot && slots?.length) {
+        if (slot && slots.length) {
           const targetSlot = slots.find((s) => s.name.toLowerCase() === slot.toLowerCase());
           const slotItems = targetSlot
-            ? filteredItems.filter((i: any) => i.meal_slot_id === targetSlot.id || (i.description || '').toLowerCase().includes(slot.toLowerCase()))
+            ? filteredItems.filter((i: any) => i.meal_slot_id === targetSlot.id || (!i.meal_slot_id && (i.description || '').toLowerCase().includes(slot.toLowerCase())))
             : [];
           const included = slotItems.filter((i: any) => !i.is_add_on && Number(i.price_paise || 0) === 0);
           const extra = slotItems.filter((i: any) => i.is_add_on || Number(i.price_paise || 0) > 0);
@@ -71,8 +79,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
               id: provider.id,
               name: provider.display_name,
               address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
+              locality: provider.locality,
+              city: provider.city,
               phone: provider.public_phone,
+              public_email: provider.public_email,
               description: provider.description,
+              cover_path: provider.cover_path,
+              logo_path: provider.logo_path,
               supports_pickup: provider.supports_pickup,
               supports_delivery: provider.supports_delivery,
             },
@@ -87,9 +100,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         }
 
         // Return grouped menus across active slots cleanly from DB
-        const activeSlots = (slots ?? []).filter((s) => s.active !== false);
+        const activeSlots = slots.filter((s) => s.active !== false);
         const timings = Object.fromEntries(
-          (slots ?? []).map((s) => [
+          slots.map((s) => [
             String(s.name).toLowerCase(),
             {
               enabled: s.active !== false,
@@ -100,7 +113,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         );
         const groupedMenus = activeSlots.map((s) => {
           const sItems = filteredItems.filter(
-            (i: any) => i.meal_slot_id === s.id || (i.description || '').toLowerCase().includes(s.name.toLowerCase())
+            (i: any) => i.meal_slot_id === s.id || (!i.meal_slot_id && (i.description || '').toLowerCase().includes(s.name.toLowerCase()))
           );
           return {
             slot: s.name.toUpperCase(),
@@ -129,9 +142,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
               id: provider.id,
               name: provider.display_name,
               address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
+              locality: provider.locality,
+              city: provider.city,
               phone: provider.public_phone,
+              public_email: provider.public_email,
               description: provider.description,
               cover_path: provider.cover_path,
+              logo_path: provider.logo_path,
               supports_pickup: provider.supports_pickup,
               supports_delivery: provider.supports_delivery,
             },
@@ -155,7 +172,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     : { id: providerId, name: 'Mess Partner' };
 
   if (!slot) {
-    const slotsToCheck = ['BREAKFAST', 'LUNCH', 'DINNER'];
+    const slotsToCheck = ['BREAKFAST', 'LUNCH', 'SNACKS', 'DINNER'];
     const storeMenus = slotsToCheck
       .map((sName) => {
         const m = platformStore.menus.get(`${providerId}_${keyDay}_${sName}`) || platformStore.menus.get(`${providerId}_Daily_${sName}`);

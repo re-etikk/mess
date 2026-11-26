@@ -6,6 +6,7 @@ import { addPartnerNotification } from '@/lib/partner-notifications';
 import { requireCustomerIdentity } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 function isoDayOfWeek1To7(dateStr: string): number {
   const d = new Date(`${dateStr}T12:00:00+05:30`);
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest) {
 
         events = (evRes as any)?.data ?? [];
         redemptions = (redRes as any)?.data ?? [];
-        providerSlots = slotsRes.data ?? [];
+        providerSlots = (slotsRes.data ?? []).filter((s: any) => String(s.name || '').trim().toLowerCase() !== 'all');
         providerMenuItems = itemsRes.data ?? [];
       }
     } catch (e: any) {

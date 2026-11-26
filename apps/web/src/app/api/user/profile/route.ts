@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
-import { isAllowedMediaUrl, requireCustomerIdentity } from '@/lib/auth-session';
+import { isAllowedMediaUrl, publicErrorMessage, requireCustomerIdentity } from '@/lib/auth-session';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export const dynamic = 'force-dynamic';
@@ -60,7 +60,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, profile: profileData, addresses }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err?.message || 'Error loading profile' }, { status: 500 });
+    console.error('Profile GET error:', err?.message);
+    return NextResponse.json({ success: false, error: publicErrorMessage(err, 'Unable to load profile. Please try again.') }, { status: 500 });
   }
 }
 
@@ -210,6 +211,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, profile: updatedProfile, message: 'Profile saved successfully.' });
   } catch (err: any) {
     console.error('Profile POST error:', err?.message);
-    return NextResponse.json({ success: false, error: err?.message || 'Error updating profile' }, { status: 500 });
+    return NextResponse.json({ success: false, error: publicErrorMessage(err, 'Unable to save profile. Please try again.') }, { status: 500 });
   }
 }

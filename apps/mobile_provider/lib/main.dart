@@ -74,6 +74,10 @@ class _MessProviderAppState extends State<MessProviderApp> {
           : (_session != null
               ? ProviderShell(
                   session: _session!,
+                  onSessionUpdated: (updated) {
+                    ProviderApiService.saveSession(updated);
+                    if (mounted) setState(() => _session = updated);
+                  },
                   onSignOut: () async {
                     await ProviderApiService.clearSession();
                     if (mounted) setState(() => _session = null);
@@ -144,9 +148,15 @@ class _PartnerSplashScreen extends StatelessWidget {
 }
 
 class ProviderShell extends StatefulWidget {
-  const ProviderShell({super.key, required this.session, required this.onSignOut});
+  const ProviderShell({
+    super.key,
+    required this.session,
+    required this.onSignOut,
+    this.onSessionUpdated,
+  });
   final ProviderSession session;
   final VoidCallback onSignOut;
+  final ValueChanged<ProviderSession>? onSessionUpdated;
 
   @override
   State<ProviderShell> createState() => _ProviderShellState();
@@ -161,6 +171,7 @@ class _ProviderShellState extends State<ProviderShell> {
       PartnerOverviewTab(
         session: widget.session,
         onSignOut: widget.onSignOut,
+        onSessionUpdated: widget.onSessionUpdated,
         onSwitchTab: (i) => setState(() => _tab = i),
       ),
       MenuManagementTab(session: widget.session),

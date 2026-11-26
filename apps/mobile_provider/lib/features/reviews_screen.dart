@@ -54,7 +54,7 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
       });
     } catch (e) {
       if (mounted) {
-        setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+        setState(() => _error = ProviderApiService.friendlyError(e, action: 'load reviews'));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -115,7 +115,7 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                                 ctrl.text = draft;
                               }
                             } catch (e) {
-                              if (mounted) showPartnerNotice(context, '$e', isError: true);
+                              if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'draft reply'), isError: true);
                             } finally {
                               setSheetState(() => drafting = false);
                             }
@@ -156,7 +156,7 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                   } catch (e) {
                     setSheetState(() => submitting = false);
                     if (mounted) {
-                      showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+                      showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'publish reply'), isError: true);
                     }
                   }
                 },

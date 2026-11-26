@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
-import { getAdminClient } from '@/lib/supabase/admin';
+import { getAdminClient, noStoreFetch } from '@/lib/supabase/admin';
 import { sanitizePostgrestSearch } from '@/lib/auth-session';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
+const SLOT_ORDER: Record<string, number> = { breakfast: 1, lunch: 2, snacks: 3, dinner: 4 };
 
 function getFallbackClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) return null;
   return createSupabaseClient(url, anon, {
+    global: { fetch: noStoreFetch },
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
@@ -120,7 +124,9 @@ export async function GET(req: NextRequest) {
       .map((provider: any) => {
         const pId = provider.id;
         const pItems = allItems.filter((i: any) => i.provider_id === pId);
-        const pSlots = allSlots.filter((s: any) => s.provider_id === pId);
+        const pSlots = allSlots
+          .filter((s: any) => s.provider_id === pId && String(s.name || '').trim().toLowerCase() !== 'all')
+          .sort((a: any, b: any) => (SLOT_ORDER[String(a.name).toLowerCase()] ?? 99) - (SLOT_ORDER[String(b.name).toLowerCase()] ?? 99));
         const pHours = allHours.filter((h: any) => h.provider_id === pId);
         const pReviews = allReviews.filter((r: any) => r.provider_id === pId);
         const dbSubCount = allSubs.filter((s: any) => s.provider_id === pId).length;
@@ -145,7 +151,7 @@ export async function GET(req: NextRequest) {
           const slotItems = pItems.filter(
             (item: any) =>
               item.meal_slot_id === slot.id ||
-              (item.description && item.description.toLowerCase().includes(String(slot.name).toLowerCase()))
+              (!item.meal_slot_id && item.description && item.description.toLowerCase().includes(String(slot.name).toLowerCase()))
           );
 
           const dbIncluded = slotItems.filter((item: any) => !item.is_add_on).map((item: any) => item.name);
@@ -220,14 +226,17 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // Real starting meal price in INR (null if no prices configured)
-        const nonZeroMenuPrices = pItems.filter((i: any) => !i.is_add_on && Number(i.price_paise) > 0).map((i: any) => Number(i.price_paise));
+        // Real starting meal price in INR (ignore < ₹1/meal test artifacts so ₹0/meal never renders)
+        const nonZeroMenuPrices = pItems
+          .filter((i: any) => !i.is_add_on && Number(i.price_paise) >= 100)
+          .map((i: any) => Number(i.price_paise));
         const dailyPlanPrices = pPlans
           .filter((pl: any) => Number(pl.price_paise) > 0)
-          .map((pl: any) => Math.round(Number(pl.price_paise) / Math.max(1, Number(pl.duration_days || 30))));
+          .map((pl: any) => Math.round(Number(pl.price_paise) / Math.max(1, Number(pl.duration_days || 30))))
+          .filter((perMealPaise: number) => perMealPaise >= 100);
         const minPaiseCandidates = [...nonZeroMenuPrices, ...dailyPlanPrices];
         const startingMealPrice =
-          minPaiseCandidates.length > 0 ? Math.round(Math.min(...minPaiseCandidates) / 100) : null;
+          minPaiseCandidates.length > 0 ? Math.max(1, Math.round(Math.min(...minPaiseCandidates) / 100)) : null;
 
         return {
           ...provider,

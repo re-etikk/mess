@@ -1035,7 +1035,7 @@ class _MealManageScreenState extends State<MealManageScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'update delivery window'))),
         );
       }
     } finally {
@@ -1188,7 +1188,7 @@ class _MealManageScreenState extends State<MealManageScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'update delivery window'))),
         );
       }
     } finally {
@@ -1315,7 +1315,9 @@ class _MealManageScreenState extends State<MealManageScreen> {
                   } catch (e) {
                     setSheetState(() => sending = false);
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(friendlyCustomerError(e, action: 'submit report'))),
+                      );
                     }
                   }
                 },
@@ -1747,7 +1749,7 @@ class _SkipConfirmScreenState extends State<_SkipConfirmScreen> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString().replaceFirst('RepositoryException: ', ''))),
+        SnackBar(content: Text(friendlyCustomerError(e, action: 'skip meal'))),
       );
     }
   }

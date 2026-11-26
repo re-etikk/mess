@@ -23,7 +23,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
   List<Map<String, dynamic>> _menus = [];
 
   static const _days = ['Daily', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  static const _slots = ['breakfast', 'lunch', 'dinner'];
+  static const _slots = ['breakfast', 'lunch', 'snacks', 'dinner'];
 
   @override
   void initState() {
@@ -64,7 +64,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
       );
       await _loadMenu();
     } catch (e) {
-      if (mounted) showPartnerNotice(context, '$e', isError: true);
+      if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update dish'), isError: true);
     }
   }
 
@@ -80,7 +80,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
         await _loadMenu();
       }
     } catch (e) {
-      if (mounted) showPartnerNotice(context, '$e', isError: true);
+      if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'remove dish'), isError: true);
     }
   }
 
@@ -195,7 +195,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                       }
                     } catch (e) {
                       setSheetState(() => saving = false);
-                      if (mounted) showPartnerNotice(context, '$e', isError: true);
+                      if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'add dish'), isError: true);
                     }
                   },
                 ),
@@ -339,7 +339,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                       final label = s[0].toUpperCase() + s.substring(1);
                       return Expanded(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
                           child: PressScale(
                             onTap: () => setState(() => _selectedSlot = s),
                             child: Container(
@@ -352,8 +352,10 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                               alignment: Alignment.center,
                               child: Text(
                                 label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   color: active ? ThaliColors.primaryDark : ThaliColors.body,
                                 ),
@@ -384,7 +386,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                             const CardSurface(
                               padding: EdgeInsets.all(16),
                               child: Text(
-                                'No dishes listed in this slot yet. Tap Add Dish to publish live items to customers.',
+                                'No dishes in this slot yet.',
                                 style: TextStyle(fontSize: 12.5, color: ThaliColors.muted),
                               ),
                             )
@@ -427,7 +429,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                             const CardSurface(
                               padding: EdgeInsets.all(16),
                               child: Text(
-                                'Add paid extras (Extra Roti, Curd, Paneer, Gulab Jamun) for customer customization.',
+                                'No add-ons or specials yet.',
                                 style: TextStyle(fontSize: 12.5, color: ThaliColors.muted),
                               ),
                             )
@@ -592,7 +594,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                                     calories = (res['estimated_calories'] as num?)?.toInt();
                                   });
                                 } catch (e) {
-                                  if (mounted) showPartnerNotice(context, '$e', isError: true);
+                                  if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'parse menu'), isError: true);
                                 } finally {
                                   setSheetState(() => parsing = false);
                                 }
@@ -693,7 +695,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                         }
                       } catch (e) {
                         setSheetState(() => publishing = false);
-                        if (mounted) showPartnerNotice(context, '$e', isError: true);
+                        if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'publish menu'), isError: true);
                       }
                     },
                   ),

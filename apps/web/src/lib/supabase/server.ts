@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { noStoreFetch } from './admin';
 
 export function createClient() {
   const cookieStore = cookies();
@@ -10,6 +11,7 @@ export function createClient() {
   }
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {
+    global: { fetch: noStoreFetch },
     cookies: {
       getAll() {
         return cookieStore.getAll();

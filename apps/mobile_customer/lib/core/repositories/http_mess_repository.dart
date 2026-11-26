@@ -75,7 +75,11 @@ class HttpMessRepository implements MessRepository {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final data = jsonDecode(response.body);
       final list = (data is Map && data['providers'] is List) ? (data['providers'] as List) : (data is List ? data : []);
-      final providers = list.map((json) => _parseProvider(json as Map<String, dynamic>)).toList();
+      var providers = list.map((json) => _parseProvider(json as Map<String, dynamic>)).toList();
+      if (slot != null && slot.trim().isNotEmpty) {
+        final sLower = slot.trim().toLowerCase();
+        providers = providers.where((p) => p.mealSlots.any((m) => m.id.toLowerCase() == sLower && m.enabled)).toList();
+      }
       if (qp.isEmpty) _cachedProviders = providers;
       return providers;
     }
@@ -85,7 +89,12 @@ class HttpMessRepository implements MessRepository {
       if (errBody is Map) msg = errBody['error']?.toString();
     } catch (_) {}
     throw RepositoryException(
-      msg ?? friendlyCustomerError('HTTP ${response.statusCode}', statusCode: response.statusCode, body: response.body, action: 'load kitchens'),
+      friendlyCustomerError(
+        msg ?? 'HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
+        body: response.body,
+        action: 'load kitchens',
+      ),
       code: 'search_failed',
     );
   }
@@ -187,6 +196,7 @@ class HttpMessRepository implements MessRepository {
 
       List<MealSlot> updatedSlots = List.from(base.mealSlots);
       String? updatedCover = base.coverPath;
+      String? updatedLogo = base.logoPath;
       String updatedDesc = base.description;
       bool updatedPickup = base.supportsPickup;
       bool updatedDelivery = base.supportsDelivery;
@@ -199,6 +209,8 @@ class HttpMessRepository implements MessRepository {
           if (provMeta is Map) {
             final c = provMeta['cover_path']?.toString();
             if (c != null && c.isNotEmpty) updatedCover = c;
+            final l = provMeta['logo_path']?.toString();
+            if (l != null && l.isNotEmpty) updatedLogo = l;
             final d = provMeta['description']?.toString();
             if (d != null && d.isNotEmpty) updatedDesc = d;
             if (provMeta.containsKey('supports_pickup')) updatedPickup = provMeta['supports_pickup'] != false;
@@ -230,6 +242,7 @@ class HttpMessRepository implements MessRepository {
         address: base.address,
         publicPhone: base.publicPhone,
         coverPath: updatedCover,
+        logoPath: updatedLogo,
         rating: base.rating,
         totalReviews: base.totalReviews,
         subscriberCount: base.subscriberCount,
@@ -958,6 +971,7 @@ class HttpMessRepository implements MessRepository {
 
   static (int, int, int, int) _defaultTiming(String slotStr) {
     if (slotStr == 'BREAKFAST') return (7, 30, 9, 30);
+    if (slotStr == 'SNACKS') return (16, 30, 18, 30);
     if (slotStr == 'DINNER') return (19, 30, 21, 30);
     return (12, 0, 14, 0);
   }
@@ -966,7 +980,8 @@ class HttpMessRepository implements MessRepository {
     final List<MealSlot> mealSlots = [];
     for (final m in rawMenus) {
       final mMap = m as Map<String, dynamic>;
-      final slotStr = (mMap['slot']?.toString() ?? 'LUNCH').toUpperCase();
+      final slotStr = (mMap['slot']?.toString() ?? 'LUNCH').trim().toUpperCase();
+      if (slotStr.isEmpty || slotStr == 'ALL') continue;
       final slotId = slotStr.toLowerCase();
       final slotName = slotStr.substring(0, 1) + slotStr.substring(1).toLowerCase();
 
@@ -1011,7 +1026,7 @@ class HttpMessRepository implements MessRepository {
       }
 
       int startHour, startMinute, endHour, endMinute;
-      bool slotEnabled = (mMap['active'] as bool?) ?? true;
+      bool slotEnabled = (mMap['enabled'] as bool?) ?? (mMap['active'] as bool?) ?? true;
       final timingObj = (rawTimings != null && rawTimings[slotId] is Map)
           ? rawTimings[slotId] as Map<String, dynamic>
           : null;
@@ -1101,6 +1116,7 @@ class HttpMessRepository implements MessRepository {
       address: address.isNotEmpty ? address : null,
       publicPhone: json['public_phone']?.toString(),
       coverPath: json['cover_path']?.toString(),
+      logoPath: json['logo_path']?.toString(),
       distanceMeters: distanceMeters,
       distanceKm: distKm,
       description: description,

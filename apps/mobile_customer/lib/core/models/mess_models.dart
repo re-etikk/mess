@@ -116,6 +116,7 @@ class MessProvider {
     this.address,
     this.publicPhone,
     this.coverPath,
+    this.logoPath,
     this.rating,
     this.totalReviews = 0,
     this.subscriberCount = 0,
@@ -143,6 +144,7 @@ class MessProvider {
   final String? address;
   final String? publicPhone;
   final String? coverPath;
+  final String? logoPath;
   final double? rating;
   final int totalReviews;
   final int subscriberCount;

@@ -7,7 +7,7 @@ import {
 } from '@/lib/auth-session';
 
 export type ProviderAuthResult =
-  | { ok: true; userId: string; providerId: string; isAdmin: boolean }
+  | { ok: true; userId: string; providerId: string; isAdmin: boolean; email?: string }
   | { ok: false; status: 400 | 401 | 403 | 503; error: string };
 
 async function checkDbProviderOwnership(
@@ -99,14 +99,14 @@ export async function requireProviderOwnership(
     const signed = verifySignedSessionToken(token, 'thali_tok_');
     if (signed) {
       if (signed.role === 'admin') {
-        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: true };
+        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: true, email: signed.email };
       }
       if (signed.providerId && signed.providerId === targetProviderId) {
-        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: false };
+        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: false, email: signed.email };
       }
       const owns = await checkDbProviderOwnership(signed.userId, signed.email, targetProviderId);
       if (owns) {
-        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: false };
+        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: false, email: signed.email };
       }
       return { ok: false, status: 403, error: 'You do not have permission to manage this kitchen.' };
     }
@@ -128,12 +128,12 @@ export async function requireProviderOwnership(
             .is('revoked_at', null)
             .maybeSingle();
           if (adminRole) {
-            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
+            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true, email: user.email };
           }
 
           const owns = await checkDbProviderOwnership(user.id, user.email, targetProviderId);
           if (owns) {
-            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false, email: user.email };
           }
           return { ok: false, status: 403, error: 'You do not have permission to manage this kitchen.' };
         }
@@ -167,7 +167,7 @@ export async function requireProviderOwnership(
         .limit(1)
         .maybeSingle();
       if (membership) {
-        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false, email: user.email };
       }
 
       const { data: owned } = await session
@@ -177,7 +177,7 @@ export async function requireProviderOwnership(
         .eq('owner_user_id', user.id)
         .maybeSingle();
       if (owned) {
-        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false, email: user.email };
       }
 
       return { ok: false, status: 403, error: 'You do not have permission to manage this kitchen.' };

@@ -10,6 +10,7 @@ import {
 import { checkRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 async function findAuthUserByEmail(
   admin: NonNullable<ReturnType<typeof getAdminClient>>,
@@ -72,39 +73,50 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { data: record, error } = await admin
+    const { data: records, error } = await admin
       .from('auth_otps')
       .select('*')
       .eq('identifier', identifier)
       .eq('verified', false)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(3);
 
-    if (error || !record) {
+    if (error) {
+      console.error('auth_otps lookup error:', error.message);
+      return NextResponse.json(
+        { success: false, error: 'Unable to verify code right now. Please try again.' },
+        { status: 503 }
+      );
+    }
+
+    if (!records || records.length === 0) {
       return NextResponse.json(
         { success: false, error: 'No active OTP found for this email. Request a new code.' },
         { status: 400 }
       );
     }
 
-    if (new Date(record.expires_at).getTime() < Date.now()) {
+    const nowMs = Date.now();
+    const activeRows = records.filter((r: any) => new Date(r.expires_at).getTime() >= nowMs);
+    if (activeRows.length === 0) {
       return NextResponse.json({ success: false, error: 'OTP has expired. Please request a new one.' }, { status: 400 });
     }
 
-    if ((record.attempts || 0) >= 5) {
+    if ((activeRows[0].attempts || 0) >= 5) {
       return NextResponse.json(
         { success: false, error: 'Too many invalid attempts. Please request a new OTP.' },
         { status: 429 }
       );
     }
 
-    const expectedOtp = String(record.otp_code || '').trim();
-    if (!timingSafeStringEqual(expectedOtp, otpCode)) {
+    const matchedRecord = activeRows.find((r: any) =>
+      timingSafeStringEqual(String(r.otp_code || '').trim(), otpCode)
+    );
+    if (!matchedRecord) {
       await admin
         .from('auth_otps')
-        .update({ attempts: (record.attempts || 0) + 1 })
-        .eq('id', record.id)
+        .update({ attempts: (activeRows[0].attempts || 0) + 1 })
+        .eq('id', activeRows[0].id)
         .eq('verified', false);
       return NextResponse.json({ success: false, error: 'Incorrect OTP code. Please check and try again.' }, { status: 400 });
     }
@@ -118,7 +130,7 @@ export async function POST(req: NextRequest) {
     if (!secret) {
       return NextResponse.json({ success: false, error: 'Verification signing key is not configured.' }, { status: 503 });
     }
-    const verificationToken = `vt_${crypto.createHmac('sha256', secret).update(`${identifier}:${record.id}:${Date.now()}`).digest('hex')}`;
+    const verificationToken = `vt_${crypto.createHmac('sha256', secret).update(`${identifier}:${matchedRecord.id}:${Date.now()}`).digest('hex')}`;
 
     // Single-use claim: conditional update prevents concurrent OTP replay races
     const { data: claimedRow, error: claimErr } = await admin
@@ -127,7 +139,7 @@ export async function POST(req: NextRequest) {
         verified: true,
         verification_token: verificationToken,
       })
-      .eq('id', record.id)
+      .eq('id', matchedRecord.id)
       .eq('verified', false)
       .select('id')
       .maybeSingle();
@@ -138,6 +150,14 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Consume any other lingering unverified OTP rows for this email once verification succeeds
+    await admin
+      .from('auth_otps')
+      .update({ verified: true })
+      .eq('identifier', identifier)
+      .eq('verified', false)
+      .then(() => null, () => null);
 
     if (!createSession) {
       return NextResponse.json({

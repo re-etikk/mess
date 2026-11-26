@@ -35,14 +35,14 @@ describe('POST /api/auth/otp/verify', () => {
       select: () => otpSelect,
       eq: () => otpSelect,
       order: () => otpSelect,
-      limit: () => otpSelect,
-      maybeSingle: async () => ({ data: record, error: null }),
+      limit: async () => ({ data: [record], error: null }),
     };
     const otpUpdate = {
       update: () => otpUpdate,
       eq: () => otpUpdate,
       select: () => otpUpdate,
       maybeSingle: async () => ({ data: { id: record.id }, error: null }),
+      then: (resolve: (v: any) => void) => resolve({ error: null }),
     };
     const profileSelect = {
       select: () => profileSelect,
@@ -159,5 +159,34 @@ describe('POST /api/auth/otp/verify', () => {
     expect(body.user.id).toBe(existingUser.id);
     expect(listUsers).toHaveBeenCalledTimes(2);
     expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 with clean retry message if OTP database lookup errors', async () => {
+    const originalFrom = admin.from;
+    admin.from = (table: string) => {
+      if (table === 'auth_otps') {
+        const errSelect = {
+          select: () => errSelect,
+          eq: () => errSelect,
+          order: () => errSelect,
+          limit: async () => ({ data: null, error: { message: 'permission denied for table auth_otps' } }),
+        };
+        return { select: () => errSelect };
+      }
+      return originalFrom(table);
+    };
+
+    const request = new NextRequest('http://localhost/api/auth/otp/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'person@example.com', otp: '123456' }),
+    });
+
+    const response = await POST(request);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.success).toBe(false);
+    expect(body.error).not.toContain('permission denied');
   });
 });

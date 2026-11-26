@@ -6,6 +6,7 @@ import { requireProviderOwnership } from '@/lib/provider-auth';
 import { ensurePlanSlotsLinked } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 function displayClock(value: string) {
   const [hourText, minuteText] = value.split(':');
@@ -54,7 +55,8 @@ export async function GET(req: NextRequest) {
 
     if (slotsResult.error) throw slotsResult.error;
 
-    const timings = Object.fromEntries((slotsResult.data ?? []).map((slot) => [slot.name.toLowerCase(), {
+    const cleanSlots = (slotsResult.data ?? []).filter((s) => String(s.name || '').trim().toLowerCase() !== 'all');
+    const timings = Object.fromEntries(cleanSlots.map((slot) => [slot.name.toLowerCase(), {
       enabled: slot.active,
       start: displayClock(slot.starts_at_local),
       end: displayClock(slot.ends_at_local),
@@ -63,7 +65,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        slots: slotsResult.data ?? [],
+        slots: cleanSlots,
         operating_hours: hoursResult.data ?? [],
         timings,
       },
@@ -118,7 +120,7 @@ export async function POST(req: NextRequest) {
   let normalizedBody = body;
   if (body && typeof body === 'object' && !Array.isArray(body) && !('slots' in body)) {
     const legacy = body as Record<string, unknown>;
-    const meals = ['breakfast', 'lunch', 'dinner'];
+    const meals = ['breakfast', 'lunch', 'snacks', 'dinner'];
     if (meals.some((meal) => meal in legacy)) {
       const slots = meals.flatMap((meal) => {
         const value = legacy[meal];
@@ -127,8 +129,10 @@ export async function POST(req: NextRequest) {
         const isEnabled = timing.enabled !== false;
         const start = typeof timing.start === 'string' ? normalizeClock(timing.start) : null;
         const end = typeof timing.end === 'string' ? normalizeClock(timing.end) : null;
-        const fallbackStart = meal === 'breakfast' ? '07:30:00' : meal === 'dinner' ? '19:30:00' : '12:00:00';
-        const fallbackEnd = meal === 'breakfast' ? '10:00:00' : meal === 'dinner' ? '22:30:00' : '15:00:00';
+        const fallbackStart =
+          meal === 'breakfast' ? '07:30:00' : meal === 'snacks' ? '16:30:00' : meal === 'dinner' ? '19:30:00' : '12:00:00';
+        const fallbackEnd =
+          meal === 'breakfast' ? '10:00:00' : meal === 'snacks' ? '18:30:00' : meal === 'dinner' ? '22:30:00' : '15:30:00';
         return [{
           name: meal,
           starts_at_local: start || fallbackStart,
@@ -184,6 +188,7 @@ export async function POST(req: NextRequest) {
     // 1. Update/Upsert meal slots if provided
     if (input.slots && input.slots.length > 0) {
       for (const slot of input.slots) {
+        if (slot.name.trim().toLowerCase() === 'all') continue;
         if (slot.id) {
           const { error } = await db
             .from('meal_slots')
