@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 import { generateCounterQRToken, getIndiaDateString } from '@/lib/crypto';
 import { platformStore } from '@/lib/platform-service';
+import { getIstWeekday, isKitchenOpenFromRecord, isUndefinedColumnError } from '@/lib/kitchen-status';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
@@ -32,8 +33,9 @@ export async function GET(req: NextRequest) {
     const todayStart = new Date(`${today}T00:00:00+05:30`).toISOString();
     const tomorrow = new Date(new Date(todayStart).getTime() + 24 * 60 * 60 * 1000).toISOString();
 
-    const [{ data: provider }, { data: dbSlots }, subs, pendingSubs, plans, scans, revRes] = await Promise.all([
-      client.from('providers').select('id,display_name,status,timezone,locality,city').eq('id', providerId).maybeSingle(),
+    const todayWeekday = getIstWeekday(now);
+    const [provPrimary, { data: dbSlots }, subs, pendingSubs, plans, scans, revRes, { data: todayHour }] = await Promise.all([
+      client.from('providers').select('id,display_name,status,timezone,locality,city,is_accepting_orders').eq('id', providerId).maybeSingle(),
       client.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', providerId).eq('active', true),
       client.from('subscriptions').select('id,price_paid_paise,payment_mode', { count: 'exact' }).eq('provider_id', providerId).eq('status', 'active'),
       client.from('subscriptions').select('id,price_paid_paise,payment_mode').eq('provider_id', providerId).eq('status', 'pending_payment'),
@@ -49,7 +51,19 @@ export async function GET(req: NextRequest) {
         .select('rating')
         .eq('provider_id', providerId)
         .then((r) => r, () => ({ data: [] as any[] })),
+      client
+        .from('provider_operating_hours')
+        .select('closed')
+        .eq('provider_id', providerId)
+        .eq('weekday', todayWeekday)
+        .maybeSingle(),
     ]);
+
+    let provider: any = provPrimary.data;
+    if (isUndefinedColumnError(provPrimary.error, 'is_accepting_orders')) {
+      const fb = await client.from('providers').select('id,display_name,status,timezone,locality,city').eq('id', providerId).maybeSingle();
+      provider = fb.data;
+    }
 
     const slots = (dbSlots ?? []).filter((s: any) => String(s.name || '').trim().toLowerCase() !== 'all');
     const localTime = new Intl.DateTimeFormat('en-GB', {
@@ -108,7 +122,15 @@ export async function GET(req: NextRequest) {
         ? Math.round((reviews.reduce((a: number, r: any) => a + Number(r.rating || 0), 0) / reviews.length) * 10) / 10
         : null;
 
-    const manualOpen = platformStore.providerStatuses.get(providerId);
+    const isOpenToday = provider
+      ? isKitchenOpenFromRecord({
+          status: provider.status,
+          is_accepting_orders: provider.is_accepting_orders,
+          todayHours: todayHour,
+        })
+      : (platformStore.providerStatuses.get(providerId) ?? true);
+
+    platformStore.providerStatuses.set(providerId, isOpenToday);
 
     return NextResponse.json(
       {
@@ -120,7 +142,7 @@ export async function GET(req: NextRequest) {
           city: provider?.city || '',
           status: provider?.status || 'active',
         },
-        is_open_today: manualOpen !== undefined ? manualOpen : provider?.status === 'active',
+        is_open_today: isOpenToday,
         today_date: today,
         current_slot: current?.name || 'LUNCH',
         qr_token: qrToken,

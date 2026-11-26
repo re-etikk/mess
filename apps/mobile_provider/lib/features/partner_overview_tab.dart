@@ -84,19 +84,30 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
     }
   }
 
+  bool _togglingStatus = false;
+
   Future<void> _toggleStatus(bool nextOpen) async {
-    setState(() => _isOpenToday = nextOpen);
+    if (_togglingStatus) return;
+    final previous = _isOpenToday;
+    setState(() {
+      _togglingStatus = true;
+      _isOpenToday = nextOpen;
+    });
     try {
-      await ProviderApiService.toggleKitchenStatus(
+      final confirmed = await ProviderApiService.toggleKitchenStatus(
         providerId: widget.session.providerId,
         isOpen: nextOpen,
       );
       if (!mounted) return;
-      showPartnerNotice(context, nextOpen ? 'Kitchen marked Open for today' : 'Kitchen marked Closed for today');
+      setState(() => _isOpenToday = confirmed);
+      showPartnerNotice(context, confirmed ? 'Kitchen marked Open for today' : 'Kitchen marked Closed for today');
     } catch (e) {
       if (mounted) {
+        setState(() => _isOpenToday = previous);
         showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update status'), isError: true);
       }
+    } finally {
+      if (mounted) setState(() => _togglingStatus = false);
     }
   }
 

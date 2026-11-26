@@ -1015,10 +1015,27 @@ class ProviderApiService {
   static bool? staticKitchenStatus;
 
   static Future<bool> fetchKitchenStatus(String providerId) async {
-    // 1. Static in-memory priority (locked in session)
-    if (staticKitchenStatus != null) return staticKitchenStatus!;
+    // 1. Always query server first so status stays synced across DB and customer discovery
+    try {
+      final uri = Uri.parse('$baseUrl/api/provider/status?provider_id=${Uri.encodeComponent(providerId)}');
+      final response = await http
+          .get(uri, headers: {..._authHeaders(), 'Cache-Control': 'no-cache, no-store'})
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final isOpen = (data['is_open_today'] as bool?) ?? true;
+        staticKitchenStatus = isOpen;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('thali_kitchen_manual_status_$providerId', isOpen);
+          await prefs.setBool('thali_kitchen_open_$providerId', isOpen);
+        } catch (_) {}
+        return isOpen;
+      }
+    } catch (_) {}
 
-    // 2. Persistent SharedPreferences manual choice priority
+    // 2. Fallback to session/local cache only if network/server unavailable
+    if (staticKitchenStatus != null) return staticKitchenStatus!;
     try {
       final prefs = await SharedPreferences.getInstance();
       if (prefs.containsKey('thali_kitchen_manual_status_$providerId')) {
@@ -1033,19 +1050,6 @@ class ProviderApiService {
       }
     } catch (_) {}
 
-    // 3. Query server only if never manually chosen
-    try {
-      final uri = Uri.parse('$baseUrl/api/provider/status?provider_id=$providerId');
-      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 8));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final isOpen = (data['is_open_today'] as bool?) ?? true;
-        staticKitchenStatus = isOpen;
-        return isOpen;
-      }
-    } catch (_) {}
-
-    staticKitchenStatus = true;
     return true;
   }
 
@@ -1053,34 +1057,44 @@ class ProviderApiService {
     required String providerId,
     required bool isOpen,
   }) async {
-    // 1. Immediately lock statically in memory
-    staticKitchenStatus = isOpen;
+    final uri = Uri.parse('$baseUrl/api/provider/status');
+    final headers = _authHeaders(json: true);
+    final response = await http
+        .post(
+          uri,
+          headers: headers,
+          body: jsonEncode({
+            'provider_id': providerId,
+            'is_open': isOpen,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
 
-    // 2. Persist locally in SharedPreferences
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        friendlyError(
+          'status_failed',
+          statusCode: response.statusCode,
+          body: response.body,
+          action: 'update kitchen status',
+        ),
+      );
+    }
+
+    final data = jsonDecode(response.body);
+    if (data is Map && data['success'] == false) {
+      throw Exception(friendlyError(data['error'] ?? 'Unable to update kitchen status.', action: 'update kitchen status'));
+    }
+
+    final confirmedOpen = (data is Map && data['is_open_today'] is bool) ? (data['is_open_today'] as bool) : isOpen;
+    staticKitchenStatus = confirmedOpen;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('thali_kitchen_manual_status_$providerId', isOpen);
-      await prefs.setBool('thali_kitchen_open_$providerId', isOpen);
+      await prefs.setBool('thali_kitchen_manual_status_$providerId', confirmedOpen);
+      await prefs.setBool('thali_kitchen_open_$providerId', confirmedOpen);
     } catch (_) {}
 
-    // 3. Background server synchronization (never block or throw)
-    try {
-      final uri = Uri.parse('$baseUrl/api/provider/status');
-      final headers = {
-        'Content-Type': 'application/json',
-        if (currentSession?.token.isNotEmpty == true) 'Authorization': 'Bearer ${currentSession!.token}',
-      };
-      await http.post(
-        uri,
-        headers: headers,
-        body: jsonEncode({
-          'provider_id': providerId,
-          'is_open': isOpen,
-        }),
-      ).timeout(const Duration(seconds: 8));
-    } catch (_) {}
-
-    return true;
+    return confirmedOpen;
   }
 
   static Future<Map<String, dynamic>> fetchSettlements(String providerId) async {

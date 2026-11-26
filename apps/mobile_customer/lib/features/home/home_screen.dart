@@ -54,6 +54,9 @@ class _HomeScreenState extends State<HomeScreen> {
         final sKey = _selectedSlot!.toLowerCase();
         list = list.where((p) => p.mealSlots.any((m) => m.id.toLowerCase() == sKey && m.enabled)).toList();
       }
+      if (_openNowOnly) {
+        list = list.where((p) => p.isOpen).toList();
+      }
       if (!mounted) return;
       setState(() => _providers = list);
     } catch (e) {
@@ -491,37 +494,60 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
-                    height: 172,
+                    height: 176,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: _providers.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 10),
                       itemBuilder: (_, i) {
                         final p = _providers[i];
+                        final isClosed = !p.isOpen;
                         return SizedBox(
-                          width: 118,
+                          width: 120,
                           child: InkWell(
                             onTap: () => Navigator.push(context, messRoute(MessDetailScreen(provider: p))),
                             borderRadius: BorderRadius.circular(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                MessCoverVisual(
-                                  imageUrl: p.coverPath,
-                                  height: 106,
-                                  radius: 12,
-                                  caption: p.startingMealPrice != null ? 'Meals at ₹${p.startingMealPrice}' : null,
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  p.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
-                                ),
-                                const SizedBox(height: 4),
-                                RatingBadge(rating: p.rating, compact: true),
-                              ],
+                            child: Container(
+                              padding: isClosed ? const EdgeInsets.all(6) : EdgeInsets.zero,
+                              decoration: isClosed
+                                  ? BoxDecoration(
+                                      color: const Color(0xFF141416),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: const Color(0xFF27272A)),
+                                    )
+                                  : null,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  MessCoverVisual(
+                                    imageUrl: p.coverPath,
+                                    height: isClosed ? 96 : 106,
+                                    radius: 10,
+                                    closed: isClosed,
+                                    caption: p.startingMealPrice != null ? 'Meals at ₹${p.startingMealPrice}' : null,
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    p.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: isClosed ? Colors.white : ThaliColors.ink,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  isClosed
+                                      ? const Text(
+                                          'Closed today',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFA1A1AA)),
+                                        )
+                                      : RatingBadge(rating: p.rating, compact: true),
+                                ],
+                              ),
                             ),
                           ),
                         );
@@ -530,141 +556,177 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 18),
                   SectionHeader(
-                    title: 'Open now',
+                    title: _openNowOnly ? 'Open now' : 'Explore Messes',
                     actionLabel: 'See all',
                     onAction: () => Navigator.push(context, messRoute(const SearchScreen())),
                   ),
                   const SizedBox(height: 10),
                   for (final p in _providers)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: CardSurface(
-                        padding: const EdgeInsets.all(10),
-                        onTap: () => Navigator.push(context, messRoute(MessDetailScreen(provider: p))),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Stack(
-                              children: [
-                                MessCoverVisual(imageUrl: p.coverPath, height: 142, radius: 10),
-                                if (p.subscriberCount > 0)
-                                  Positioned(
-                                    top: 8,
-                                    left: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.94),
-                                        borderRadius: BorderRadius.circular(99),
-                                      ),
-                                      child: Text(
-                                        p.subscriberCount >= 99 ? '99+ subscribers' : '${p.subscriberCount} subscribers',
-                                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
-                                      ),
-                                    ),
-                                  ),
-                                Positioned(
-                                  top: 8,
-                                  right: 8,
-                                  child: InkWell(
-                                    onTap: () => setState(() {
-                                      if (_favorites.contains(p.id)) {
-                                        _favorites.remove(p.id);
-                                      } else {
-                                        _favorites.add(p.id);
-                                      }
-                                    }),
-                                    child: Container(
-                                      width: 32,
-                                      height: 32,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.94),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      alignment: Alignment.center,
-                                      child: Icon(
-                                        _favorites.contains(p.id) ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                                        size: 17,
-                                        color: _favorites.contains(p.id) ? ThaliColors.primary : ThaliColors.ink,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Row(
+                    Builder(
+                      builder: (_) {
+                        final isClosed = !p.isOpen;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: CardSurface(
+                            padding: const EdgeInsets.all(10),
+                            color: isClosed ? const Color(0xFF141416) : ThaliColors.card,
+                            borderColor: isClosed ? const Color(0xFF27272A) : null,
+                            onTap: () => Navigator.push(context, messRoute(MessDetailScreen(provider: p))),
+                            child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(p.name, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '${p.isOpen ? 'Open' : 'Closed'} · ${p.area.isNotEmpty ? p.area : p.city}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: p.isOpen ? ThaliColors.greenDark : ThaliColors.muted,
+                                Stack(
+                                  children: [
+                                    MessCoverVisual(
+                                      imageUrl: p.coverPath,
+                                      height: 142,
+                                      radius: 10,
+                                      closed: isClosed,
+                                    ),
+                                    if (p.subscriberCount > 0)
+                                      Positioned(
+                                        top: 8,
+                                        left: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: 0.94),
+                                            borderRadius: BorderRadius.circular(99),
+                                          ),
+                                          child: Text(
+                                            p.subscriberCount >= 99 ? '99+ subscribers' : '${p.subscriberCount} subscribers',
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+                                          ),
                                         ),
                                       ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        p.mealSlots.isEmpty
-                                            ? 'Daily Subscriptions'
-                                            : p.mealSlots.map((s) => s.name).join(' · '),
-                                        style: const TextStyle(fontSize: 12, color: ThaliColors.muted),
+                                    Positioned(
+                                      top: 8,
+                                      right: 8,
+                                      child: InkWell(
+                                        onTap: () => setState(() {
+                                          if (_favorites.contains(p.id)) {
+                                            _favorites.remove(p.id);
+                                          } else {
+                                            _favorites.add(p.id);
+                                          }
+                                        }),
+                                        child: Container(
+                                          width: 32,
+                                          height: 32,
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: 0.94),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Icon(
+                                            _favorites.contains(p.id) ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                                            size: 17,
+                                            color: _favorites.contains(p.id) ? ThaliColors.primary : ThaliColors.ink,
+                                          ),
+                                        ),
                                       ),
-                                      const SizedBox(height: 6),
-                                      Wrap(
-                                        spacing: 6,
-                                        runSpacing: 4,
-                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-                                            decoration: BoxDecoration(
-                                              color: p.supportsDelivery ? ThaliColors.primarySoft : ThaliColors.subtle,
-                                              borderRadius: BorderRadius.circular(6),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  p.supportsDelivery ? Icons.delivery_dining_rounded : Icons.storefront_outlined,
-                                                  size: 12,
-                                                  color: p.supportsDelivery ? ThaliColors.primary : ThaliColors.muted,
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  p.supportsDelivery ? 'Self Delivery' : 'Pickup / Dine-in',
-                                                  style: TextStyle(
-                                                    fontSize: 10.5,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: p.supportsDelivery ? ThaliColors.primary : ThaliColors.body,
-                                                  ),
-                                                ),
-                                              ],
+                                          Text(
+                                            p.name,
+                                            style: TextStyle(
+                                              fontSize: 15.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: isClosed ? Colors.white : ThaliColors.ink,
                                             ),
                                           ),
-                                          if (p.startingMealPrice != null)
-                                            Text(
-                                              'From ₹${p.startingMealPrice}/meal',
-                                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${p.isOpen ? 'Open' : 'Closed · Off Today'} · ${p.area.isNotEmpty ? p.area : p.city}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: isClosed ? const Color(0xFFE4E4E7) : ThaliColors.greenDark,
                                             ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            p.mealSlots.isEmpty
+                                                ? 'Daily Subscriptions'
+                                                : p.mealSlots.map((s) => s.name).join(' · '),
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isClosed ? const Color(0xFFA1A1AA) : ThaliColors.muted,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 4,
+                                            crossAxisAlignment: WrapCrossAlignment.center,
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                                decoration: BoxDecoration(
+                                                  color: isClosed
+                                                      ? const Color(0xFF27272A)
+                                                      : (p.supportsDelivery ? ThaliColors.primarySoft : ThaliColors.subtle),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      isClosed
+                                                          ? Icons.lock_outline_rounded
+                                                          : (p.supportsDelivery ? Icons.delivery_dining_rounded : Icons.storefront_outlined),
+                                                      size: 12,
+                                                      color: isClosed
+                                                          ? const Color(0xFFD4D4D8)
+                                                          : (p.supportsDelivery ? ThaliColors.primary : ThaliColors.muted),
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      isClosed
+                                                          ? 'Off Today'
+                                                          : (p.supportsDelivery ? 'Self Delivery' : 'Pickup / Dine-in'),
+                                                      style: TextStyle(
+                                                        fontSize: 10.5,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: isClosed
+                                                            ? const Color(0xFFE4E4E7)
+                                                            : (p.supportsDelivery ? ThaliColors.primary : ThaliColors.body),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              if (p.startingMealPrice != null)
+                                                Text(
+                                                  'From ₹${p.startingMealPrice}/meal',
+                                                  style: TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: isClosed ? Colors.white : ThaliColors.ink,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
                                         ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    RatingBadge(rating: p.rating),
+                                  ],
                                 ),
-                                RatingBadge(rating: p.rating),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      },
                     ),
                 ],
               ]),

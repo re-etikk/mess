@@ -3,6 +3,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient, noStoreFetch } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { platformStore } from '@/lib/platform-service';
+import { getIstWeekday, isKitchenOpenFromRecord, isUndefinedColumnError } from '@/lib/kitchen-status';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
@@ -44,17 +45,36 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   if (db) {
     try {
-      const { data: provider } = await db
+      const primaryProv = await db
         .from('providers')
-        .select('id,display_name,description,address_line1,locality,city,public_phone,public_email,cover_path,logo_path,supports_pickup,supports_delivery,status')
+        .select('id,display_name,description,address_line1,locality,city,public_phone,public_email,cover_path,logo_path,supports_pickup,supports_delivery,status,is_accepting_orders')
         .eq('id', providerId)
         .maybeSingle();
 
+      let provider: any = primaryProv.data;
+      if (isUndefinedColumnError(primaryProv.error, 'is_accepting_orders')) {
+        const fallbackProv = await db
+          .from('providers')
+          .select('id,display_name,description,address_line1,locality,city,public_phone,public_email,cover_path,logo_path,supports_pickup,supports_delivery,status')
+          .eq('id', providerId)
+          .maybeSingle();
+        provider = fallbackProv.data;
+      }
+
       if (provider) {
-        const [{ data: rawSlots }, { data: dbItems }] = await Promise.all([
+        const todayWeekday = getIstWeekday();
+        const [{ data: rawSlots }, { data: dbItems }, { data: todayHour }] = await Promise.all([
           db.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', provider.id).order('starts_at_local'),
           db.from('menu_items').select('id,name,description,category,dietary_type,price_paise,meal_slot_id,is_add_on,max_quantity,active,day_of_week,item_kind').eq('provider_id', provider.id).eq('active', true).order('name'),
+          db.from('provider_operating_hours').select('closed').eq('provider_id', provider.id).eq('weekday', todayWeekday).maybeSingle(),
         ]);
+
+        const isOpenToday = isKitchenOpenFromRecord({
+          status: provider.status,
+          is_accepting_orders: provider.is_accepting_orders,
+          todayHours: todayHour,
+        });
+        platformStore.providerStatuses.set(provider.id, isOpenToday);
 
         const slots = (rawSlots ?? [])
           .filter((s) => String(s.name || '').trim().toLowerCase() !== 'all')
@@ -66,6 +86,23 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           filteredItems = dayMatched;
         }
 
+        const providerPayload = {
+          id: provider.id,
+          name: provider.display_name,
+          address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
+          locality: provider.locality,
+          city: provider.city,
+          phone: provider.public_phone,
+          public_email: provider.public_email,
+          description: provider.description,
+          cover_path: provider.cover_path,
+          logo_path: provider.logo_path,
+          supports_pickup: provider.supports_pickup,
+          supports_delivery: provider.supports_delivery,
+          status: provider.status,
+          is_open_today: isOpenToday,
+        };
+
         if (slot && slots.length) {
           const targetSlot = slots.find((s) => s.name.toLowerCase() === slot.toLowerCase());
           const slotItems = targetSlot
@@ -75,20 +112,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           const extra = slotItems.filter((i: any) => i.is_add_on || Number(i.price_paise || 0) > 0);
           return NextResponse.json({
             success: true,
-            provider: {
-              id: provider.id,
-              name: provider.display_name,
-              address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
-              locality: provider.locality,
-              city: provider.city,
-              phone: provider.public_phone,
-              public_email: provider.public_email,
-              description: provider.description,
-              cover_path: provider.cover_path,
-              logo_path: provider.logo_path,
-              supports_pickup: provider.supports_pickup,
-              supports_delivery: provider.supports_delivery,
-            },
+            provider: providerPayload,
             slot: slot.toUpperCase(),
             meal_slot_id: targetSlot?.id ?? null,
             menu: {
@@ -138,20 +162,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         return NextResponse.json(
           {
             success: true,
-            provider: {
-              id: provider.id,
-              name: provider.display_name,
-              address: [provider.address_line1, provider.locality, provider.city].filter(Boolean).join(', '),
-              locality: provider.locality,
-              city: provider.city,
-              phone: provider.public_phone,
-              public_email: provider.public_email,
-              description: provider.description,
-              cover_path: provider.cover_path,
-              logo_path: provider.logo_path,
-              supports_pickup: provider.supports_pickup,
-              supports_delivery: provider.supports_delivery,
-            },
+            provider: providerPayload,
             day: dayFilter || 'Daily',
             timings,
             menus: groupedMenus,
@@ -167,9 +178,19 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   // Only check real persisted entries in platformStore (no fabricated menu items!)
   const keyDay = dayFilter || 'Daily';
   const storeProv = platformStore.providers.get(providerId);
+  const storeOpen = platformStore.providerStatuses.has(providerId)
+    ? platformStore.providerStatuses.get(providerId)!
+    : storeProv?.is_open_today !== false;
   const storeProviderObj = storeProv
-    ? { id: storeProv.id, name: storeProv.display_name, address: storeProv.address, phone: storeProv.phone }
-    : { id: providerId, name: 'Mess Partner' };
+    ? {
+        id: storeProv.id,
+        name: storeProv.display_name,
+        address: storeProv.address,
+        phone: storeProv.phone,
+        status: storeProv.status,
+        is_open_today: storeOpen,
+      }
+    : { id: providerId, name: 'Mess Partner', is_open_today: storeOpen };
 
   if (!slot) {
     const slotsToCheck = ['BREAKFAST', 'LUNCH', 'SNACKS', 'DINNER'];

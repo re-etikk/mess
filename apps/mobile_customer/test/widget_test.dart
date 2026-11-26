@@ -10,6 +10,10 @@ import 'package:mess_customer_app/core/widgets/mess_widgets.dart';
 import 'package:mess_customer_app/mess_app.dart';
 
 class _StubRepository extends HttpMessRepository {
+  _StubRepository({this.providers = const []});
+
+  final List<MessProvider> providers;
+
   @override
   Future<List<MessProvider>> getProviders({
     double? lat,
@@ -20,8 +24,9 @@ class _StubRepository extends HttpMessRepository {
     bool deliveryOnly = false,
     String? sort,
     String? dietary,
-  }) async =>
-      const [];
+  }) async {
+    return openNow ? providers.where((p) => p.isOpen).toList() : providers;
+  }
 
   @override
   Future<List<MessProvider>> searchProviders({
@@ -106,5 +111,69 @@ void main() {
     for (final s in statuses) {
       expect(find.text(s.$2), findsOneWidget);
     }
+  });
+
+  testWidgets('HomeScreen renders closed kitchens cleanly and Open now filter hides them', (tester) async {
+    final providers = [
+      const MessProvider(
+        id: 'p-open',
+        name: 'Sunny Thali House',
+        area: 'Sector 62',
+        city: 'Noida',
+        distanceMeters: 450,
+        description: 'Fresh home food',
+        mealSlots: [],
+        plans: [],
+        isOpen: true,
+      ),
+      const MessProvider(
+        id: 'p-closed',
+        name: 'Night Off Kitchen',
+        area: 'Sector 63',
+        city: 'Noida',
+        distanceMeters: 900,
+        description: 'Off today',
+        mealSlots: [],
+        plans: [],
+        isOpen: false,
+      ),
+    ];
+
+    final appState = AppState(repository: _StubRepository(providers: providers));
+    appState.signIn(
+      emailOrPhone: 'riya@example.com',
+      name: 'Riya',
+      userId: 'user-1',
+      locality: 'Sector 62',
+      city: 'Noida',
+    );
+
+    await tester.pumpWidget(MessApp(appState: appState));
+    await tester.pump(const Duration(milliseconds: 1250));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sunny Thali House'), findsAtLeastNWidgets(1));
+    expect(find.text('Night Off Kitchen'), findsAtLeastNWidgets(1));
+    expect(find.text('Closed today'), findsAtLeastNWidgets(1));
+
+    await tester.scrollUntilVisible(
+      find.text('CLOSED TODAY'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('CLOSED TODAY'), findsAtLeastNWidgets(1));
+
+    await tester.scrollUntilVisible(
+      find.text('Open now'),
+      -250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Open now').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sunny Thali House'), findsAtLeastNWidgets(1));
+    expect(find.text('Night Off Kitchen'), findsNothing);
+    expect(find.text('CLOSED TODAY'), findsNothing);
+    expect(find.text('Closed today'), findsNothing);
   });
 }

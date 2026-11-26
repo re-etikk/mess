@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getAdminClient, noStoreFetch } from '@/lib/supabase/admin';
 import { sanitizePostgrestSearch } from '@/lib/auth-session';
 import { platformStore } from '@/lib/platform-service';
+import { getIstWeekday, isKitchenOpenFromRecord, isUndefinedColumnError } from '@/lib/kitchen-status';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
@@ -67,31 +68,99 @@ export async function GET(req: NextRequest) {
     }
     supabase = supabase || getFallbackClient();
     if (!supabase) {
-      return NextResponse.json({ success: true, total: 0, providers: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
+      const storeProviders = Array.from(platformStore.providers.values())
+        .filter((p) => p.status === 'active')
+        .map((p) => {
+          const isOpen = platformStore.providerStatuses.has(p.id)
+            ? platformStore.providerStatuses.get(p.id)!
+            : p.is_open_today !== false;
+          return {
+            id: p.id,
+            display_name: p.display_name,
+            slug: p.id,
+            description: p.description || '',
+            locality: p.address || '',
+            city: '',
+            supports_pickup: (p as any).supports_pickup !== false,
+            supports_delivery: (p as any).supports_delivery === true,
+            status: p.status,
+            is_open_today: isOpen,
+            rating: null,
+            total_reviews: 0,
+            subscriber_count: 0,
+            distance_km: null,
+            dietary_types: [],
+            starting_meal_price: null,
+            plans: [],
+            menus: [],
+            timings: {},
+            meal_slots: [],
+          };
+        })
+        .filter((provider) => {
+          if (query) {
+            const q = query.toLowerCase();
+            if (
+              !provider.display_name.toLowerCase().includes(q) &&
+              !provider.description.toLowerCase().includes(q) &&
+              !provider.locality.toLowerCase().includes(q)
+            ) {
+              return false;
+            }
+          }
+          if (openNowOnly && !provider.is_open_today) return false;
+          if (deliveryOnly && !provider.supports_delivery) return false;
+          return true;
+        });
+
+      return NextResponse.json(
+        { success: true, total: storeProviders.length, providers: storeProviders },
+        { headers: { 'Cache-Control': 'private, no-store' } }
+      );
     }
 
-    let providersQuery = supabase
-      .from('providers')
-      .select(
-        'id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,address_line1,address_line2,locality,city,state,pincode,latitude,longitude,supports_pickup,supports_delivery,status,created_at'
-      )
-      .eq('status', 'active')
-      .order('display_name');
-
-    if (city) {
-      const safeCity = sanitizePostgrestSearch(city);
-      if (safeCity) {
-        providersQuery = providersQuery.ilike('city', `%${safeCity}%`);
+    const applySearchFilters = (q: any) => {
+      if (city) {
+        const safeCity = sanitizePostgrestSearch(city);
+        if (safeCity) {
+          q = q.ilike('city', `%${safeCity}%`);
+        }
       }
-    }
-    if (area) {
-      const esc = sanitizePostgrestSearch(area);
-      if (esc) {
-        providersQuery = providersQuery.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%,address_line1.ilike.%${esc}%`);
+      if (area) {
+        const esc = sanitizePostgrestSearch(area);
+        if (esc) {
+          q = q.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%,address_line1.ilike.%${esc}%`);
+        }
       }
-    }
+      return q;
+    };
 
-    const { data: dbProviders, error: providersError } = await providersQuery.limit(200);
+    const primaryRes = await applySearchFilters(
+      supabase
+        .from('providers')
+        .select(
+          'id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,address_line1,address_line2,locality,city,state,pincode,latitude,longitude,supports_pickup,supports_delivery,status,is_accepting_orders,created_at'
+        )
+        .eq('status', 'active')
+        .order('display_name')
+    ).limit(200);
+
+    let dbProviders: any[] | null = primaryRes.data as any[] | null;
+    let providersError = primaryRes.error;
+
+    if (isUndefinedColumnError(providersError, 'is_accepting_orders')) {
+      const fallbackRes = await applySearchFilters(
+        supabase
+          .from('providers')
+          .select(
+            'id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,address_line1,address_line2,locality,city,state,pincode,latitude,longitude,supports_pickup,supports_delivery,status,created_at'
+          )
+          .eq('status', 'active')
+          .order('display_name')
+      ).limit(200);
+      dbProviders = fallbackRes.data as any[] | null;
+      providersError = fallbackRes.error;
+    }
     if (providersError) throw providersError;
 
     const allProviders = dbProviders ?? [];
@@ -117,8 +186,7 @@ export async function GET(req: NextRequest) {
     const allReviews = (reviewsRes as any)?.data ?? [];
     const allSubs = (subsRes as any)?.data ?? [];
 
-    const nowWeekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(new Date());
-    const todayWeekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(nowWeekdayName);
+    const todayWeekday = getIstWeekday();
 
     let results = allProviders
       .map((provider: any) => {
@@ -213,10 +281,14 @@ export async function GET(req: NextRequest) {
             ? haversineKm(userLat!, userLng!, pLat, pLng)
             : null;
 
-        // Real open today flag
+        // Authoritative open today flag directly from Postgres state
         const todayHour = pHours.find((h: any) => Number(h.weekday) === todayWeekday);
-        const manualOpen = platformStore.providerStatuses.get(pId);
-        const isOpenToday = manualOpen !== undefined ? manualOpen : Boolean(!todayHour || !todayHour.closed);
+        const isOpenToday = isKitchenOpenFromRecord({
+          status: provider.status,
+          is_accepting_orders: provider.is_accepting_orders,
+          todayHours: todayHour,
+        });
+        platformStore.providerStatuses.set(pId, isOpenToday);
 
         // Real dietary types from active menu items
         const dietarySet = new Set<string>();

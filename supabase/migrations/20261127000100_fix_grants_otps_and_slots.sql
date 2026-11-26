@@ -12,8 +12,13 @@ alter default privileges in schema public grant all privileges on tables to serv
 alter default privileges in schema public grant all privileges on sequences to service_role;
 alter default privileges in schema public grant all privileges on routines to service_role;
 
+-- Ensure live kitchen open/closed column exists on providers
+alter table public.providers
+  add column if not exists is_accepting_orders boolean not null default true;
+
 -- Public read access for diner discovery catalog
 grant select on table
+  public.providers,
   public.meal_slots,
   public.menu_items,
   public.subscription_plans,

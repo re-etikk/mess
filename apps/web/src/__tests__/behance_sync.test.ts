@@ -4,6 +4,9 @@ import { POST as mealsPost, GET as mealsGet } from '../app/api/customer/meals/ro
 import { POST as managePost, GET as manageGet } from '../app/api/subscription/manage/route';
 import { POST as queuePost, GET as queueGet } from '../app/api/provider/kitchen-queue/route';
 import { GET as reviewsGet, POST as reviewsPost } from '../app/api/mess/reviews/route';
+import { GET as statusGet, POST as statusPost } from '../app/api/provider/status/route';
+import { GET as messSearchGet } from '../app/api/mess/search/route';
+import { isKitchenOpenFromRecord } from '../lib/kitchen-status';
 import { NextRequest } from 'next/server';
 
 describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
@@ -198,5 +201,58 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
     expect(parsed.dietary).toBe('veg');
     expect(parsed.delivery_only).toBe(true);
     expect(parsed.max_monthly_inr).toBe(2500);
+  });
+
+  it('excludes kitchens marked closed today from /api/mess/search?open_now=true', async () => {
+    expect(isKitchenOpenFromRecord({ status: 'active', is_accepting_orders: false, todayHours: null })).toBe(false);
+    expect(isKitchenOpenFromRecord({ status: 'active', is_accepting_orders: true, todayHours: { closed: true } })).toBe(false);
+    expect(isKitchenOpenFromRecord({ status: 'active', is_accepting_orders: true, todayHours: { closed: false } })).toBe(true);
+
+    platformStore.providerStatuses.clear();
+    platformStore.providers.set('prov-open-1', {
+      id: 'prov-open-1',
+      display_name: 'Open Spice Kitchen',
+      phone: '9800000001',
+      address: 'Sector 62',
+      status: 'active',
+      is_open_today: true,
+    });
+    platformStore.providers.set('prov-closed-1', {
+      id: 'prov-closed-1',
+      display_name: 'Closed Home Tiffin',
+      phone: '9800000002',
+      address: 'Sector 63',
+      status: 'active',
+      is_open_today: true,
+    });
+
+    process.env.ADMIN_SECRET_KEY = 'test-admin-secret';
+    const closeRes = await statusPost(
+      new NextRequest('https://www.thali.store/api/provider/status', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-admin-secret' },
+        body: JSON.stringify({ provider_id: 'prov-closed-1', is_open: false }),
+      })
+    );
+    expect(closeRes.status).toBe(200);
+    expect((await closeRes.json()).is_open_today).toBe(false);
+
+    const statusJson = await (
+      await statusGet(new NextRequest('https://www.thali.store/api/provider/status?provider_id=prov-closed-1'))
+    ).json();
+    expect(statusJson.is_open_today).toBe(false);
+
+    const allJson = await (
+      await messSearchGet(new NextRequest('https://www.thali.store/api/mess/search'))
+    ).json();
+    const closedEntry = allJson.providers.find((p: any) => p.id === 'prov-closed-1');
+    expect(closedEntry).toBeDefined();
+    expect(closedEntry.is_open_today).toBe(false);
+
+    const openOnlyJson = await (
+      await messSearchGet(new NextRequest('https://www.thali.store/api/mess/search?open_now=true'))
+    ).json();
+    expect(openOnlyJson.providers.some((p: any) => p.id === 'prov-open-1')).toBe(true);
+    expect(openOnlyJson.providers.some((p: any) => p.id === 'prov-closed-1')).toBe(false);
   });
 });

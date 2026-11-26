@@ -81,9 +81,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
           var list = await appState.getProviders(
             slot: slot.isNotEmpty ? slot.toUpperCase() : null,
+            openNow: filters['open_now'] == true,
             deliveryOnly: deliveryOnly,
             dietary: apiDietary,
           );
+          if (filters['open_now'] == true) {
+            list = list.where((p) => p.isOpen).toList();
+          }
 
           if (keywords.isNotEmpty) {
             final kwLower = keywords.toLowerCase();
@@ -299,49 +303,73 @@ class _SearchScreenState extends State<SearchScreen> {
                                     crossAxisCount: 2,
                                     mainAxisSpacing: 12,
                                     crossAxisSpacing: 12,
-                                    childAspectRatio: 0.85,
+                                    childAspectRatio: 0.78,
                                   ),
                                   itemCount: _results.length,
                                   itemBuilder: (_, i) {
                                     final p = _results[i];
+                                    final isClosed = !p.isOpen;
                                     return InkWell(
+                                      borderRadius: BorderRadius.circular(14),
                                       onTap: () {
                                         if (_controller.text.trim().isNotEmpty) {
                                           appState.recordRecentSearch(_controller.text.trim());
                                         }
                                         Navigator.push(context, messRoute(MessDetailScreen(provider: p)));
                                       },
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          MessCoverVisual(
-                                            imageUrl: p.coverPath,
-                                            height: 108,
-                                            radius: 12,
-                                            caption: p.startingMealPrice != null ? '₹${p.startingMealPrice}/meal' : null,
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
-                                          const SizedBox(height: 3),
-                                          Row(
-                                            children: [
-                                              RatingBadge(rating: p.rating, compact: true),
-                                              const SizedBox(width: 6),
-                                              Expanded(
-                                                child: Text(
-                                                  p.supportsDelivery ? 'Self Delivery' : 'Pickup',
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    fontSize: 10.5,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: p.supportsDelivery ? ThaliColors.primary : ThaliColors.muted,
+                                      child: Container(
+                                        padding: isClosed ? const EdgeInsets.all(6) : EdgeInsets.zero,
+                                        decoration: isClosed
+                                            ? BoxDecoration(
+                                                color: const Color(0xFF141416),
+                                                borderRadius: BorderRadius.circular(14),
+                                                border: Border.all(color: const Color(0xFF27272A)),
+                                              )
+                                            : null,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            MessCoverVisual(
+                                              imageUrl: p.coverPath,
+                                              height: isClosed ? 100 : 108,
+                                              radius: 10,
+                                              closed: isClosed,
+                                              caption: p.startingMealPrice != null ? '₹${p.startingMealPrice}/meal' : null,
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              p.name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 13.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: isClosed ? Colors.white : ThaliColors.ink,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Row(
+                                              children: [
+                                                RatingBadge(rating: p.rating, compact: true),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Text(
+                                                    isClosed ? 'Closed Today' : (p.supportsDelivery ? 'Self Delivery' : 'Pickup'),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: isClosed
+                                                          ? const Color(0xFFE4E4E7)
+                                                          : (p.supportsDelivery ? ThaliColors.primary : ThaliColors.muted),
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
+                                              ],
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     );
                                   },

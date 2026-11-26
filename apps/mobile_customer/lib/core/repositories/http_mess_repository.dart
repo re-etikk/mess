@@ -80,6 +80,9 @@ class HttpMessRepository implements MessRepository {
         final sLower = slot.trim().toLowerCase();
         providers = providers.where((p) => p.mealSlots.any((m) => m.id.toLowerCase() == sLower && m.enabled)).toList();
       }
+      if (openNow) {
+        providers = providers.where((p) => p.isOpen).toList();
+      }
       if (qp.isEmpty) _cachedProviders = providers;
       return providers;
     }
@@ -201,6 +204,7 @@ class HttpMessRepository implements MessRepository {
       bool updatedPickup = base.supportsPickup;
       bool updatedDelivery = base.supportsDelivery;
       bool updatedTakeaway = base.allowsTakeaway;
+      bool updatedIsOpen = base.isOpen;
 
       if (results[0].statusCode == 200) {
         final menuData = jsonDecode(results[0].body);
@@ -216,6 +220,11 @@ class HttpMessRepository implements MessRepository {
             if (provMeta.containsKey('supports_pickup')) updatedPickup = provMeta['supports_pickup'] != false;
             if (provMeta.containsKey('supports_delivery')) updatedDelivery = provMeta['supports_delivery'] == true;
             if (provMeta.containsKey('allows_takeaway')) updatedTakeaway = provMeta['allows_takeaway'] != false;
+            if (provMeta.containsKey('status') || provMeta.containsKey('is_open_today')) {
+              final st = provMeta['status']?.toString();
+              final statusActive = st == null || st == 'active';
+              updatedIsOpen = statusActive && provMeta['is_open_today'] != false;
+            }
           }
           if (menuData['menus'] is List) {
             final rawMenus = menuData['menus'] as List;
@@ -238,7 +247,7 @@ class HttpMessRepository implements MessRepository {
         description: updatedDesc,
         mealSlots: updatedSlots,
         plans: updatedPlans,
-        isOpen: base.isOpen,
+        isOpen: updatedIsOpen,
         address: base.address,
         publicPhone: base.publicPhone,
         coverPath: updatedCover,
@@ -1079,7 +1088,7 @@ class HttpMessRepository implements MessRepository {
     final distKm = (json['distance_km'] as num?)?.toDouble();
     final distanceMeters = distKm != null ? (distKm * 1000).round() : 0;
     final description = json['description']?.toString() ?? '';
-    final isOpen = json['status']?.toString() == 'active' && json['is_open_today'] != false;
+    final isOpen = (json['status'] == null || json['status']?.toString() == 'active') && json['is_open_today'] != false;
 
     final rawPlans = json['plans'] as List<dynamic>? ?? [];
     final plans = rawPlans.map((p) {

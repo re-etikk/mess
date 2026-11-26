@@ -319,7 +319,12 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
                   child: Column(
                     children: [
-                      MessCoverVisual(imageUrl: _provider.coverPath, height: 155, radius: 14),
+                      MessCoverVisual(
+                        imageUrl: _provider.coverPath,
+                        height: 155,
+                        radius: 14,
+                        closed: !_provider.isOpen,
+                      ),
                       const SizedBox(height: 12),
                       Text(_provider.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
                       const SizedBox(height: 3),
@@ -357,6 +362,30 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
                           ),
                         ],
                       ),
+                      if (!_provider.isOpen) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF141416),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF27272A)),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.lock_outline_rounded, size: 17, color: Colors.white),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Kitchen is closed today',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
