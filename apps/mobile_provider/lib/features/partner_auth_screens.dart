@@ -422,6 +422,8 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
   final _passwordCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
+  final _stateCtrl = TextEditingController();
+  final _pincodeCtrl = TextEditingController();
 
   int _step = 0;
   bool _submitting = false;
@@ -436,14 +438,16 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
     _passwordCtrl.dispose();
     _addressCtrl.dispose();
     _cityCtrl.dispose();
+    _stateCtrl.dispose();
+    _pincodeCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     final email = _emailCtrl.text.trim();
     final pass = _passwordCtrl.text.trim();
-    if (!email.contains('@') || pass.length < 6) {
-      showPartnerNotice(context, 'Enter a valid email and at least 6 characters password.', isError: true);
+    if (!email.contains('@') || pass.length < 8) {
+      showPartnerNotice(context, 'Enter a valid email and at least 8 characters password.', isError: true);
       return;
     }
     setState(() => _submitting = true);
@@ -456,6 +460,8 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
         password: pass,
         address: _addressCtrl.text.trim(),
         city: _cityCtrl.text.trim(),
+        state: _stateCtrl.text.trim(),
+        pincode: _pincodeCtrl.text.trim(),
         supportsDelivery: _supportsDelivery,
       );
       if (!mounted) return;
@@ -502,6 +508,21 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
                   TextField(controller: _addressCtrl, decoration: const InputDecoration(labelText: 'Locality / Street Address')),
                   const SizedBox(height: 12),
                   TextField(controller: _cityCtrl, decoration: const InputDecoration(labelText: 'City')),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(child: TextField(controller: _stateCtrl, decoration: const InputDecoration(labelText: 'State'))),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: _pincodeCtrl,
+                          keyboardType: TextInputType.number,
+                          maxLength: 6,
+                          decoration: const InputDecoration(labelText: 'PIN Code', counterText: ''),
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 14),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -569,7 +590,7 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
                   TextField(
                     controller: _passwordCtrl,
                     obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Password (min 6 characters)'),
+                    decoration: const InputDecoration(labelText: 'Password (min 8 characters)'),
                   ),
                   const SizedBox(height: 18),
                   Row(

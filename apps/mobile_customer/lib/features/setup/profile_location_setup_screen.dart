@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
+import '../../mess_app.dart';
 
 /// Complete your profile (Step 1) -> Location Search (Step 2) -> Confirm Pin Map (Step 3).
 class ProfileLocationSetupScreen extends StatefulWidget {
@@ -93,6 +94,12 @@ class _ProfileLocationSetupScreenState extends State<ProfileLocationSetupScreen>
           lat: _lat,
           lng: _lng,
         );
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            messRoute(const MessRootGate()),
+            (route) => false,
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { getClientIp, signSessionToken } from '@/lib/auth-session';
+import { checkRateLimit } from '@/lib/rate-limiter';
 
 export async function POST(req: NextRequest) {
   let body: { email?: string; password?: string; role?: string; name?: string; display_name?: string; phone?: string };
@@ -8,6 +10,11 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body.' }, { status: 400 });
+  }
+
+  const rl = checkRateLimit(`register:${getClientIp(req)}`, 8, 15 * 60 * 1000);
+  if (!rl.isAllowed) {
+    return NextResponse.json({ success: false, error: 'Too many registration attempts. Please try later.' }, { status: 429 });
   }
 
   const email = body.email?.trim().toLowerCase();
@@ -38,7 +45,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'An account with this email may already exist. Please sign in or recover access.' }, { status: 409 });
     }
 
-    const { error: profileError } = await admin.from('profiles').insert({ id: data.user.id, display_name: name, phone_e164: phone });
+    const { error: profileError } = await admin
+      .from('profiles')
+      .insert({ id: data.user.id, display_name: name, email, phone_e164: phone });
     const { data: existingRole, error: existingRoleError } = await admin.from('user_roles')
       .select('id,revoked_at').eq('user_id', data.user.id).eq('role', 'customer').maybeSingle();
     const roleResult = existingRoleError
@@ -53,11 +62,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Account was created but profile setup failed. Contact support before retrying.' }, { status: 503 });
     }
 
+    const token =
+      data.session?.access_token ||
+      signSessionToken({
+        userId: data.user.id,
+        email: data.user.email || email,
+        role: 'customer',
+        name,
+      });
+
     return NextResponse.json({
       success: true,
       user: { id: data.user.id, email: data.user.email, name, role: 'customer', phone },
-      session_created: Boolean(data.session),
-      message: data.session ? 'Registration successful.' : 'Check your email to confirm your account before signing in.',
+      token,
+      refresh_token: data.session?.refresh_token || '',
+      session_created: true,
+      message: data.session ? 'Registration successful.' : 'Account created and signed in.',
     }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Registration is unavailable.';

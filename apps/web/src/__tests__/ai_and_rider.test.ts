@@ -133,9 +133,23 @@ describe('Phase 1 AI/ML Engine & Mess Rider Workflows', () => {
     ).json();
     expect(getRiders.riders.length).toBe(1);
 
+    const { POST: riderOrdersPost } = await import('../app/api/rider/orders/route');
+    const loginRes = await (
+      await riderOrdersPost(
+        new NextRequest('https://www.thali.store/api/rider/orders', {
+          method: 'POST',
+          body: JSON.stringify({ action: 'login', phone: '9988776655', pin: '4321' }),
+        })
+      )
+    ).json();
+    expect(loginRes.success).toBe(true);
+    expect(loginRes.rider_token).toMatch(/^thali_rider_/);
+
     const ordersRes = await (
       await riderOrdersGet(
-        new NextRequest('https://www.thali.store/api/rider/orders?phone=9988776655&pin=4321&slot=LUNCH')
+        new NextRequest('https://www.thali.store/api/rider/orders?slot=LUNCH', {
+          headers: { Authorization: `Bearer ${loginRes.rider_token}` },
+        })
       )
     ).json();
     expect(ordersRes.success).toBe(true);

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 
 interface MenuDish {
+  id?: string;
   name: string;
   isExtra: boolean;
   price: number;
@@ -282,14 +283,33 @@ export default function ProviderPortal() {
     loadPaymentSettings(providerId);
     setLoadingData(true);
     try {
-      const [subsRes, redRes, ordRes, statusRes, plansRes, slotsRes] = await Promise.all([
+      const [subsRes, redRes, ordRes, statusRes, plansRes, slotsRes, menuRes] = await Promise.all([
         fetch(`/api/provider/subscriptions?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/redemptions?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/orders?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/status?provider_id=${providerId}`).catch(() => null),
         fetch(`/api/provider/plans?provider_id=${providerId}`, { cache: 'no-store' }).catch(() => null),
         fetch(`/api/provider/timings?provider_id=${providerId}`, { cache: 'no-store' }).catch(() => null),
+        fetch(`/api/provider/menu?provider_id=${providerId}`, { cache: 'no-store' }).catch(() => null),
       ]);
+      if (menuRes?.ok) {
+        const md = await menuRes.json().catch(() => ({}));
+        const loaded: MenuDish[] = [];
+        for (const m of md.menus || []) {
+          const slotName = String(m.slot || 'lunch').toLowerCase();
+          for (const item of m.items || []) {
+            loaded.push({
+              id: item.id,
+              name: item.name,
+              isExtra: Boolean(item.is_add_on),
+              price: Number(item.price_paise || 0) / 100,
+              available: item.active !== false,
+              slot: slotName,
+            });
+          }
+        }
+        if (loaded.length > 0) setDishes(loaded);
+      }
       if (statusRes?.ok) {
         const sData = await statusRes.json().catch(() => ({}));
         if (typeof sData.is_open_today === 'boolean') {
@@ -628,23 +648,78 @@ export default function ProviderPortal() {
     }
   }
 
-  function addDish() {
+  async function addDish() {
     if (!newDishName.trim()) return;
+    const dishName = newDishName.trim();
+    const isExtra = newDishIsExtra;
+    const price = isExtra ? Number(newDishPrice) || 30 : 0;
+    const slot = newDishSlot;
     setDishes([
       ...dishes,
       {
-        name: newDishName.trim(),
-        isExtra: newDishIsExtra,
-        price: newDishIsExtra ? Number(newDishPrice) || 30 : 0,
+        name: dishName,
+        isExtra,
+        price,
         available: true,
-        slot: newDishSlot,
+        slot,
       },
     ]);
     setNewDishName('');
+    if (session?.providerId) {
+      await fetch('/api/provider/menu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: session.providerId,
+          action: 'add_item',
+          name: dishName,
+          slot,
+          is_extra: isExtra,
+          price,
+        }),
+      }).catch(() => null);
+    }
   }
 
-  function removeDish(index: number) {
+  async function removeDish(index: number) {
+    const target = dishes[index];
     setDishes(dishes.filter((_, i) => i !== index));
+    if (session?.providerId && target) {
+      await fetch('/api/provider/menu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: session.providerId,
+          action: 'remove_item',
+          item_id: target.id,
+          name: target.name,
+          slot: target.slot,
+        }),
+      }).catch(() => null);
+    }
+  }
+
+  async function toggleDishAvailability(index: number) {
+    const target = dishes[index];
+    if (!target) return;
+    const nextAvail = !target.available;
+    const updated = [...dishes];
+    updated[index] = { ...target, available: nextAvail };
+    setDishes(updated);
+    if (session?.providerId) {
+      await fetch('/api/provider/menu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: session.providerId,
+          action: 'toggle_availability',
+          item_id: target.id,
+          name: target.name,
+          slot: target.slot,
+          is_available: nextAvail,
+        }),
+      }).catch(() => null);
+    }
   }
 
   async function recordCounterOrder() {
@@ -1157,11 +1232,7 @@ export default function ProviderPortal() {
                     <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          const updated = [...dishes];
-                          updated[idx].available = !updated[idx].available;
-                          setDishes(updated);
-                        }}
+                        onClick={() => toggleDishAvailability(idx)}
                         className={`rounded-full px-2.5 py-1 text-xs font-bold transition ${
                           dish.available ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
                         }`}

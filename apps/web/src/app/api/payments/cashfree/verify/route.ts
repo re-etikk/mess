@@ -5,6 +5,7 @@ import {
   getCashfreeConfig,
 } from '@/lib/cashfree';
 import { fulfillCashfreePaidOrder } from '@/lib/cashfree-fulfillment';
+import { requireCustomerIdentity } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +67,11 @@ export async function POST(req: NextRequest) {
       orderTags: cfOrder.order_tags,
     });
 
+    const auth = await requireCustomerIdentity(req);
+    const subId = (result.subscription as any)?.id;
+    const subCustId = (result.subscription as any)?.customer_id || cfOrder.order_tags?.cust_id;
+    const canViewDetails = auth.ok && (auth.isAdmin || !subCustId || auth.userId === subCustId);
+
     return NextResponse.json({
       success: true,
       verified: true,
@@ -74,7 +80,7 @@ export async function POST(req: NextRequest) {
       cf_payment_id: cfPaymentId || null,
       amount_inr: result.amountInr,
       purpose: result.purpose,
-      subscription: result.subscription || null,
+      subscription: canViewDetails ? (result.subscription || null) : subId ? { id: subId, status: 'active' } : null,
       already_processed: result.alreadyProcessed,
       message: 'Payment verified and pass activated!',
     });

@@ -21,6 +21,7 @@ interface RiderOrder {
 export default function RiderPortalPage() {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
+  const [riderToken, setRiderToken] = useState('');
   const [loggedIn, setLoggedIn] = useState(false);
   const [riderName, setRiderName] = useState('');
   const [providerName, setProviderName] = useState('');
@@ -35,26 +36,20 @@ export default function RiderPortalPage() {
   const gpsWatchRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const hr = new Date().getHours();
+    const initialSlot: 'BREAKFAST' | 'LUNCH' | 'DINNER' =
+      hr < 11 ? 'BREAKFAST' : hr < 16 ? 'LUNCH' : 'DINNER';
+    setSlot(initialSlot);
+
     const urlParams = new URLSearchParams(window.location.search);
     const qPhone = urlParams.get('phone');
-    const saved = localStorage.getItem('thali_rider_auth');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.phone && parsed.pin) {
-          setPhone(parsed.phone);
-          setPin(parsed.pin);
-          setLoggedIn(true);
-          loadOrders(parsed.phone, parsed.pin, slot);
-          return;
-        }
-      } catch {}
-    }
     if (qPhone) setPhone(qPhone);
-    const hr = new Date().getHours();
-    if (hr < 11) setSlot('BREAKFAST');
-    else if (hr < 16) setSlot('LUNCH');
-    else setSlot('DINNER');
+
+    const savedToken = localStorage.getItem('thali_rider_token');
+    if (savedToken) {
+      setRiderToken(savedToken);
+      loadOrders(savedToken, initialSlot);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -66,25 +61,29 @@ export default function RiderPortalPage() {
     };
   }, []);
 
-  async function loadOrders(p: string, k: string, activeSlot: string) {
+  async function loadOrders(token: string, activeSlot: string) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/rider/orders?phone=${encodeURIComponent(p)}&pin=${encodeURIComponent(k)}&slot=${activeSlot}`,
-        { cache: 'no-store' }
-      );
+      const res = await fetch(`/api/rider/orders?slot=${encodeURIComponent(activeSlot)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
       const data = await res.json();
       if (!res.ok || !data.success) {
+        if (res.status === 401) {
+          localStorage.removeItem('thali_rider_token');
+          setRiderToken('');
+          setLoggedIn(false);
+        }
         throw new Error(data.error || 'Unable to load deliveries.');
       }
       setRiderName(data.rider?.name || 'Delivery Staff');
       setProviderName(data.provider?.display_name || 'Mess Kitchen');
       setOrders(Array.isArray(data.orders) ? data.orders : []);
       setLoggedIn(true);
-      localStorage.setItem('thali_rider_auth', JSON.stringify({ phone: p, pin: k }));
     } catch (e: any) {
-      setError(e?.message || 'Unable to sign in.');
+      setError(e?.message || 'Unable to load deliveries.');
       if (!loggedIn) setOrders([]);
     } finally {
       setLoading(false);
@@ -93,7 +92,26 @@ export default function RiderPortalPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    await loadOrders(phone.trim(), pin.trim(), slot);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/rider/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', phone: phone.trim(), pin: pin.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.rider_token) {
+        throw new Error(data.error || 'Invalid mobile number or 4-digit staff PIN.');
+      }
+      localStorage.setItem('thali_rider_token', data.rider_token);
+      setRiderToken(data.rider_token);
+      setPin('');
+      await loadOrders(data.rider_token, slot);
+    } catch (e: any) {
+      setError(e?.message || 'Unable to sign in.');
+      setLoading(false);
+    }
   }
 
   async function updateOrder(order: RiderOrder, nextStatus: 'out_for_delivery' | 'delivered') {
@@ -102,11 +120,12 @@ export default function RiderPortalPage() {
     try {
       const res = await fetch('/api/rider/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${riderToken}`,
+        },
         body: JSON.stringify({
           action: 'update_status',
-          phone,
-          pin,
           subscription_id: order.subscription_id,
           customer_id: order.customer_id,
           service_date: order.service_date,
@@ -118,7 +137,7 @@ export default function RiderPortalPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Status update failed.');
-      await loadOrders(phone, pin, slot);
+      await loadOrders(riderToken, slot);
     } catch (e: any) {
       setError(e?.message || 'Could not update status.');
     } finally {
@@ -151,8 +170,11 @@ export default function RiderPortalPage() {
         try {
           await fetch('/api/rider/orders', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'location_ping', phone, pin, lat, lng }),
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${riderToken}`,
+            },
+            body: JSON.stringify({ action: 'location_ping', lat, lng }),
           });
         } catch {}
       },
@@ -165,11 +187,13 @@ export default function RiderPortalPage() {
   }
 
   function logout() {
+    localStorage.removeItem('thali_rider_token');
     localStorage.removeItem('thali_rider_auth');
     if (gpsWatchRef.current !== null && navigator.geolocation) {
       navigator.geolocation.clearWatch(gpsWatchRef.current);
     }
     setLoggedIn(false);
+    setRiderToken('');
     setOrders([]);
     setPin('');
   }
@@ -245,7 +269,7 @@ export default function RiderPortalPage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => loadOrders(phone, pin, slot)}
+              onClick={() => loadOrders(riderToken, slot)}
               className="p-2 rounded-full bg-white/15 hover:bg-white/25"
               title="Refresh"
             >
@@ -284,7 +308,7 @@ export default function RiderPortalPage() {
               key={s}
               onClick={() => {
                 setSlot(s);
-                loadOrders(phone, pin, s);
+                loadOrders(riderToken, s);
               }}
               className={`py-2 rounded-xl text-xs font-bold border transition ${
                 slot === s

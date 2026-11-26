@@ -17,6 +17,16 @@ function buildShareLink(name: string, phone10: string, pin: string, providerName
   };
 }
 
+function buildInviteLinkWithoutPin(name: string, phone10: string, providerName: string) {
+  const base = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.thali.store').replace(/\/$/, '');
+  const riderUrl = `${base}/rider/portal?phone=${phone10}`;
+  const msg = `Namaste ${name}! Open ${providerName} delivery link: ${riderUrl} and sign in with your mobile ${phone10} and staff PIN.`;
+  return {
+    rider_url: riderUrl,
+    whatsapp_url: `https://wa.me/91${phone10}?text=${encodeURIComponent(msg)}`,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const providerId = new URL(req.url).searchParams.get('provider_id')?.trim() || '';
   if (!providerId) {
@@ -24,7 +34,7 @@ export async function GET(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -38,7 +48,7 @@ export async function GET(req: NextRequest) {
         admin.from('providers').select('display_name').eq('id', providerId).maybeSingle(),
         admin
           .from('provider_riders')
-          .select('*')
+          .select('id,provider_id,name,phone,is_active,last_lat,last_lng,last_location_at,created_at,updated_at')
           .eq('provider_id', providerId)
           .eq('is_active', true)
           .order('created_at', { ascending: false })
@@ -57,17 +67,25 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const enriched = riders.map((r) => {
+  const sanitized = riders.map((r) => {
     const p10 = String(r.phone || '').replace(/\D/g, '').slice(-10);
-    const links = buildShareLink(r.name || 'Rider', p10, r.pin_code || '0000', providerName);
+    const links = buildInviteLinkWithoutPin(r.name || 'Rider', p10, providerName);
     return {
-      ...r,
+      id: r.id,
+      provider_id: r.provider_id,
+      name: r.name,
+      phone: p10,
+      is_active: r.is_active !== false,
+      has_pin: true,
+      last_lat: r.last_lat ?? null,
+      last_lng: r.last_lng ?? null,
+      last_location_at: r.last_location_at ?? null,
       ...links,
     };
   });
 
   return NextResponse.json(
-    { success: true, riders: enriched },
+    { success: true, riders: sanitized },
     { headers: { 'Cache-Control': 'private, no-store' } }
   );
 }
@@ -75,10 +93,10 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const providerId = String(body.provider_id || '').trim();
-  const name = String(body.name || '').trim();
+  const name = String(body.name || '').trim().slice(0, 80);
   const phone10 = String(body.phone || '').replace(/\D/g, '').slice(-10);
   const requestedPin = String(body.pin_code || '').replace(/\D/g, '').slice(0, 4);
-  const pinCode = requestedPin.length === 4 ? requestedPin : String(Math.floor(1000 + Math.random() * 9000));
+  const pinCode = requestedPin.length === 4 ? requestedPin : String(crypto.randomInt(1000, 10000));
 
   if (!providerId || !name || phone10.length !== 10) {
     return NextResponse.json(
@@ -88,7 +106,7 @@ export async function POST(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -114,7 +132,7 @@ export async function POST(req: NextRequest) {
           },
           { onConflict: 'provider_id,phone' }
         )
-        .select('*')
+        .select('id,provider_id,name,phone,is_active,created_at,updated_at')
         .single();
       if (!error && data) riderRow = data;
     } catch {}
@@ -132,12 +150,12 @@ export async function POST(req: NextRequest) {
     };
   }
 
-  platformStore.providerRiders.set(riderRow.id, riderRow);
+  platformStore.providerRiders.set(riderRow.id, { ...riderRow, pin_code: pinCode });
   const links = buildShareLink(name, phone10, pinCode, providerName);
 
   return NextResponse.json({
     success: true,
-    rider: { ...riderRow, ...links },
+    rider: { ...riderRow, pin_code: pinCode, ...links },
   });
 }
 
@@ -158,20 +176,41 @@ export async function PATCH(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
   const admin = getAdminClient();
-  let riderName = String(body.rider_name || 'Delivery Staff').trim();
-  let riderPhone = String(body.rider_phone || '').trim();
+  let riderName = '';
+  let riderPhone = '';
 
   if (admin) {
-    const { data: r } = await admin.from('provider_riders').select('name,phone').eq('id', riderId).maybeSingle();
-    if (r) {
-      riderName = r.name;
-      riderPhone = r.phone;
+    const [{ data: r }, { data: sub }] = await Promise.all([
+      admin
+        .from('provider_riders')
+        .select('id,name,phone,provider_id,is_active')
+        .eq('id', riderId)
+        .eq('provider_id', providerId)
+        .eq('is_active', true)
+        .maybeSingle(),
+      admin
+        .from('subscriptions')
+        .select('id,customer_id,provider_id')
+        .eq('id', subscriptionId)
+        .eq('provider_id', providerId)
+        .eq('customer_id', customerId)
+        .maybeSingle(),
+    ]);
+
+    if (!r) {
+      return NextResponse.json({ success: false, error: 'Selected delivery staff member was not found for this kitchen.' }, { status: 404 });
     }
+    if (!sub) {
+      return NextResponse.json({ success: false, error: 'Subscription does not belong to this kitchen/customer.' }, { status: 404 });
+    }
+
+    riderName = r.name;
+    riderPhone = r.phone;
 
     await admin.from('daily_meal_events').upsert(
       {
@@ -188,6 +227,13 @@ export async function PATCH(req: NextRequest) {
       },
       { onConflict: 'subscription_id,service_date,slot' }
     );
+  } else {
+    const r = platformStore.providerRiders.get(riderId);
+    if (!r || r.provider_id !== providerId) {
+      return NextResponse.json({ success: false, error: 'Delivery staff not found.' }, { status: 404 });
+    }
+    riderName = r.name;
+    riderPhone = r.phone;
   }
 
   const memKey = `${subscriptionId}_${serviceDate}_${slot}`;
@@ -220,7 +266,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 

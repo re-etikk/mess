@@ -192,10 +192,10 @@ class _ProviderShellState extends State<ProviderShell> {
                 ),
                 child: Row(
                   children: [
-                    _navItem(0, Icons.dashboard_outlined, Icons.dashboard_rounded, 'Overview'),
+                    _navItem(0, Icons.home_outlined, Icons.home_rounded, 'Home'),
                     _navItem(1, Icons.restaurant_menu_outlined, Icons.restaurant_menu_rounded, 'Menu'),
                     _navItem(2, Icons.card_membership_outlined, Icons.card_membership_rounded, 'Plans'),
-                    _navItem(3, Icons.qr_code_2_outlined, Icons.qr_code_2_rounded, 'Daily QR'),
+                    _navItem(3, Icons.qr_code_2_outlined, Icons.qr_code_2_rounded, 'Check-In'),
                   ],
                 ),
               ),
@@ -215,29 +215,30 @@ class _ProviderShellState extends State<ProviderShell> {
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
           height: double.infinity,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
-            color: active ? ThaliColors.primary : Colors.transparent,
+            color: active ? ThaliColors.primarySoft : Colors.transparent,
             borderRadius: BorderRadius.circular(99),
           ),
-          child: Row(
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 active ? activeIcon : icon,
-                size: 18,
-                color: active ? Colors.white : ThaliColors.muted,
+                size: 20,
+                color: active ? ThaliColors.primary : ThaliColors.muted,
               ),
-              if (active) ...[
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
-                  ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                  color: active ? ThaliColors.primary : ThaliColors.muted,
                 ),
-              ],
+              ),
             ],
           ),
         ),

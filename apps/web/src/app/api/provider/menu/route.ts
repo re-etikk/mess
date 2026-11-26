@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { ensurePlanSlotsLinked } from '@/lib/auth-session';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-
-function getFallbackClient() {
-  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+async function getDbClient() {
+  const admin = getAdminClient();
+  if (admin) return admin;
+  try {
+    return await createClient();
+  } catch {
+    return null;
+  }
 }
 
 const DEFAULT_SLOTS = [
@@ -30,16 +31,12 @@ export async function GET(req: NextRequest) {
   const slotFilter = params.get('slot_id');
 
   const access = await requireProviderOwnership(req, providerId);
-  const db = getAdminClient();
 
   try {
-    let client = db;
+    const client = await getDbClient();
     if (!client) {
-      try {
-        client = await createClient();
-      } catch (_) {}
+      return NextResponse.json({ success: true, items: [], menus: [], menu: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
-    client = client || getFallbackClient();
 
     const [{ data: provider }, { data: dbSlots }] = await Promise.all([
       client.from('providers').select('id,display_name,status').eq('id', providerId).maybeSingle(),
@@ -188,19 +185,11 @@ export async function POST(req: NextRequest) {
 
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
-  if (!access.ok && access.status !== 401) {
-    const dbCheck = getAdminClient() || getFallbackClient();
-    if (dbCheck) {
-      const { data: prov } = await dbCheck.from('providers').select('id,status').eq('id', input.provider_id).maybeSingle();
-      if (!prov || (prov.status !== 'active' && prov.status !== 'approved')) {
-        return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-      }
-    } else {
-      return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-    }
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
-  const db = getAdminClient() || getFallbackClient();
+  const db = await getDbClient();
   const itemName = (input.name || input.item_name || '').trim();
 
   // ACTION: ADD ITEM
@@ -220,9 +209,9 @@ export async function POST(req: NextRequest) {
     let storeMenu = platformStore.menus.get(slotKey);
     if (!storeMenu) {
       storeMenu = {
-        id: `menu-${input.provider_id}-${slotName}`,
+        id: `menu-${input.provider_id}-${dayOfWeek}-${slotName}`,
         provider_id: input.provider_id,
-        day_of_week: 'Daily',
+        day_of_week: dayOfWeek,
         slot: slotName.toUpperCase(),
         items_included: [],
         items_extra: [],
@@ -293,6 +282,11 @@ export async function POST(req: NextRequest) {
           ? extRes.data
           : (await db.from('menu_items').insert(baseInsert).select('*').single()).data;
 
+        const adminClient = getAdminClient();
+        if (adminClient) {
+          await ensurePlanSlotsLinked(adminClient, input.provider_id);
+        }
+
         return NextResponse.json({ success: true, item: data || { name: itemName } }, { status: 201 });
       } catch (err) {
         console.warn('DB menu insert fallback:', err);
@@ -305,8 +299,9 @@ export async function POST(req: NextRequest) {
   // ACTION: REMOVE ITEM
   if (input.action === 'remove_item') {
     const slotName = (input.slot || 'lunch').toLowerCase();
-    const slotKey = `${input.provider_id}_Daily_${slotName.toUpperCase()}`;
-    const storeMenu = platformStore.menus.get(slotKey);
+    const dayOfWeek = input.day_of_week || 'Daily';
+    const slotKey = `${input.provider_id}_${dayOfWeek}_${slotName.toUpperCase()}`;
+    const storeMenu = platformStore.menus.get(slotKey) || platformStore.menus.get(`${input.provider_id}_Daily_${slotName.toUpperCase()}`);
     if (storeMenu && itemName) {
       storeMenu.items_included = storeMenu.items_included.filter((x) => x.toLowerCase() !== itemName.toLowerCase());
       storeMenu.items_extra = storeMenu.items_extra.filter((x) => x.name.toLowerCase() !== itemName.toLowerCase());
@@ -328,8 +323,9 @@ export async function POST(req: NextRequest) {
   if (input.action === 'toggle_availability') {
     const isAvail = input.is_available !== undefined ? input.is_available : false;
     const slotName = (input.slot || 'lunch').toLowerCase();
-    const slotKey = `${input.provider_id}_Daily_${slotName.toUpperCase()}`;
-    const storeMenu = platformStore.menus.get(slotKey);
+    const dayOfWeek = input.day_of_week || 'Daily';
+    const slotKey = `${input.provider_id}_${dayOfWeek}_${slotName.toUpperCase()}`;
+    const storeMenu = platformStore.menus.get(slotKey) || platformStore.menus.get(`${input.provider_id}_Daily_${slotName.toUpperCase()}`);
     if (storeMenu && itemName) {
       storeMenu.items_unavailable = storeMenu.items_unavailable || [];
       if (!isAvail) {

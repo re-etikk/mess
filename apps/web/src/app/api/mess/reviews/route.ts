@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { isAllowedMediaUrl, requireCustomerIdentity } from '@/lib/auth-session';
+import { checkRateLimit } from '@/lib/rate-limiter';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
@@ -107,14 +109,57 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const providerId = String(body.provider_id || '').trim();
-  const customerId = String(body.customer_id || '').trim();
+  const claimedCustomerId = String(body.customer_id || '').trim();
+  const identity = await requireCustomerIdentity(req, claimedCustomerId || undefined);
+  if (!identity.ok) {
+    return NextResponse.json({ success: false, error: identity.error }, { status: identity.status });
+  }
+  const customerId = identity.isAdmin && claimedCustomerId ? claimedCustomerId : identity.userId;
+
+  const rl = checkRateLimit(`mess-review:${customerId}`, 10, 10 * 60 * 1000);
+  if (!rl.isAllowed) {
+    return NextResponse.json({ success: false, error: 'Too many review submissions. Please try again later.' }, { status: 429 });
+  }
+
   const rating = Number(body.rating);
   const reviewText = String(body.review_text || '').trim().slice(0, 1000);
   const tags = Array.isArray(body.tags) ? body.tags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 6) : [];
-  const imagePaths = Array.isArray(body.image_paths) ? body.image_paths.map((i: any) => String(i).trim()).filter(Boolean).slice(0, 4) : [];
+  const rawImages = Array.isArray(body.image_paths) ? body.image_paths.map((i: any) => String(i).trim()).filter(Boolean).slice(0, 4) : [];
+  if (rawImages.some((url: string) => !isAllowedMediaUrl(url))) {
+    return NextResponse.json({ success: false, error: 'One or more image URLs are invalid or unsupported.' }, { status: 400 });
+  }
+  const imagePaths = rawImages;
 
   if (!providerId || !customerId || isNaN(rating) || rating < 1 || rating > 5) {
     return NextResponse.json({ success: false, error: 'provider_id, customer_id, and rating (1-5) are required.' }, { status: 400 });
+  }
+
+  // Only verified subscribers (active/paused/expired/cancelled, never unpaid pending_payment) can submit a review
+  const adminCheck = getAdminClient();
+  let hasVerifiedSub = false;
+  if (adminCheck) {
+    try {
+      const { data: subRow } = await adminCheck
+        .from('subscriptions')
+        .select('id,status')
+        .eq('provider_id', providerId)
+        .eq('customer_id', customerId)
+        .in('status', ['active', 'paused', 'expired', 'cancelled'])
+        .limit(1)
+        .maybeSingle();
+      if (subRow) hasVerifiedSub = true;
+    } catch {}
+  }
+  if (!hasVerifiedSub) {
+    hasVerifiedSub = Array.from(platformStore.subscriptions.values()).some(
+      (s) => s.provider_id === providerId && s.customer_id === customerId && s.status !== 'pending_payment'
+    );
+  }
+  if (!hasVerifiedSub && !identity.isAdmin) {
+    return NextResponse.json(
+      { success: false, error: 'Only verified kitchen subscribers can submit a review.' },
+      { status: 403 }
+    );
   }
 
   const admin = getAdminClient();

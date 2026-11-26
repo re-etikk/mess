@@ -76,7 +76,7 @@ export async function fulfillCashfreePaidOrder(
   // Guard against underpayment if expected amount is known
   if (input.orderAmountInr != null && amountPaise > 0) {
     const paidPaise = Math.round(input.orderAmountInr * 100);
-    if (paidPaise + 100 < amountPaise) {
+    if (paidPaise < amountPaise) {
       throw new Error(`Paid amount ₹${input.orderAmountInr} is less than expected ₹${amountPaise / 100}.`);
     }
   }
@@ -113,19 +113,22 @@ export async function fulfillCashfreePaidOrder(
       try {
         const { data: currentSub } = await admin
           .from('subscriptions')
-          .select('id, initial_meal_credits')
+          .select('id, initial_meal_credits, starts_at')
           .eq('id', subscriptionId)
           .maybeSingle();
 
         if (currentSub) {
+          const requestedStart = currentSub.starts_at ? new Date(currentSub.starts_at) : now;
+          const effectiveStart = requestedStart.getTime() > now.getTime() ? requestedStart : now;
+          const effectiveExpires = new Date(effectiveStart.getTime() + durationDays * 24 * 60 * 60 * 1000);
           const { data: updated } = await admin
             .from('subscriptions')
             .update({
               status: 'active',
-              starts_at: now.toISOString(),
+              starts_at: effectiveStart.toISOString(),
               activated_at: now.toISOString(),
               payment_verified_at: now.toISOString(),
-              expires_at: expiresAt.toISOString(),
+              expires_at: effectiveExpires.toISOString(),
               remaining_meal_credits: currentSub.initial_meal_credits ?? meta?.meal_credits ?? null,
             })
             .eq('id', subscriptionId)
@@ -141,10 +144,13 @@ export async function fulfillCashfreePaidOrder(
     // 2. Activate in platformStore
     const storeSub = platformStore.subscriptions.get(subscriptionId);
     if (storeSub) {
+      const requestedStart = storeSub.starts_at ? new Date(storeSub.starts_at) : now;
+      const effectiveStart = requestedStart.getTime() > now.getTime() ? requestedStart : now;
+      const effectiveExpires = new Date(effectiveStart.getTime() + durationDays * 24 * 60 * 60 * 1000);
       storeSub.status = 'active';
-      storeSub.starts_at = now.toISOString();
+      storeSub.starts_at = effectiveStart.toISOString();
       (storeSub as any).activated_at = now.toISOString();
-      storeSub.expires_at = expiresAt.toISOString();
+      storeSub.expires_at = effectiveExpires.toISOString();
       storeSub.payment_mode = 'online';
       (storeSub as any).cashfree_order_id = input.orderId;
       (storeSub as any).cashfree_payment_id = input.cfPaymentId || '';
@@ -196,15 +202,26 @@ export async function fulfillCashfreePaidOrder(
 
   if (customerId) {
     const notifId = `notif-cf-${Date.now()}`;
+    const notifMsg = `₹${amountInr.toFixed(0)} received via Cashfree for ${planName}. Your meal pass is active right away!`;
     platformStore.notifications.set(notifId, {
       id: notifId,
       customer_id: customerId,
       title: 'Online Payment Successful',
-      message: `₹${amountInr.toFixed(0)} received via Cashfree for ${planName}. Your meal pass is active right away!`,
+      message: notifMsg,
       notification_type: 'system',
       is_read: false,
       created_at: now.toISOString(),
     });
+    if (admin) {
+      try {
+        await admin.from('customer_notifications').insert({
+          customer_id: customerId,
+          title: 'Online Payment Successful',
+          message: notifMsg,
+          notification_type: 'payment',
+        });
+      } catch {}
+    }
   }
 
   let recipientEmail = (meta as any)?.customer_email || tags.cust_email || '';

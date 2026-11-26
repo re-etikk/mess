@@ -192,7 +192,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             _search('');
                           },
                         )
-                      : const Icon(Icons.auto_awesome_rounded, color: ThaliColors.primary, size: 20),
+                      : const Icon(Icons.tune_rounded, color: ThaliColors.muted, size: 18),
                 ),
               ),
               if (smartChips.isNotEmpty) ...[
@@ -202,16 +202,17 @@ class _SearchScreenState extends State<SearchScreen> {
                   runSpacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Icon(Icons.auto_awesome_rounded, size: 14, color: ThaliColors.primary),
-                    const Text('Smart filters:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.primary)),
+                    const Icon(Icons.tune_rounded, size: 14, color: ThaliColors.muted),
+                    const Text('Filters:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.muted)),
                     for (final c in smartChips)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                         decoration: BoxDecoration(
-                          color: ThaliColors.primarySoft,
+                          color: ThaliColors.subtle,
                           borderRadius: BorderRadius.circular(99),
+                          border: Border.all(color: ThaliColors.stroke),
                         ),
-                        child: Text(c, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.primaryDark)),
+                        child: Text(c, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ThaliColors.ink)),
                       ),
                   ],
                 ),

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { sanitizePostgrestSearch } from '@/lib/auth-session';
 import { platformStore, validateAndApplyPromo } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const providerId = new URL(req.url).searchParams.get('provider_id')?.trim() || '';
+  const rawProviderId = new URL(req.url).searchParams.get('provider_id')?.trim() || '';
+  const providerId = /^[0-9a-f-]{36}$/i.test(rawProviderId) ? rawProviderId : sanitizePostgrestSearch(rawProviderId);
   const admin = getAdminClient();
   const promos: any[] = [];
 

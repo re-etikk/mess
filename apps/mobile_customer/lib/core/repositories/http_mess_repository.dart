@@ -12,7 +12,16 @@ class HttpMessRepository implements MessRepository {
             );
 
   final String baseUrl;
+  String authToken = '';
   List<MessProvider> _cachedProviders = [];
+
+  Map<String, String> _authHeaders({bool json = false, bool noCache = false}) {
+    return {
+      if (json) 'Content-Type': 'application/json',
+      if (noCache) 'Cache-Control': 'no-cache, no-store',
+      if (authToken.isNotEmpty) 'Authorization': 'Bearer $authToken',
+    };
+  }
 
   Map<String, dynamic> _safeJsonMap(http.Response response, {required String action}) {
     try {
@@ -249,7 +258,7 @@ class HttpMessRepository implements MessRepository {
       response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders(json: true),
             body: jsonEncode({'token': qrPayload.trim(), 'user_id': customerId}),
           )
           .timeout(const Duration(seconds: 12));
@@ -316,7 +325,7 @@ class HttpMessRepository implements MessRepository {
       response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders(json: true),
             body: jsonEncode({
               'provider_id': plan.providerId,
               'plan_id': plan.id,
@@ -386,7 +395,7 @@ class HttpMessRepository implements MessRepository {
       response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders(json: true),
             body: jsonEncode({
               'provider_id': plan.providerId,
               'slot': slotId.toUpperCase(),
@@ -441,7 +450,7 @@ class HttpMessRepository implements MessRepository {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'purpose': purpose,
             'provider_id': providerId,
@@ -504,7 +513,7 @@ class HttpMessRepository implements MessRepository {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({'order_id': orderId}),
         )
         .timeout(const Duration(seconds: 15));
@@ -530,7 +539,7 @@ class HttpMessRepository implements MessRepository {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'subscription_id': subscriptionId,
             'target_plan_id': targetPlanId,
@@ -576,7 +585,7 @@ class HttpMessRepository implements MessRepository {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'subscription_id': subscriptionId,
             'target_plan_id': targetPlanId,
@@ -680,7 +689,7 @@ class HttpMessRepository implements MessRepository {
       response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders(json: true),
             body: jsonEncode({
               'provider_id': providerId,
               'customer_id': customerId,
@@ -708,7 +717,7 @@ class HttpMessRepository implements MessRepository {
     final uri = Uri.parse('$baseUrl/api/customer/meals?customer_id=$customerId&date=$dateStr');
     http.Response response;
     try {
-      response = await http.get(uri, headers: {'Cache-Control': 'no-cache, no-store'}).timeout(const Duration(seconds: 12));
+      response = await http.get(uri, headers: _authHeaders(noCache: true)).timeout(const Duration(seconds: 12));
     } catch (e) {
       throw RepositoryException(friendlyCustomerError(e, action: 'load daily meals'), code: 'network_error');
     }
@@ -741,7 +750,7 @@ class HttpMessRepository implements MessRepository {
       response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders(json: true),
             body: jsonEncode({
               'action': action,
               'subscription_id': subscriptionId,
@@ -770,7 +779,7 @@ class HttpMessRepository implements MessRepository {
     final uri = Uri.parse('$baseUrl/api/subscription/manage?customer_id=$customerId');
     http.Response response;
     try {
-      response = await http.get(uri, headers: {'Cache-Control': 'no-cache, no-store'}).timeout(const Duration(seconds: 12));
+      response = await http.get(uri, headers: _authHeaders(noCache: true)).timeout(const Duration(seconds: 12));
     } catch (e) {
       throw RepositoryException(friendlyCustomerError(e, action: 'load subscriptions'), code: 'network_error');
     }
@@ -804,7 +813,7 @@ class HttpMessRepository implements MessRepository {
       response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders(json: true),
             body: jsonEncode({
               'action': action,
               'subscription_id': subscriptionId,
@@ -847,7 +856,7 @@ class HttpMessRepository implements MessRepository {
     final response = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: _authHeaders(json: true),
           body: jsonEncode({
             'user_id': userId,
             if (displayName != null) 'display_name': displayName,
@@ -895,7 +904,7 @@ class HttpMessRepository implements MessRepository {
   @override
   Future<List<Map<String, dynamic>>> fetchAddresses(String customerId) async {
     final uri = Uri.parse('$baseUrl/api/user/addresses?customer_id=$customerId');
-    final response = await http.get(uri).timeout(const Duration(seconds: 10));
+    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       return (data['addresses'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
@@ -907,7 +916,7 @@ class HttpMessRepository implements MessRepository {
   Future<void> saveAddress(Map<String, dynamic> address) async {
     final uri = Uri.parse('$baseUrl/api/user/addresses');
     final response = await http
-        .post(uri, headers: {'Content-Type': 'application/json'}, body: jsonEncode(address))
+        .post(uri, headers: _authHeaders(json: true), body: jsonEncode(address))
         .timeout(const Duration(seconds: 10));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw const RepositoryException('Unable to save address.', code: 'address_save_failed');
@@ -917,7 +926,7 @@ class HttpMessRepository implements MessRepository {
   @override
   Future<void> deleteAddress(String id, String customerId) async {
     final uri = Uri.parse('$baseUrl/api/user/addresses?id=$id&customer_id=$customerId');
-    await http.delete(uri).timeout(const Duration(seconds: 10));
+    await http.delete(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
   }
 
   String _providerNameFromToken(String payload) {

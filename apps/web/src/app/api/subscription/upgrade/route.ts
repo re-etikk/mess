@@ -3,151 +3,94 @@ import crypto from 'crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore } from '@/lib/platform-service';
 import { addPartnerNotification } from '@/lib/partner-notifications';
+import { isAllowedMediaUrl, requireCustomerIdentity } from '@/lib/auth-session';
+import {
+  resolveAuthoritativePlan,
+  resolveVerifiedUpgradeQuote,
+} from '@/lib/checkout-pricing';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const {
-      subscription_id,
-      target_plan_id,
-      payment_mode = 'counter_cash',
-      receipt_url = '',
-      utr_reference = '',
-    } = body;
+    const subscriptionId = String(body.subscription_id || '').trim();
+    const targetPlanId = String(body.target_plan_id || '').trim();
+    const paymentMode = body.payment_mode === 'direct_upi' ? 'direct_upi' : 'counter_cash';
+    const receiptUrl = String(body.receipt_url || '').trim();
+    const utrReference = String(body.utr_reference || '').trim().slice(0, 80);
 
-    if (!subscription_id || !target_plan_id) {
+    if (!subscriptionId || !targetPlanId) {
       return NextResponse.json(
         { success: false, error: 'subscription_id and target_plan_id are required.' },
         { status: 400 }
       );
     }
 
-    let currentSub: any = null;
-    let targetPlan: any = null;
+    if (receiptUrl && !isAllowedMediaUrl(receiptUrl)) {
+      return NextResponse.json({ success: false, error: 'Invalid receipt URL.' }, { status: 400 });
+    }
 
-    // 1. Fetch from Supabase DB
+    const auth = await requireCustomerIdentity(req, body.customer_id ? String(body.customer_id) : undefined);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
     const admin = getAdminClient();
-    if (admin) {
-      try {
-        const { data: s } = await admin
-          .from('subscriptions')
-          .select('*, profiles:customer_id(display_name, phone_e164)')
-          .eq('id', subscription_id)
-          .maybeSingle();
-        if (s) currentSub = s;
-
-        const { data: p } = await admin
-          .from('subscription_plans')
-          .select('*')
-          .eq('id', target_plan_id)
-          .maybeSingle();
-        if (p) targetPlan = p;
-      } catch (e) {
-        console.warn('DB error fetching sub or plan for upgrade:', e);
-      }
-    }
-
-    // 2. Fetch from platformStore
-    if (!currentSub) {
-      currentSub = platformStore.subscriptions.get(subscription_id);
-    }
-    if (!targetPlan) {
-      targetPlan = platformStore.plans.get(target_plan_id);
-    }
-
-    // 3. Resilient fallback: Find active sub by customer_id if ID not found
-    if (!currentSub && body.customer_id) {
-      for (const [, s] of platformStore.subscriptions.entries()) {
-        if (s.customer_id === body.customer_id && s.status === 'active') {
-          currentSub = s;
-          break;
-        }
-      }
-    }
-
-    // 4. Client snapshot fallback
-    if (!currentSub) {
-      const snap = body.current_subscription || {};
-      const snapExpires = snap.endDate || snap.end_date || body.end_date || new Date(Date.now() + 25 * 86400000).toISOString();
-      const snapPrice = Number(snap.price || body.current_price || 2400);
-      currentSub = {
-        id: subscription_id,
-        customer_id: body.customer_id || snap.customerId || 'customer-active',
-        customer_name: body.customer_name || snap.customerName || 'Subscriber',
-        provider_id: body.provider_id || snap.providerId || '',
-        plan_name: snap.planName || snap.plan_name || body.current_plan_name || 'Current Pass',
-        plan_type: snap.type || snap.plan_type || body.current_plan_type || 'fixed_period',
-        status: 'active',
-        starts_at: snap.startDate || snap.start_date || new Date(Date.now() - 5 * 86400000).toISOString(),
-        expires_at: snapExpires,
-        duration_days: Number(snap.durationDays || snap.duration_days || body.duration_days || 30),
-        price_paid_paise: Math.round(snapPrice * 100),
-        remaining_meal_credits: snap.mealsRemaining ?? snap.remaining_credits ?? null,
-        initial_meal_credits: snap.totalMeals ?? snap.initial_credits ?? null,
-      };
-    }
+    const targetPlan = await resolveAuthoritativePlan({
+      admin,
+      providerId: String(body.provider_id || '').trim(),
+      planId: targetPlanId,
+    });
 
     if (!targetPlan) {
-      const tPricePaise = Number(body.target_plan_price_paise) || ((Number(body.target_plan_price) || 2100) * 100);
-      targetPlan = {
-        id: target_plan_id,
-        provider_id: body.provider_id || currentSub.provider_id || '',
-        name: body.target_plan_name || 'Target Plan',
-        plan_type: body.target_plan_type || 'meal_credits',
-        price_paise: tPricePaise,
-        duration_days: Number(body.target_duration_days) || 30,
-        meal_credits: Number(body.target_meal_credits) || 60,
-      };
+      return NextResponse.json({ success: false, error: 'Target upgrade plan was not found.' }, { status: 404 });
     }
 
-    // Pro-rata calculation
-    const now = Date.now();
-    const expiresAt = new Date(currentSub.expires_at).getTime();
-    const remainingMs = Math.max(0, expiresAt - now);
-    const remainingDays = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
-    const totalDays = currentSub.duration_days || 30;
-    const pricePaidPaise = Number(currentSub.price_paid_paise) || 280000;
-    const targetPlanPricePaise = Number(targetPlan.price_paise) || 480000;
+    const quoteRes = await resolveVerifiedUpgradeQuote({
+      admin,
+      subscriptionId,
+      customerId: auth.userId,
+      isAdmin: auth.isAdmin,
+      targetPlan,
+    });
 
-    let residualCreditPaise = 0;
-    let unusedFraction = 0;
-
-    if (currentSub.plan_type === 'meal_credits' || currentSub.plan_type_snapshot === 'meal_credits') {
-      const remainingCredits = currentSub.remaining_meal_credits ?? 0;
-      const initialCredits = currentSub.initial_meal_credits ?? 60;
-      unusedFraction = initialCredits > 0 ? Math.min(1, Math.max(0, remainingCredits / initialCredits)) : 0;
-      residualCreditPaise = Math.round(pricePaidPaise * unusedFraction);
-    } else {
-      unusedFraction = totalDays > 0 ? Math.min(1, Math.max(0, remainingDays / totalDays)) : 0;
-      residualCreditPaise = Math.round(pricePaidPaise * unusedFraction);
+    if (!quoteRes.ok) {
+      return NextResponse.json({ success: false, error: quoteRes.error }, { status: quoteRes.status });
     }
 
-    const payablePaise = Math.max(0, targetPlanPricePaise - residualCreditPaise);
+    const { currentSub, remainingDays, residualCreditPaise, payablePaise } = quoteRes;
     const payableInr = payablePaise / 100;
+    const providerId = currentSub.provider_id || targetPlan.provider_id;
+    const customerId = currentSub.customer_id || auth.userId;
 
-    const newSubId = `sub-upg-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const newSubId =
+      admin && isUuid.test(customerId) && isUuid.test(targetPlan.id)
+        ? crypto.randomUUID()
+        : `sub-upg-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+
     const customerName = currentSub.customer_name || currentSub.profiles?.display_name || 'Customer';
     const customerPhone = currentSub.customer_phone || currentSub.profiles?.phone_e164 || '';
-    const providerId = currentSub.provider_id;
 
     const upgradeDetails = {
-      from_subscription_id: subscription_id,
+      from_subscription_id: subscriptionId,
       from_plan_name: currentSub.plan_name || currentSub.plan_name_snapshot,
       to_plan_name: targetPlan.name,
       residual_credit_inr: residualCreditPaise / 100,
-      target_plan_price_inr: targetPlanPricePaise / 100,
+      target_plan_price_inr: targetPlan.price_paise / 100,
       net_payable_inr: payableInr,
       days_left_snapshot: remainingDays,
-      receipt_url,
-      utr_reference,
+      receipt_url: receiptUrl,
+      utr_reference: utrReference,
     };
 
-    // Store in platformStore
+    const now = new Date();
+    const expiresIso = new Date(now.getTime() + targetPlan.duration_days * 86400000).toISOString();
+
     platformStore.subscriptions.set(newSubId, {
       id: newSubId,
-      customer_id: currentSub.customer_id,
+      customer_id: customerId,
       customer_name: customerName,
       customer_phone: customerPhone,
       provider_id: providerId,
@@ -155,50 +98,50 @@ export async function POST(req: NextRequest) {
       plan_type: targetPlan.plan_type,
       plan_name: targetPlan.name,
       status: 'pending_payment',
-      starts_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + (targetPlan.duration_days || 30) * 24 * 60 * 60 * 1000).toISOString(),
-      remaining_meal_credits: targetPlan.meal_credits || null,
-      initial_meal_credits: targetPlan.meal_credits || null,
+      starts_at: now.toISOString(),
+      expires_at: expiresIso,
+      remaining_meal_credits: targetPlan.meal_credits,
+      initial_meal_credits: targetPlan.meal_credits,
       price_paid_paise: payablePaise,
-      payment_mode,
-      created_at: new Date().toISOString(),
+      payment_mode: paymentMode,
+      created_at: now.toISOString(),
       ...({
-        receipt_url,
-        utr_reference,
-        upgrade_from_subscription_id: subscription_id,
+        receipt_url: receiptUrl,
+        utr_reference: utrReference,
+        upgrade_from_subscription_id: subscriptionId,
         upgrade_details: upgradeDetails,
       } as any),
     });
 
-    // Also insert into Supabase DB if available
-    if (admin) {
+    if (admin && isUuid.test(customerId) && isUuid.test(targetPlan.id)) {
       try {
         await admin.from('subscriptions').insert({
-          id: crypto.randomUUID(),
-          customer_id: currentSub.customer_id,
+          id: newSubId,
+          customer_id: customerId,
           provider_id: providerId,
           plan_id: targetPlan.id,
           status: 'pending_payment',
           plan_type_snapshot: targetPlan.plan_type,
           plan_name_snapshot: targetPlan.name,
-          terms_version_snapshot: 'v1.0-upgrade',
+          terms_version_snapshot: targetPlan.terms_version,
           price_paid_paise: payablePaise,
-          initial_meal_credits: targetPlan.meal_credits || null,
-          remaining_meal_credits: targetPlan.meal_credits || null,
-          starts_at: new Date().toISOString(),
-          expires_at: new Date(Date.now() + (targetPlan.duration_days || 30) * 24 * 60 * 60 * 1000).toISOString(),
+          initial_meal_credits: targetPlan.meal_credits,
+          remaining_meal_credits: targetPlan.meal_credits,
+          starts_at: now.toISOString(),
+          expires_at: expiresIso,
+          payment_mode: paymentMode,
+          delivery_instructions: currentSub.delivery_instructions || null,
         });
       } catch (e) {
         console.warn('DB error inserting upgrade sub:', e);
       }
     }
 
-    // Send notification to Mess Partner
     addPartnerNotification({
       provider_id: providerId,
       type: 'plan_upgrade',
       title: 'Plan Upgrade Request',
-      message: `${customerName} requested an upgrade from ${currentSub.plan_name || 'Current Pass'} to ${targetPlan.name}. Net payable: ₹${payableInr.toFixed(0)}. Please verify payment and approve.`,
+      message: `${customerName} requested an upgrade from ${currentSub.plan_name || currentSub.plan_name_snapshot || 'Current Pass'} to ${targetPlan.name}. Net payable: ₹${payableInr.toFixed(0)}.`,
       customer_name: customerName,
       customer_phone: customerPhone,
       amount_inr: payableInr,
@@ -207,7 +150,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Upgrade request submitted! Please pay ₹${payableInr.toFixed(0)} to activate.`,
+      message: `Upgrade request submitted. Pay ₹${payableInr.toFixed(0)} at counter for approval.`,
       subscription_id: newSubId,
       status: 'pending_payment',
       payable_inr: payableInr,

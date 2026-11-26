@@ -6,11 +6,11 @@ import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-
 function getFallbackClient() {
-  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) return null;
+  return createSupabaseClient(url, anon, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
@@ -148,16 +148,58 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   // Only check real persisted entries in platformStore (no fabricated menu items!)
-  const targetSlot = (slot || 'LUNCH').toUpperCase();
   const keyDay = dayFilter || 'Daily';
-  const storeMenu = platformStore.menus.get(`${providerId}_${keyDay}_${targetSlot}`) || platformStore.menus.get(`${providerId}_Daily_${targetSlot}`);
   const storeProv = platformStore.providers.get(providerId);
+  const storeProviderObj = storeProv
+    ? { id: storeProv.id, name: storeProv.display_name, address: storeProv.address, phone: storeProv.phone }
+    : { id: providerId, name: 'Mess Partner' };
+
+  if (!slot) {
+    const slotsToCheck = ['BREAKFAST', 'LUNCH', 'DINNER'];
+    const storeMenus = slotsToCheck
+      .map((sName) => {
+        const m = platformStore.menus.get(`${providerId}_${keyDay}_${sName}`) || platformStore.menus.get(`${providerId}_Daily_${sName}`);
+        if (!m) return null;
+        return {
+          slot: sName,
+          slot_id: `slot-${sName.toLowerCase()}`,
+          enabled: true,
+          items_included: m.items_included || [],
+          items_extra: (m.items_extra || []).map((e, i) => ({
+            id: `ext-${i}`,
+            name: e.name,
+            kind: 'addon',
+            price_paise: Math.round((e.price || 0) * 100),
+            price: e.price || 0,
+          })),
+          items: [
+            ...(m.items_included || []).map((name, i) => ({ id: `inc-${i}`, name, price_paise: 0, is_add_on: false, active: true })),
+            ...(m.items_extra || []).map((e, i) => ({
+              id: `ext-${i}`,
+              name: e.name,
+              price_paise: Math.round((e.price || 0) * 100),
+              is_add_on: true,
+              active: true,
+            })),
+          ],
+        };
+      })
+      .filter(Boolean);
+
+    return NextResponse.json({
+      success: true,
+      provider: storeProviderObj,
+      day: keyDay,
+      menus: storeMenus,
+    });
+  }
+
+  const targetSlot = slot.toUpperCase();
+  const storeMenu = platformStore.menus.get(`${providerId}_${keyDay}_${targetSlot}`) || platformStore.menus.get(`${providerId}_Daily_${targetSlot}`);
 
   return NextResponse.json({
     success: true,
-    provider: storeProv
-      ? { id: storeProv.id, name: storeProv.display_name, address: storeProv.address, phone: storeProv.phone }
-      : { id: providerId, name: 'Mess Partner' },
+    provider: storeProviderObj,
     day: keyDay,
     slot: targetSlot,
     menu: {

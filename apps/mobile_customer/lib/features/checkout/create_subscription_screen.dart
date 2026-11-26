@@ -852,11 +852,11 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded, size: 16, color: ThaliColors.primary),
+              const Icon(Icons.compare_arrows_rounded, size: 16, color: ThaliColors.ink),
               const SizedBox(width: 6),
               const Expanded(
                 child: Text(
-                  'Smart Plan Savings',
+                  'Plan Comparison',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: ThaliColors.ink),
                 ),
               ),

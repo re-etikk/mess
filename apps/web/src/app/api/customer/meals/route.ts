@@ -3,13 +3,14 @@ import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore } from '@/lib/platform-service';
 import { getIndiaDateString } from '@/lib/crypto';
 import { addPartnerNotification } from '@/lib/partner-notifications';
+import { requireCustomerIdentity } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
 function isoDayOfWeek1To7(dateStr: string): number {
   const d = new Date(`${dateStr}T12:00:00+05:30`);
-  const day = d.getUTCDay(); // 0=Sun..6=Sat
-  return day === 0 ? 7 : day; // 1=Mon..7=Sun
+  const day = d.getUTCDay();
+  return day === 0 ? 7 : day;
 }
 
 function addDays(dateStr: string, offset: number): string {
@@ -30,12 +31,18 @@ function displayClock(val?: string | null): string {
 
 export async function GET(req: NextRequest) {
   const params = new URL(req.url).searchParams;
-  const customerId = params.get('customer_id')?.trim() || '';
+  const customerIdParam = params.get('customer_id')?.trim() || '';
   const dateStr = params.get('date')?.trim() || getIndiaDateString();
 
-  if (!customerId) {
+  if (!customerIdParam) {
     return NextResponse.json({ success: false, error: 'customer_id is required.' }, { status: 400 });
   }
+
+  const auth = await requireCustomerIdentity(req, customerIdParam);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+  const customerId = auth.userId;
 
   const admin = getAdminClient();
   let subs: any[] = [];
@@ -89,7 +96,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Fallback check platformStore if running in unit tests / offline
   if (subs.length === 0) {
     for (const s of platformStore.subscriptions.values()) {
       if (s.customer_id === customerId && (s.status === 'active' || (s as any).status === 'paused')) {
@@ -120,21 +126,22 @@ export async function GET(req: NextRequest) {
 
   const primarySub = subs[0];
   const provider = Array.isArray(primarySub.providers) ? primarySub.providers[0] : primarySub.providers;
-  const repeatDays: number[] = Array.isArray(primarySub.repeat_days) && primarySub.repeat_days.length > 0
-    ? primarySub.repeat_days.map((n: any) => Number(n))
-    : [1, 2, 3, 4, 5, 6, 7];
+  const repeatDays: number[] =
+    Array.isArray(primarySub.repeat_days) && primarySub.repeat_days.length > 0
+      ? primarySub.repeat_days.map((n: any) => Number(n))
+      : [1, 2, 3, 4, 5, 6, 7];
 
   const isPausedOnDate = (dStr: string) => {
     if (primarySub.status === 'paused') {
-      if (primarySub.pause_starts_at && primarySub.pause_ends_at) {
-        return dStr >= primarySub.pause_starts_at.slice(0, 10) && dStr <= primarySub.pause_ends_at.slice(0, 10);
+      const pStart = primarySub.pause_started_at || primarySub.pause_starts_at;
+      if (pStart && primarySub.pause_ends_at) {
+        return dStr >= pStart.slice(0, 10) && dStr <= primarySub.pause_ends_at.slice(0, 10);
       }
       return true;
     }
     return false;
   };
 
-  // Build 7-day calendar strip (Mon..Sun containing requested dateStr)
   const dow = isoDayOfWeek1To7(dateStr);
   const mondayStr = addDays(dateStr, -(dow - 1));
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -161,7 +168,10 @@ export async function GET(req: NextRequest) {
   });
 
   const targetDow = isoDayOfWeek1To7(dateStr);
-  const isBreakDay = !repeatDays.includes(targetDow) || isPausedOnDate(dateStr);
+  const startDateIso = primarySub.starts_at ? String(primarySub.starts_at).slice(0, 10) : '';
+  const endDateIso = primarySub.expires_at ? String(primarySub.expires_at).slice(0, 10) : '';
+  const outsideValidity = Boolean((startDateIso && dateStr < startDateIso) || (endDateIso && dateStr > endDateIso));
+  const isBreakDay = outsideValidity || !repeatDays.includes(targetDow) || isPausedOnDate(dateStr);
 
   if (isBreakDay) {
     return NextResponse.json({
@@ -187,8 +197,16 @@ export async function GET(req: NextRequest) {
 
   const selectedSlotsConfig: Record<string, any> =
     primarySub.selected_slots && typeof primarySub.selected_slots === 'object' ? primarySub.selected_slots : {};
+  const hasSlotSelection = Object.keys(selectedSlotsConfig).length > 0;
 
-  const meals = slotDefs.map((slotRow) => {
+  const activeSlotDefs = hasSlotSelection
+    ? slotDefs.filter((slotRow) => {
+        const key = String(slotRow.name || '').toLowerCase();
+        return Boolean(selectedSlotsConfig[key]);
+      })
+    : slotDefs;
+
+  const meals = (activeSlotDefs.length > 0 ? activeSlotDefs : slotDefs).map((slotRow) => {
     const slotUpper = String(slotRow.name || '').toUpperCase();
     const slotKey = slotUpper.toLowerCase();
     const ev = events.find((e) => e.subscription_id === primarySub.id && e.service_date === dateStr && e.slot === slotUpper);
@@ -277,47 +295,82 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const action = String(body.action || '').trim(); // 'reschedule' | 'instruction' | 'skip'
+  const action = String(body.action || '').trim();
   const subscriptionId = String(body.subscription_id || '').trim();
-  const customerId = String(body.customer_id || '').trim();
+  const claimedCustomerId = String(body.customer_id || '').trim();
   const providerId = String(body.provider_id || '').trim();
   const serviceDate = String(body.service_date || getIndiaDateString()).trim();
   const slot = String(body.slot || '').toUpperCase().trim();
 
-  if (!action || !subscriptionId || !customerId || !providerId || !slot) {
+  if (!action || !subscriptionId || !claimedCustomerId || !providerId || !slot) {
     return NextResponse.json(
       { success: false, error: 'action, subscription_id, customer_id, provider_id, and slot are required.' },
       { status: 400 }
     );
   }
 
+  const auth = await requireCustomerIdentity(req, claimedCustomerId);
+  if (!auth.ok) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+  }
+  const customerId = auth.userId;
+
   const admin = getAdminClient();
   const memKey = `${subscriptionId}_${serviceDate}_${slot}`;
   const nowIso = new Date().toISOString();
 
+  // Verify subscription ownership before any mutation (`skip`, `reschedule`, or `instruction`)
+  let verifiedSub: any = null;
+  if (admin) {
+    const { data: sub } = await admin
+      .from('subscriptions')
+      .select('id,skip_allowance,skips_used,customer_id,provider_id,status')
+      .eq('id', subscriptionId)
+      .maybeSingle();
+    verifiedSub = sub;
+  }
+  if (!verifiedSub) {
+    verifiedSub = platformStore.subscriptions.get(subscriptionId) || null;
+  }
+  if (!verifiedSub) {
+    return NextResponse.json({ success: false, error: 'Subscription not found.' }, { status: 404 });
+  }
+  if (!auth.isAdmin && verifiedSub.customer_id !== customerId) {
+    return NextResponse.json({ success: false, error: 'You cannot modify this meal.' }, { status: 403 });
+  }
+  if (verifiedSub.provider_id && verifiedSub.provider_id !== providerId) {
+    return NextResponse.json({ success: false, error: 'Subscription does not match kitchen.' }, { status: 400 });
+  }
+
   if (action === 'skip') {
-    let skipAllowance = 2;
-    let skipsUsed = 0;
+    const skipAllowance = Number(verifiedSub.skip_allowance ?? 2);
+    const skipsUsed = Number(verifiedSub.skips_used ?? 0);
 
     if (admin) {
-      const { data: sub } = await admin
-        .from('subscriptions')
-        .select('id,skip_allowance,skips_used,customer_id')
-        .eq('id', subscriptionId)
-        .eq('customer_id', customerId)
+      const { data: existingEv } = await admin
+        .from('daily_meal_events')
+        .select('id,status')
+        .eq('subscription_id', subscriptionId)
+        .eq('service_date', serviceDate)
+        .eq('slot', slot)
         .maybeSingle();
 
-      if (sub) {
-        skipAllowance = Number(sub.skip_allowance ?? 2);
-        skipsUsed = Number(sub.skips_used ?? 0);
-        if (skipsUsed >= skipAllowance) {
-          return NextResponse.json(
-            { success: false, error: `You have already used all ${skipAllowance} skips allowed for this plan.` },
-            { status: 400 }
-          );
-        }
-        await admin.from('subscriptions').update({ skips_used: skipsUsed + 1 }).eq('id', subscriptionId);
+      if (existingEv?.status === 'skipped') {
+        return NextResponse.json({
+          success: true,
+          event: existingEv,
+          remaining_skips: Math.max(0, skipAllowance - skipsUsed),
+          message: `${slot} is already skipped for ${serviceDate}.`,
+        });
       }
+
+      if (skipsUsed >= skipAllowance) {
+        return NextResponse.json(
+          { success: false, error: `You have already used all ${skipAllowance} skips allowed for this plan.` },
+          { status: 400 }
+        );
+      }
+      await admin.from('subscriptions').update({ skips_used: skipsUsed + 1 }).eq('id', subscriptionId);
 
       const { data: ev, error } = await admin
         .from('daily_meal_events')
@@ -330,7 +383,7 @@ export async function POST(req: NextRequest) {
             slot,
             status: 'skipped',
             skipped_at: nowIso,
-            skip_reason: body.reason ? String(body.reason) : 'Skipped by customer',
+            skip_reason: body.reason ? String(body.reason).slice(0, 240) : 'Skipped by customer',
             updated_at: nowIso,
           },
           { onConflict: 'subscription_id,service_date,slot' }
@@ -356,6 +409,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const existingMem = platformStore.dailyMealEvents.get(memKey);
+    if (existingMem?.status === 'skipped') {
+      return NextResponse.json({
+        success: true,
+        event: existingMem,
+        remaining_skips: Math.max(0, skipAllowance - skipsUsed),
+      });
+    }
+    if (skipsUsed >= skipAllowance) {
+      return NextResponse.json(
+        { success: false, error: `You have already used all ${skipAllowance} skips allowed for this plan.` },
+        { status: 400 }
+      );
+    }
+    (verifiedSub as any).skips_used = skipsUsed + 1;
     const memEv = {
       id: memKey,
       subscription_id: subscriptionId,
@@ -367,11 +435,11 @@ export async function POST(req: NextRequest) {
       skipped_at: nowIso,
     };
     platformStore.dailyMealEvents.set(memKey, memEv);
-    return NextResponse.json({ success: true, event: memEv, remaining_skips: Math.max(0, skipAllowance - 1) });
+    return NextResponse.json({ success: true, event: memEv, remaining_skips: Math.max(0, skipAllowance - (skipsUsed + 1)) });
   }
 
   if (action === 'reschedule') {
-    const customTimeSlot = String(body.custom_time_slot || body.time_window || '').trim();
+    const customTimeSlot = String(body.custom_time_slot || body.time_window || '').trim().slice(0, 80);
     if (!customTimeSlot) {
       return NextResponse.json({ success: false, error: 'custom_time_slot is required.' }, { status: 400 });
     }

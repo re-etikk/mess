@@ -143,7 +143,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
                         ),
                       ),
-                      validator: (v) => v == null || v.length < 6 ? 'Minimum 6 characters required.' : null,
+                      validator: (v) => v == null || v.length < 8 ? 'Minimum 8 characters required.' : null,
                     ),
                     const SizedBox(height: 12),
                     CheckboxListTile(

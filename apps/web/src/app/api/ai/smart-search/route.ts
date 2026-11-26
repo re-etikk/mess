@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { callGeminiJson, heuristicSmartSearch, SmartSearchSchema } from '@/lib/ai-service';
+import { getClientIp } from '@/lib/auth-session';
+import { checkRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const rl = checkRateLimit(`smart_search:${getClientIp(req)}`, 40, 60 * 1000);
+  if (!rl.isAllowed) {
+    return NextResponse.json({ success: false, error: 'Too many search requests. Slow down briefly.' }, { status: 429 });
+  }
+
   const body = await req.json().catch(() => ({}));
-  const query = String(body.query || '').trim();
+  const query = String(body.query || '').trim().slice(0, 240);
 
   if (!query) {
     return NextResponse.json({ success: false, error: 'Search query is required.' }, { status: 400 });

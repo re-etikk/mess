@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { isAllowedMediaUrl, requireCustomerIdentity } from '@/lib/auth-session';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +9,23 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get('user_id') || searchParams.get('id');
   const providerId = searchParams.get('provider_id');
+
+  if (!userId && !providerId) {
+    return NextResponse.json({ success: false, error: 'user_id or provider_id is required.' }, { status: 400 });
+  }
+
+  if (userId) {
+    const auth = await requireCustomerIdentity(req, userId);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+  }
+  if (providerId) {
+    const provAuth = await requireProviderOwnership(req, providerId);
+    if (!provAuth.ok) {
+      return NextResponse.json({ success: false, error: provAuth.error }, { status: provAuth.status });
+    }
+  }
 
   const admin = getAdminClient();
   if (!admin) {
@@ -55,8 +74,30 @@ export async function POST(req: NextRequest) {
 
   const userId = String(body.user_id || body.id || '').trim();
   const providerId = String(body.provider_id || '').trim();
+
+  if (!userId && !providerId) {
+    return NextResponse.json({ success: false, error: 'User ID or Provider ID is required.' }, { status: 400 });
+  }
+
+  if (userId) {
+    const auth = await requireCustomerIdentity(req, userId);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+  }
+  if (providerId) {
+    const provAuth = await requireProviderOwnership(req, providerId);
+    if (!provAuth.ok) {
+      return NextResponse.json({ success: false, error: provAuth.error }, { status: provAuth.status });
+    }
+  }
+
   const displayName = body.display_name !== undefined ? String(body.display_name || '').trim() : body.name !== undefined ? String(body.name || '').trim() : undefined;
   const avatarPath = body.avatar_path || body.avatar_url || body.photo_url || undefined;
+  if (avatarPath && !isAllowedMediaUrl(String(avatarPath))) {
+    return NextResponse.json({ success: false, error: 'Invalid avatar URL.' }, { status: 400 });
+  }
+
   const email = body.email !== undefined ? String(body.email || '').trim().toLowerCase() : undefined;
   const phone = body.phone !== undefined ? String(body.phone || '').trim() : body.phone_e164 !== undefined ? String(body.phone_e164 || '').trim() : undefined;
   const foodPreference = body.food_preference ? String(body.food_preference).trim().toLowerCase() : undefined;
@@ -68,10 +109,6 @@ export async function POST(req: NextRequest) {
   const city = body.city !== undefined ? String(body.city).trim() : undefined;
   const latitude = body.latitude != null ? Number(body.latitude) : undefined;
   const longitude = body.longitude != null ? Number(body.longitude) : undefined;
-
-  if (!userId && !providerId) {
-    return NextResponse.json({ success: false, error: 'User ID or Provider ID is required.' }, { status: 400 });
-  }
 
   const admin = getAdminClient();
   if (!admin) {
@@ -123,7 +160,6 @@ export async function POST(req: NextRequest) {
         updatedProfile = res.data;
       }
 
-      // If locality / address updated during setup, upsert default address cleanly
       if (locality || address) {
         const addrLine = address || locality || '';
         const { data: existingAddr } = await admin

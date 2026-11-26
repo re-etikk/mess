@@ -20,20 +20,52 @@ export async function POST(req: NextRequest) {
     }
 
     const access = await requireProviderOwnership(req, providerId);
-    if (!access.ok && access.status !== 401) {
+    if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
 
     const admin = getAdminClient();
+    let dbCustomerId = '';
+    let dbPlanName = 'Meal Pass';
     if (admin) {
       try {
-        await admin
+        const { data: subRow } = await admin
           .from('subscriptions')
-          .update({
-            status: 'cancelled',
-          })
+          .select('id,status,customer_id,plan_name_snapshot')
           .eq('id', subscriptionId)
-          .eq('provider_id', providerId);
+          .eq('provider_id', providerId)
+          .maybeSingle();
+        if (subRow && subRow.status !== 'pending_payment') {
+          return NextResponse.json(
+            { success: false, error: `Only pending payment requests can be declined (current: ${subRow.status}).` },
+            { status: 400 }
+          );
+        }
+        if (subRow) {
+          dbCustomerId = subRow.customer_id || '';
+          dbPlanName = subRow.plan_name_snapshot || dbPlanName;
+          await admin
+            .from('subscriptions')
+            .update({
+              status: 'cancelled',
+            })
+            .eq('id', subscriptionId)
+            .eq('provider_id', providerId)
+            .eq('status', 'pending_payment');
+
+          if (dbCustomerId) {
+            await admin
+              .from('customer_notifications')
+              .insert({
+                customer_id: dbCustomerId,
+                title: 'Payment Request Declined',
+                message: `Your payment request for ${dbPlanName} was declined: ${reason}`,
+                notification_type: 'system',
+                action_route: '/plans',
+              })
+              .then(() => null, () => null);
+          }
+        }
       } catch (e) {
         console.warn('DB error rejecting subscription:', e);
       }

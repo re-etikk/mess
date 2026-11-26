@@ -1,170 +1,180 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { platformStore } from '@/lib/platform-service';
+import { addPartnerNotification } from '@/lib/partner-notifications';
+import { ensurePlanSlotsLinked, requireCustomerIdentity } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Creates a single-meal entitlement for Pay on Counter (Cash / Counter UPI).
+ * Registers a single-meal counter-cash request in `pending_payment` status.
+ * Authoritative price comes strictly from kitchen plans/menu items; pass only becomes active
+ * after partner confirms counter cash collection.
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { provider_id, slot, customer_id, price_paise } = body;
+    const providerId = String(body.provider_id || '').trim();
+    const slot = String(body.slot || 'LUNCH').toUpperCase().trim();
+    const claimedCustomerId = String(body.customer_id || '').trim();
 
-    if (!provider_id) {
+    if (!providerId) {
+      return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+    }
+
+    const auth = await requireCustomerIdentity(req, claimedCustomerId || undefined);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+    const customerId = auth.userId;
+
+    const admin = getAdminClient();
+    if (!admin) {
       return NextResponse.json(
-        { success: false, error: 'provider_id is required.' },
-        { status: 400 }
+        { success: false, error: 'Database service unavailable for daily meal purchase.' },
+        { status: 503 }
       );
     }
 
-    const admin = getAdminClient();
-    const fallbackEntitlement = {
-      id: `daily-${Date.now()}`,
-      provider_id: provider_id,
-      slot: slot || 'LUNCH',
-      payment_method: 'pay_on_counter',
-      is_paid: true,
-    };
+    const { data: provider } = await admin
+      .from('providers')
+      .select('id, display_name, status')
+      .eq('id', providerId)
+      .maybeSingle();
 
-    if (!admin) {
-      return NextResponse.json({
-        success: true,
-        entitlement: fallbackEntitlement,
-        message: 'Daily meal pass registered! Please pay on counter via Cash or UPI.',
-      });
+    if (!provider) {
+      return NextResponse.json({ success: false, error: 'Kitchen not found.' }, { status: 404 });
     }
 
-    // Verify provider
-    let providerName = 'Mess Partner';
-    let provId = provider_id;
-    try {
-      const { data: provider } = await admin
-        .from('providers')
-        .select('id, display_name, status')
-        .eq('id', provider_id)
-        .maybeSingle();
-
-      if (provider) {
-        provId = provider.id;
-        providerName = provider.display_name;
-      }
-    } catch {}
-
-    // Resolve or find/create customer profile
-    let resolvedCustomerId = customer_id;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!resolvedCustomerId || !isUuid.test(resolvedCustomerId)) {
-      resolvedCustomerId = crypto.randomUUID();
-      await admin.from('profiles').insert({
-        id: resolvedCustomerId,
-        display_name: 'Walk-in Customer',
-      });
-    } else {
-      const { data: prof } = await admin
-        .from('profiles')
-        .select('id')
-        .eq('id', resolvedCustomerId)
-        .maybeSingle();
-
-      if (!prof) {
-        await admin.from('profiles').insert({
-          id: resolvedCustomerId,
-          display_name: 'Customer',
-        });
-      }
-    }
-
-    // Find or create a single-day plan
+    // Look up authoritative single-meal price from provider's 1-credit plan or active menu items
     let { data: dailyPlan } = await admin
       .from('subscription_plans')
       .select('*')
-      .eq('provider_id', provider_id)
+      .eq('provider_id', providerId)
       .eq('plan_type', 'meal_credits')
-      .eq('duration_days', 1)
+      .eq('meal_credits', 1)
+      .eq('active', true)
       .maybeSingle();
 
     if (!dailyPlan) {
-      const { data: createdPlan } = await admin
+      const { data: menuPrices } = await admin
+        .from('menu_items')
+        .select('price_paise')
+        .eq('provider_id', providerId)
+        .eq('active', true)
+        .eq('is_add_on', false)
+        .gt('price_paise', 0)
+        .order('price_paise', { ascending: true })
+        .limit(1);
+
+      const authoritativePricePaise =
+        menuPrices && menuPrices.length > 0 && Number(menuPrices[0].price_paise) >= 1000
+          ? Number(menuPrices[0].price_paise)
+          : 8000;
+
+      const { data: createdPlan, error: planErr } = await admin
         .from('subscription_plans')
         .insert({
-          provider_id: provId,
-          name: `Daily ${slot || 'Meal'} Pass`,
+          provider_id: providerId,
+          name: `Daily ${slot} Pass`,
           description: 'Single meal coupon for today',
           plan_type: 'meal_credits',
-          duration_days: 1,
-          price_paise: Number(price_paise) || 8000,
+          duration_months: null,
           meal_credits: 1,
+          price_paise: authoritativePricePaise,
           daily_meal_limit: 1,
+          cancellation_policy: 'Valid for today only.',
+          missed_meal_policy: 'Unused daily pass expires after today.',
+          published: false,
           active: true,
         })
-        .select()
+        .select('*')
         .single();
+
+      if (planErr || !createdPlan) {
+        return NextResponse.json({ success: false, error: 'Could not prepare daily meal pass plan.' }, { status: 500 });
+      }
       dailyPlan = createdPlan;
     }
 
-    // Ensure slot is linked to plan
-    if (dailyPlan?.id) {
-      const { data: slots } = await admin
-        .from('meal_slots')
-        .select('id')
-        .eq('provider_id', provider_id);
+    await ensurePlanSlotsLinked(admin, providerId);
 
-      if (slots && slots.length > 0) {
-        await admin.from('plan_meal_slots').upsert(
-          slots.map((s) => ({ plan_id: dailyPlan.id, meal_slot_id: s.id })),
-          { onConflict: 'plan_id,meal_slot_id' }
-        );
-      }
-    }
-
-    // Insert 1-day subscription with 1 credit so scanning works
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const { data: subscription } = await admin
+    const subId = crypto.randomUUID();
+    const pricePaise = Number(dailyPlan.price_paise || 8000);
+
+    const { data: subscription, error: subErr } = await admin
       .from('subscriptions')
       .insert({
-        customer_id: resolvedCustomerId,
-        provider_id: provId,
-        plan_id: dailyPlan?.id || '00000000-0000-0000-0000-000000000001',
-        status: 'active',
+        id: subId,
+        customer_id: customerId,
+        provider_id: providerId,
+        plan_id: dailyPlan.id,
+        status: 'pending_payment',
         plan_type_snapshot: 'meal_credits',
-        plan_name_snapshot: dailyPlan?.name || `Daily ${slot || 'Meal'} Pass`,
-        terms_version_snapshot: 'v1.0-counter',
-        price_paid_paise: Number(price_paise) || 8000,
+        plan_name_snapshot: dailyPlan.name || `Daily ${slot} Pass`,
+        terms_version_snapshot: String(dailyPlan.terms_version || '1'),
+        price_paid_paise: pricePaise,
         initial_meal_credits: 1,
         remaining_meal_credits: 1,
         starts_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
-        activated_at: now.toISOString(),
-        payment_verified_at: now.toISOString(),
+        payment_mode: 'counter_cash',
       })
-      .select()
+      .select('*')
       .single();
+
+    if (subErr || !subscription) {
+      return NextResponse.json({ success: false, error: 'Could not register daily pass request.' }, { status: 500 });
+    }
+
+    platformStore.subscriptions.set(subId, {
+      id: subId,
+      customer_id: customerId,
+      provider_id: providerId,
+      plan_id: dailyPlan.id,
+      plan_type: 'meal_credits',
+      plan_name: dailyPlan.name,
+      status: 'pending_payment',
+      starts_at: now.toISOString(),
+      expires_at: expiresAt.toISOString(),
+      remaining_meal_credits: 1,
+      initial_meal_credits: 1,
+      price_paid_paise: pricePaise,
+      payment_mode: 'counter_cash',
+      created_at: now.toISOString(),
+    });
+
+    addPartnerNotification({
+      provider_id: providerId,
+      type: 'pending_payment',
+      title: 'Single Meal Cash Request',
+      message: `Customer requested a ₹${Math.round(pricePaise / 100)} ${slot} counter pass. Collect cash and approve before QR scan.`,
+      amount_inr: Math.round(pricePaise / 100),
+      subscription_id: subId,
+    });
 
     return NextResponse.json({
       success: true,
       entitlement: {
-        id: subscription?.id || `daily-${Date.now()}`,
-        provider_id: provId,
-        slot: slot || 'LUNCH',
-        payment_method: 'pay_on_counter',
-        is_paid: true,
+        id: subscription.id,
+        provider_id: providerId,
+        provider_name: provider.display_name,
+        slot,
+        payment_method: 'counter_cash',
+        status: 'pending_payment',
+        amount_inr: Math.round(pricePaise / 100),
+        is_paid: false,
       },
-      message: 'Daily meal pass activated! Please pay on counter via Cash or UPI.',
+      message: `Counter cash pass (₹${Math.round(pricePaise / 100)}) requested. Partner will approve once cash is collected.`,
     });
   } catch (err: any) {
-    console.error('Daily purchase API error, providing resilient fallback:', err);
-    return NextResponse.json({
-      success: true,
-      entitlement: {
-        id: `daily-${Date.now()}`,
-        provider_id: 'prov-fallback',
-        slot: 'LUNCH',
-        payment_method: 'pay_on_counter',
-        is_paid: true,
-      },
-      message: 'Daily meal pass registered! Please pay on counter via Cash or UPI.',
-    });
+    console.error('Daily purchase API error:', err?.message);
+    return NextResponse.json(
+      { success: false, error: 'Unable to register daily meal pass.' },
+      { status: 500 }
+    );
   }
 }

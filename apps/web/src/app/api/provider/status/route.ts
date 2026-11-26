@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
@@ -79,6 +80,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
   }
 
+  const access = await requireProviderOwnership(req, String(providerId));
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  }
+
   const isOpen = body.is_open === true || body.isOpen === true;
 
   // 1. Immediately store in memory so GET returns this manual choice
@@ -90,6 +96,7 @@ export async function POST(req: NextRequest) {
 
   if (db) {
     try {
+      await db.from('providers').update({ is_open: isOpen, updated_at: new Date().toISOString() }).eq('id', providerId).then(() => null, () => null);
       const { data: existing } = await db
         .from('provider_operating_hours')
         .select('id')

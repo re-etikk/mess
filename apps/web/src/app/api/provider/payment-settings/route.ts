@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { isAllowedMediaUrl } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,11 @@ export async function GET(req: NextRequest) {
 
   if (!providerId) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+  }
+
+  const access = await requireProviderOwnership(req, providerId);
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
   const admin = getAdminClient();
@@ -71,8 +77,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
     }
 
+    if (upiQrUrl && !isAllowedMediaUrl(upiQrUrl)) {
+      return NextResponse.json({ success: false, error: 'Invalid UPI QR image URL.' }, { status: 400 });
+    }
+
     const access = await requireProviderOwnership(req, providerId);
-    if (!access.ok && access.status !== 401) {
+    if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
 
@@ -107,14 +117,6 @@ export async function POST(req: NextRequest) {
           await admin
             .from('provider_billing_accounts')
             .insert(updatePayload);
-        }
-
-        // Also sync cover_path in providers table if a custom QR is uploaded
-        if (upiQrUrl) {
-          await admin
-            .from('providers')
-            .update({ cover_path: upiQrUrl })
-            .eq('id', providerId);
         }
       } catch (err: any) {
         console.error('Failed to update provider billing account in DB:', err?.message);

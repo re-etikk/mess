@@ -97,6 +97,9 @@ class KitchenQueueItem {
     this.riderId = '',
     this.riderName = '',
     this.riderPhone = '',
+    this.etaMinutes,
+    this.riderLat,
+    this.riderLng,
   });
 
   final String subscriptionId;
@@ -116,6 +119,9 @@ class KitchenQueueItem {
   final String riderId;
   final String riderName;
   final String riderPhone;
+  final int? etaMinutes;
+  final double? riderLat;
+  final double? riderLng;
 
   factory KitchenQueueItem.fromJson(Map<String, dynamic> j) => KitchenQueueItem(
         subscriptionId: j['subscription_id']?.toString() ?? '',
@@ -135,6 +141,9 @@ class KitchenQueueItem {
         riderId: j['rider_id']?.toString() ?? '',
         riderName: j['rider_name']?.toString() ?? '',
         riderPhone: j['rider_phone']?.toString() ?? '',
+        etaMinutes: (j['eta_minutes'] as num?)?.toInt(),
+        riderLat: (j['rider_lat'] as num?)?.toDouble(),
+        riderLng: (j['rider_lng'] as num?)?.toDouble(),
       );
 }
 

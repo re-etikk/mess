@@ -95,6 +95,7 @@ class AppState extends ChangeNotifier {
         authToken = data['authToken']?.toString() ?? '';
         refreshToken = data['refreshToken']?.toString() ?? '';
         isSignedIn = data['isSignedIn'] == true && customerId.isNotEmpty && authToken.isNotEmpty;
+        _syncRepoToken();
 
         if (isSignedIn && refreshToken.isNotEmpty) {
           try {
@@ -109,6 +110,7 @@ class AppState extends ChangeNotifier {
             if (refreshed.name.isNotEmpty) customerName = refreshed.name;
             authToken = refreshed.token;
             refreshToken = refreshed.refreshToken;
+            _syncRepoToken();
           } catch (_) {}
         }
 
@@ -266,6 +268,12 @@ class AppState extends ChangeNotifier {
 
   Future<MessProvider?> getProvider(String id) => repository.getProvider(id);
 
+  void _syncRepoToken() {
+    if (repository is HttpMessRepository) {
+      (repository as HttpMessRepository).authToken = authToken;
+    }
+  }
+
   void signIn({
     required String emailOrPhone,
     required String name,
@@ -284,6 +292,7 @@ class AppState extends ChangeNotifier {
     }
     if (name.trim().isNotEmpty) customerName = name.trim();
     if (token != null && token.isNotEmpty) authToken = token;
+    _syncRepoToken();
     if (refreshToken != null) this.refreshToken = refreshToken;
     if (userId != null && userId.isNotEmpty) customerId = userId;
     if (foodPref != null && foodPref.isNotEmpty) foodPreference = foodPref;
@@ -370,6 +379,7 @@ class AppState extends ChangeNotifier {
     isSignedIn = false;
     needsProfileSetup = false;
     authToken = '';
+    _syncRepoToken();
     refreshToken = '';
     customerId = '';
     customerName = '';

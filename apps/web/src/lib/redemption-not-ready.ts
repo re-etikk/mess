@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { verifyCounterQRToken } from '@/lib/crypto';
 import { addPartnerNotification } from '@/lib/partner-notifications';
+import { ensurePlanSlotsLinked, requireCustomerIdentity } from '@/lib/auth-session';
+import { checkRateLimit } from '@/lib/rate-limiter';
 
 /**
- * Executes atomic QR redemption if the database RPC is active,
- * or safely fails closed with zero credit deduction if the RPC is not yet applied.
+ * Executes atomic QR redemption via Postgres RPC `redeem_meal_atomic`.
+ * Strictly requires verified customer (or admin) authentication, NEVER auto-activates
+ * unpaid `pending_payment` passes, and returns slot + kitchen metadata cleanly.
  */
 export async function rejectUnimplementedRedemption(
   req: NextRequest,
@@ -17,9 +19,9 @@ export async function rejectUnimplementedRedemption(
     return NextResponse.json({ success: false, error: 'QR token is required.' }, { status: 400 });
   }
 
-  // 1. Verify token cryptographic integrity and date validity
+  // 1. Verify token cryptographic integrity and date/window validity
   const qrVerification = verifyCounterQRToken(token);
-  if (!qrVerification.isValid) {
+  if (!qrVerification.isValid || !qrVerification.providerId) {
     return NextResponse.json(
       {
         success: false,
@@ -31,47 +33,21 @@ export async function rejectUnimplementedRedemption(
   }
 
   try {
-    // 2. Authenticate the customer
-    const bearer = req.headers.get('authorization');
-    let user: { id: string; email?: string } | null = null;
+    // 2. Cryptographically authenticate caller & bind customer identity
+    const auth = await requireCustomerIdentity(req, customerIdParam);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+
+    const rl = checkRateLimit(`scan:${auth.userId}`, 15, 60 * 1000);
+    if (!rl.isAllowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many scan attempts. Please wait a minute.' },
+        { status: 429 }
+      );
+    }
+
     const admin = getAdminClient();
-
-    if (bearer?.startsWith('Bearer ')) {
-      if (admin) {
-        const result = await admin.auth.getUser(bearer.slice(7).trim()).catch(() => ({ data: { user: null } }));
-        user = result.data.user;
-      }
-    } else {
-      try {
-        const supabase = await createClient();
-        const result = await supabase.auth.getUser();
-        user = result.data.user;
-      } catch {
-        // Fallback to customerIdParam
-      }
-    }
-
-    if (!user && customerIdParam) {
-      const cleanParam = customerIdParam.trim();
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (isUuid.test(cleanParam)) {
-        user = { id: cleanParam };
-      } else if (admin) {
-        try {
-          const { data: profile } = await admin
-            .from('profiles')
-            .select('id')
-            .or(`id.eq.${cleanParam},phone_e164.eq.${cleanParam}`)
-            .maybeSingle();
-          if (profile) user = { id: profile.id };
-        } catch {}
-      }
-    }
-
-    if (!user) {
-      return NextResponse.json({ success: false, error: 'Authentication required to redeem meals.' }, { status: 401 });
-    }
-
     if (!admin) {
       return NextResponse.json(
         {
@@ -83,50 +59,22 @@ export async function rejectUnimplementedRedemption(
       );
     }
 
-    // 3. Attempt atomic stored procedure execution
-    let rpcRes = await admin.rpc('redeem_meal_atomic', {
-      p_customer_id: user.id,
+    const slotLower = (qrVerification.slot || 'lunch').toLowerCase();
+    const slotUpper = slotLower.toUpperCase();
+    const serviceDateStr = String(qrVerification.date || new Date().toISOString().slice(0, 10));
+
+    // Ensure slot exists and is linked to active provider plans before RPC executes
+    await ensurePlanSlotsLinked(admin, qrVerification.providerId);
+
+    // 3. Execute atomic stored procedure ONLY for verified active/paid subscriptions
+    const { data, error } = await admin.rpc('redeem_meal_atomic', {
+      p_customer_id: auth.userId,
       p_provider_id: qrVerification.providerId,
-      p_service_date: qrVerification.date,
-      p_slot_name: (qrVerification.slot || 'lunch').toLowerCase(),
+      p_service_date: serviceDateStr,
+      p_slot_name: slotLower,
     });
 
-    // If no active subscription found, check if student has a pending_payment pass/subscription that can be auto-activated
-    if (rpcRes.data && rpcRes.data.success === false && rpcRes.data.code === 'NO_ACTIVE_SUBSCRIPTION') {
-      try {
-        const { data: pendingSub } = await admin
-          .from('subscriptions')
-          .select('id, plan_id, plan_type_snapshot')
-          .eq('customer_id', user.id)
-          .eq('provider_id', qrVerification.providerId)
-          .eq('status', 'pending_payment')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (pendingSub) {
-          await admin
-            .from('subscriptions')
-            .update({ status: 'active', updated_at: new Date().toISOString() })
-            .eq('id', pendingSub.id);
-
-          // Retry atomic redemption with newly activated subscription
-          rpcRes = await admin.rpc('redeem_meal_atomic', {
-            p_customer_id: user.id,
-            p_provider_id: qrVerification.providerId,
-            p_service_date: qrVerification.date,
-            p_slot_name: (qrVerification.slot || 'lunch').toLowerCase(),
-          });
-        }
-      } catch (err) {
-        console.warn('Pending subscription check failed:', err);
-      }
-    }
-
-    const { data, error } = rpcRes;
-
     if (error) {
-      // If RPC is missing on the database, fail closed safely
       if (error.code === '42883' || error.code === 'PGRST202') {
         return NextResponse.json(
           {
@@ -141,7 +89,6 @@ export async function rejectUnimplementedRedemption(
       return NextResponse.json({ success: false, error: 'Redemption check failed. No credit was deducted.' }, { status: 503 });
     }
 
-    // 4. Handle RPC result
     if (data && typeof data === 'object') {
       if (data.success === false) {
         return NextResponse.json(
@@ -153,24 +100,29 @@ export async function rejectUnimplementedRedemption(
           { status: 400 }
         );
       }
+
+      let providerName = 'Mess Counter';
       try {
-        const slotUpper = (qrVerification.slot || 'lunch').toUpperCase();
-        const serviceDateStr = String(qrVerification.date || new Date().toISOString().slice(0, 10));
-        const { data: activeSub } = await admin
-          .from('subscriptions')
-          .select('id')
-          .eq('customer_id', user.id)
-          .eq('provider_id', qrVerification.providerId)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const [{ data: provRow }, { data: activeSub }] = await Promise.all([
+          admin.from('providers').select('display_name').eq('id', qrVerification.providerId).maybeSingle(),
+          admin
+            .from('subscriptions')
+            .select('id')
+            .eq('customer_id', auth.userId)
+            .eq('provider_id', qrVerification.providerId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+
+        if (provRow?.display_name) providerName = provRow.display_name;
 
         if (activeSub?.id) {
           await admin.from('daily_meal_events').upsert(
             {
               subscription_id: activeSub.id,
-              customer_id: user.id,
+              customer_id: auth.userId,
               provider_id: qrVerification.providerId,
               service_date: serviceDateStr,
               slot: slotUpper,
@@ -181,19 +133,28 @@ export async function rejectUnimplementedRedemption(
             { onConflict: 'subscription_id,service_date,slot' }
           );
         }
-      } catch (_) {}
+      } catch {}
+
       try {
-        if (qrVerification.providerId) {
-          addPartnerNotification({
-            provider_id: qrVerification.providerId,
-            type: 'redemption',
-            title: 'Meal Redeemed',
-            message: `${user.email?.split('@')[0] || 'Student'} checked in at counter for ${(qrVerification.slot || 'lunch').toUpperCase()}`,
-            customer_name: user.email?.split('@')[0] || 'Student',
-          });
-        }
-      } catch (_) {}
-      return NextResponse.json({ success: true, ...data }, { status: 200 });
+        addPartnerNotification({
+          provider_id: qrVerification.providerId,
+          type: 'redemption',
+          title: 'Meal Redeemed',
+          message: `${auth.email?.split('@')[0] || 'Subscriber'} checked in at counter for ${slotUpper}`,
+          customer_name: auth.email?.split('@')[0] || 'Subscriber',
+        });
+      } catch {}
+
+      return NextResponse.json(
+        {
+          success: true,
+          ...data,
+          slot: slotUpper,
+          provider_name: providerName,
+          provider_id: qrVerification.providerId,
+        },
+        { status: 200 }
+      );
     }
 
     return NextResponse.json(

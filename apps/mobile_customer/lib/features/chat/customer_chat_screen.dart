@@ -6,7 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/animations/thali_animations.dart';
-import '../../core/theme/mess_theme.dart';
+import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 
 class CustomerChatScreen extends StatefulWidget {
@@ -104,11 +104,17 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
 
   Future<void> _loadMessages({bool silent = false}) async {
     if (!silent && _messages.isEmpty) setState(() => _loading = true);
+    final state = AppStateScope.of(context, listen: false);
     final customerId = _getCustomerId();
 
     try {
       final uri = Uri.parse('$_defaultBaseUrl/api/chat/messages?provider_id=${widget.providerId}&customer_id=$customerId');
-      final res = await http.get(uri).timeout(const Duration(seconds: 10));
+      final res = await http.get(
+        uri,
+        headers: {
+          if (state.authToken.isNotEmpty) 'Authorization': 'Bearer ${state.authToken}',
+        },
+      ).timeout(const Duration(seconds: 10));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -169,10 +175,14 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
     _scrollToBottom();
 
     try {
+      final token = AppStateScope.of(context, listen: false).authToken;
       final uri = Uri.parse('$_defaultBaseUrl/api/chat/messages');
       await http.post(
         uri,
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
         body: jsonEncode({
           'provider_id': widget.providerId,
           'customer_id': customerId,
@@ -220,7 +230,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(widget.providerName, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-            const Text('Thali Partner Chat', style: TextStyle(color: MessColors.green, fontSize: 11, fontWeight: FontWeight.w600)),
+            const Text('Thali Partner Chat', style: TextStyle(color: ThaliColors.green, fontSize: 11, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -243,7 +253,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
           ),
           Expanded(
             child: _loading
-                ? const Center(child: SpinnerArc(size: 34, color: MessColors.orange))
+                ? const Center(child: SpinnerArc(size: 34, color: ThaliColors.primary))
                 : _messages.isEmpty
                     ? Center(
                         child: Padding(
@@ -251,14 +261,14 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.chat_bubble_outline_rounded, size: 54, color: MessColors.muted),
+                              const Icon(Icons.chat_bubble_outline_rounded, size: 54, color: ThaliColors.muted),
                               const SizedBox(height: 14),
                               Text('Chat with ${widget.providerName}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: ThaliColors.ink)),
                               const SizedBox(height: 6),
                               const Text(
                                 'Ask about today\'s special menu, timing adjustments, delivery details, or payment questions.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: MessColors.muted, fontSize: 13, height: 1.4),
+                                style: TextStyle(color: ThaliColors.muted, fontSize: 13, height: 1.4),
                               ),
                             ],
                           ),
@@ -280,14 +290,14 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                               constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
-                                color: isCustomer ? MessColors.orangeDark : Colors.white,
+                                color: isCustomer ? ThaliColors.primaryPressed : Colors.white,
                                 borderRadius: BorderRadius.only(
                                   topLeft: const Radius.circular(16),
                                   topRight: const Radius.circular(16),
                                   bottomLeft: Radius.circular(isCustomer ? 16 : 4),
                                   bottomRight: Radius.circular(isCustomer ? 4 : 16),
                                 ),
-                                border: isCustomer ? null : Border.all(color: MessColors.border),
+                                border: isCustomer ? null : Border.all(color: ThaliColors.stroke),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.black.withOpacity(0.04),
@@ -329,12 +339,12 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
             decoration: const BoxDecoration(
               color: Colors.white,
-              border: Border(top: BorderSide(color: MessColors.border)),
+              border: Border(top: BorderSide(color: ThaliColors.stroke)),
             ),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.photo_camera_outlined, color: MessColors.muted),
+                  icon: const Icon(Icons.photo_camera_outlined, color: ThaliColors.muted),
                   onPressed: _pickAndSendPhoto,
                 ),
                 Expanded(
@@ -343,7 +353,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                     decoration: InputDecoration(
                       hintText: 'Type your message...',
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: MessColors.border)),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: ThaliColors.stroke)),
                       filled: true,
                       fillColor: const Color(0xFFF8FAFC),
                     ),
@@ -352,7 +362,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 CircleAvatar(
-                  backgroundColor: MessColors.orangeDark,
+                  backgroundColor: ThaliColors.primaryPressed,
                   child: IconButton(
                     icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                     onPressed: () => _sendMessage(),

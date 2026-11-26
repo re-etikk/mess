@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
           customer_id,
           plan_id,
           status,
+          payment_mode,
           plan_type_snapshot,
           plan_name_snapshot,
           price_paid_paise,
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
             plan_type: sub.plan_type_snapshot || 'fixed_period',
             amount_inr: pricePaise / 100,
             status: sub.status === 'active' ? 'paid' : sub.status,
-            payment_mode: cfTx ? 'online_cashfree' : 'counter_cash',
+            payment_mode: cfTx ? 'online_cashfree' : (sub.payment_mode || 'counter_cash'),
             receipt_url: '',
             created_at: sub.created_at,
             paid_at: sub.payment_verified_at || sub.created_at,

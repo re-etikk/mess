@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore } from '@/lib/platform-service';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,10 +11,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
   }
 
+  const access = await requireProviderOwnership(req, providerId);
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  }
+
   const allMessages: any[] = [];
   const seenIds = new Set<string>();
 
-  // 1. Fetch from Supabase DB
   const admin = getAdminClient();
   if (admin) {
     try {
@@ -33,7 +38,6 @@ export async function GET(req: NextRequest) {
     } catch {}
   }
 
-  // 2. Fetch from platformStore
   for (const m of platformStore.chatMessages) {
     if (m.provider_id === providerId && !seenIds.has(m.id)) {
       seenIds.add(m.id);
@@ -41,17 +45,18 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Group by customer_id
   allMessages.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-  const conversationsMap = new Map<string, {
-    customer_id: string;
-    customer_name: string;
-    last_message: string;
-    last_message_at: string;
-    unread_count: number;
-    encrypted: boolean;
-  }>();
+  const conversationsMap = new Map<
+    string,
+    {
+      customer_id: string;
+      customer_name: string;
+      last_message: string;
+      last_message_at: string;
+      unread_count: number;
+    }
+  >();
 
   for (const msg of allMessages) {
     const existing = conversationsMap.get(msg.customer_id);
@@ -61,8 +66,7 @@ export async function GET(req: NextRequest) {
         customer_name: msg.sender_role === 'customer' ? msg.sender_name : 'Customer',
         last_message: msg.message,
         last_message_at: msg.created_at,
-        unread_count: (!msg.is_read && msg.sender_role === 'customer') ? 1 : 0,
-        encrypted: true,
+        unread_count: !msg.is_read && msg.sender_role === 'customer' ? 1 : 0,
       });
     } else {
       if (!msg.is_read && msg.sender_role === 'customer') {
@@ -74,9 +78,11 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({
-    success: true,
-    encrypted: true,
-    conversations: Array.from(conversationsMap.values()),
-  }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json(
+    {
+      success: true,
+      conversations: Array.from(conversationsMap.values()),
+    },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 }

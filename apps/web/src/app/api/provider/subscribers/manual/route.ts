@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { ensurePlanSlotsLinked } from '@/lib/auth-session';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -41,15 +42,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Resolve or Create Customer in public.profiles
+    // 1. Resolve or Create Customer in auth.users + public.profiles
     const phoneClean = (customer_phone || '').replace(/\D/g, '').slice(-10);
+    const phoneE164 = phoneClean.length === 10 ? `+91${phoneClean}` : null;
     let customerId: string | null = null;
 
-    if (phoneClean) {
+    if (phoneE164) {
       const { data: existing } = await admin
         .from('profiles')
         .select('id')
-        .eq('phone_e164', phoneClean)
+        .or(`phone_e164.eq.${phoneE164},phone_e164.eq.${phoneClean}`)
+        .limit(1)
         .maybeSingle();
 
       if (existing) {
@@ -58,21 +61,40 @@ export async function POST(req: NextRequest) {
     }
 
     if (!customerId) {
-      customerId = crypto.randomUUID();
-      await admin.from('profiles').insert({
-        id: customerId,
-        display_name: customer_name?.trim() || 'Counter Member',
-        phone_e164: phoneClean || null,
-      });
+      const placeholderEmail = `walkin.${phoneClean || Date.now()}@counter.thali.local`;
+      const { data: createdUser } = await admin.auth.admin
+        .createUser({
+          email: placeholderEmail,
+          phone: phoneE164 || undefined,
+          email_confirm: true,
+          user_metadata: { display_name: customer_name?.trim() || 'Counter Member', role: 'customer', walkin: true },
+        })
+        .catch(() => ({ data: null as any }));
+      customerId = createdUser?.user?.id || null;
+      if (customerId) {
+        await admin.from('profiles').upsert({
+          id: customerId,
+          display_name: customer_name?.trim() || 'Counter Member',
+          phone_e164: phoneE164,
+        });
+      }
     }
 
-    // 2. Resolve Plan
+    if (!customerId) {
+      return NextResponse.json(
+        { success: false, error: 'Could not register member account. Provide a valid 10-digit phone number.' },
+        { status: 400 }
+      );
+    }
+
+    // 2. Resolve Plan belonging to this provider
     let plan: any = null;
     if (plan_id) {
       const { data: p } = await admin
         .from('subscription_plans')
         .select('*')
         .eq('id', plan_id)
+        .eq('provider_id', provider_id)
         .maybeSingle();
       plan = p;
     }
@@ -89,29 +111,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const durDays = Number(custom_days) || plan?.duration_days || 30;
-    const planType = plan?.plan_type === 'meal_credits' ? 'meal_credits' : 'fixed_period';
-    const credits = planType === 'meal_credits' ? (Number(custom_credits) || plan?.meal_credits || 60) : null;
-    const pricePaise = amount_paid_inr ? Number(amount_paid_inr) * 100 : (plan?.price_paise || 250000);
+    if (!plan) {
+      return NextResponse.json(
+        { success: false, error: 'Create at least one subscription plan before enrolling a walk-in member.' },
+        { status: 400 }
+      );
+    }
+
+    const durDays = Math.max(1, Number(custom_days) || plan.duration_days || (plan.duration_months ? Number(plan.duration_months) * 30 : 30));
+    const planType = plan.plan_type === 'meal_credits' ? 'meal_credits' : 'fixed_period';
+    const credits = planType === 'meal_credits' ? (Number(custom_credits) || plan.meal_credits || 60) : null;
+    const rawInr = amount_paid_inr != null && amount_paid_inr !== '' ? Number(amount_paid_inr) : null;
+    const pricePaise = rawInr != null && Number.isFinite(rawInr) && rawInr >= 10 ? Math.round(rawInr * 100) : Number(plan.price_paise || 0);
+    if (pricePaise < 100) {
+      return NextResponse.json({ success: false, error: 'Collected amount must be at least ₹1.' }, { status: 400 });
+    }
+    const normalizedMode = String(payment_mode).toLowerCase().includes('upi') ? 'counter_upi' : 'counter_cash';
 
     const now = new Date();
     const expiresAt = new Date(now.getTime() + durDays * 24 * 60 * 60 * 1000);
 
-    // 3. Ensure slots are linked
-    if (plan?.id) {
-      const { data: slots } = await admin
-        .from('meal_slots')
-        .select('id')
-        .eq('provider_id', provider_id)
-        .eq('active', true);
-
-      if (slots && slots.length > 0) {
-        await admin.from('plan_meal_slots').upsert(
-          slots.map((s) => ({ plan_id: plan.id, meal_slot_id: s.id })),
-          { onConflict: 'plan_id,meal_slot_id' }
-        );
-      }
-    }
+    await ensurePlanSlotsLinked(admin, provider_id);
 
     // 4. Insert Active Subscription
     const { data: subscription, error: subError } = await admin
@@ -119,10 +139,11 @@ export async function POST(req: NextRequest) {
       .insert({
         customer_id: customerId,
         provider_id: provider_id,
-        plan_id: plan?.id || '00000000-0000-0000-0000-000000000001',
+        plan_id: plan.id,
         status: 'active',
+        payment_mode: normalizedMode,
         plan_type_snapshot: planType,
-        plan_name_snapshot: plan?.name || `${durDays}-Day Member Pass`,
+        plan_name_snapshot: plan.name || `${durDays}-Day Member Pass`,
         terms_version_snapshot: 'v1.0-counter-manual',
         price_paid_paise: pricePaise,
         initial_meal_credits: credits,

@@ -447,6 +447,21 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
                 ),
             ],
           ),
+          if (item.riderName.isNotEmpty || item.etaMinutes != null || (item.riderLat != null && item.riderLng != null)) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (item.riderName.isNotEmpty)
+                  _tag('Rider: ${item.riderName}', Icons.delivery_dining_outlined),
+                if (item.etaMinutes != null)
+                  _tag('ETA ${item.etaMinutes} min', Icons.schedule_rounded),
+                if (item.riderLat != null && item.riderLng != null)
+                  _tag('GPS Active', Icons.my_location_rounded),
+              ],
+            ),
+          ],
           if (item.deliveryAddress.isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(

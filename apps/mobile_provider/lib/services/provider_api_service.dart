@@ -8,8 +8,6 @@ class ProviderApiService {
     'API_BASE_URL',
     defaultValue: 'https://www.thali.store',
   );
-  static const String supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
-  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
 
   static String friendlyError(
     Object error, {
@@ -215,11 +213,13 @@ class ProviderApiService {
     required String password,
     required String address,
     required String city,
+    String state = 'India',
+    String pincode = '',
     bool supportsDelivery = false,
     bool supportsPickup = true,
   }) async {
-    if (!email.trim().contains('@') || password.trim().length < 6) {
-      throw Exception('Valid partner email and password (min 6 characters) are required.');
+    if (!email.trim().contains('@') || password.trim().length < 8) {
+      throw Exception('Valid partner email and password (min 8 characters) are required.');
     }
     final uri = Uri.parse('$baseUrl/api/provider/register');
     http.Response response;
@@ -236,6 +236,8 @@ class ProviderApiService {
               'phone': phone.trim(),
               'address': address.trim(),
               'city': city.trim(),
+              'state': state.trim().isNotEmpty ? state.trim() : 'India',
+              if (pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
               'supports_delivery': supportsDelivery,
               'supports_pickup': supportsPickup,
             }),
@@ -276,21 +278,7 @@ class ProviderApiService {
           .map((item) => item as Map<String, dynamic>)
           .toList();
 
-      int activePlansCount = (metrics['active_plans_count'] as num?)?.toInt() ?? 0;
-      if (activePlansCount == 0) {
-        try {
-          const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
-          const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-          final pRes = await http.get(
-            Uri.parse('$supabaseUrl/rest/v1/subscription_plans?provider_id=eq.$providerId&active=eq.true&select=id'),
-            headers: {'apikey': supabaseKey, 'Authorization': 'Bearer $supabaseKey'},
-          ).timeout(const Duration(seconds: 5));
-          if (pRes.statusCode == 200) {
-            final pList = jsonDecode(pRes.body) as List<dynamic>;
-            if (pList.isNotEmpty) activePlansCount = pList.length;
-          }
-        } catch (_) {}
-      }
+      final int activePlansCount = (metrics['active_plans_count'] as num?)?.toInt() ?? 0;
 
       final providerObj = data['provider'] as Map<String, dynamic>? ?? {};
       final rawAvg = metrics['average_rating'];
@@ -356,7 +344,7 @@ class ProviderApiService {
       }
     } catch (_) {}
 
-    return 'MESS_QR|$providerId|$todayStr|$slotVal|${now.millisecondsSinceEpoch}|${now.millisecondsSinceEpoch + 1800000}|auth_valid';
+    throw Exception('Counter QR could not be fetched. Check internet connection and retry.');
   }
 
   static Future<List<Map<String, dynamic>>> fetchPendingSubscriptions(String providerId) async {
@@ -791,30 +779,6 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to add menu item');
     }
-
-    // Direct atomic write to Supabase REST table for 100% customer coordination
-    try {
-      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
-      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-      await http.post(
-        Uri.parse('$supabaseUrl/rest/v1/menu_items'),
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': 'Bearer $supabaseKey',
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: jsonEncode({
-          'provider_id': providerId,
-          'name': name,
-          'description': '${slot.toLowerCase()} ${isExtra ? "add-on" : "item"}',
-          'dietary_type': 'vegetarian',
-          'price_paise': price * 100,
-          'is_add_on': isExtra,
-          'active': true,
-        }),
-      ).timeout(const Duration(seconds: 6));
-    } catch (_) {}
   }
 
   static Future<void> removeMenuItem({
@@ -841,18 +805,6 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to remove menu item');
     }
-
-    try {
-      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
-      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-      await http.delete(
-        Uri.parse('$supabaseUrl/rest/v1/menu_items?provider_id=eq.$providerId&name=ilike.${Uri.encodeComponent(name)}'),
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': 'Bearer $supabaseKey',
-        },
-      ).timeout(const Duration(seconds: 6));
-    } catch (_) {}
   }
 
   static Future<void> toggleMenuAvailability({
@@ -916,34 +868,6 @@ class ProviderApiService {
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to save plan');
     }
-
-    try {
-      const supabaseUrl = 'https://mrbtwsrknqofjkrbssww.supabase.co';
-      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-      final isFixed = planType == 'fixed_period';
-      final durMonths = isFixed ? (durationDays >= 30 ? (durationDays ~/ 30) : 1) : null;
-      await http.post(
-        Uri.parse('$supabaseUrl/rest/v1/subscription_plans'),
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': 'Bearer $supabaseKey',
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: jsonEncode({
-          'provider_id': providerId,
-          'name': name,
-          'description': description,
-          'plan_type': planType,
-          'duration_months': durMonths,
-          'meal_credits': !isFixed ? (mealCredits ?? 60) : null,
-          'price_paise': priceInr * 100,
-          'currency': 'INR',
-          'active': true,
-          'published': true,
-        }),
-      ).timeout(const Duration(seconds: 6));
-    } catch (_) {}
   }
 
   static Future<void> deletePlan({

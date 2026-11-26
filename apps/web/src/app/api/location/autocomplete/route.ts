@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { sanitizePostgrestSearch } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -120,8 +121,10 @@ export async function GET(req: NextRequest) {
     try {
       let provQ = admin.from('providers').select('locality,city,state,latitude,longitude').eq('status', 'active').limit(50);
       if (input) {
-        const esc = input.replace(/[\\%_]/g, '\\$&');
-        provQ = provQ.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%`);
+        const esc = sanitizePostgrestSearch(input);
+        if (esc) {
+          provQ = provQ.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%`);
+        }
       }
       const { data: provLocs } = await provQ;
       const seen = new Set<string>();

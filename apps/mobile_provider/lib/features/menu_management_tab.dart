@@ -238,8 +238,35 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
   @override
   Widget build(BuildContext context) {
     final slotMap = _currentSlotMap();
-    final included = ((slotMap?['items_included'] as List?) ?? const []).map((e) => e.toString()).toList();
-    final extras = ((slotMap?['items_extra'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    final rawItems = ((slotMap?['items'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    final dayMatches = rawItems.where((it) {
+      if (_selectedDay == 'Daily') return true;
+      final dow = (it['day_of_week']?.toString() ?? 'Daily').trim();
+      return dow.isEmpty || dow == 'Daily' || dow.toLowerCase() == _selectedDay.toLowerCase();
+    }).toList();
+    final included = rawItems.isNotEmpty
+        ? dayMatches
+            .where((it) => it['is_add_on'] != true && it['active'] != false)
+            .map((it) => it['name']?.toString() ?? '')
+            .where((s) => s.isNotEmpty)
+            .toList()
+        : ((slotMap?['items_included'] as List?) ?? const []).map((e) => e.toString()).toList();
+    final extras = rawItems.isNotEmpty
+        ? dayMatches
+            .where((it) => it['is_add_on'] == true && it['active'] != false)
+            .map((it) => {
+                  'id': it['id'],
+                  'name': it['name']?.toString() ?? 'Extra',
+                  'price_paise': it['price_paise'] ?? 0,
+                  'price': (((it['price_paise'] as num?)?.toInt() ?? 0) / 100).round(),
+                  'limit': it['max_quantity'] ?? 5,
+                  'is_available': it['active'] != false,
+                })
+            .toList()
+        : ((slotMap?['items_extra'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     final unavailable = ((slotMap?['items_unavailable'] as List?) ?? const []).map((e) => e.toString().toLowerCase()).toSet();
 
     return Scaffold(
@@ -263,8 +290,8 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                       ),
                       TextButton.icon(
                         onPressed: _aiSnapMenuSheet,
-                        icon: const Icon(Icons.auto_awesome_rounded, size: 17, color: ThaliColors.greenDark),
-                        label: const Text('AI Snap', style: TextStyle(color: ThaliColors.greenDark, fontWeight: FontWeight.w700)),
+                        icon: const Icon(Icons.document_scanner_outlined, size: 17, color: ThaliColors.ink),
+                        label: const Text('Scan Menu', style: TextStyle(color: ThaliColors.ink, fontWeight: FontWeight.w700)),
                       ),
                       TextButton.icon(
                         onPressed: _addItemSheet,
@@ -487,11 +514,11 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    const Icon(Icons.auto_awesome_rounded, size: 20, color: ThaliColors.primary),
+                    const Icon(Icons.document_scanner_outlined, size: 20, color: ThaliColors.ink),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'AI Snap Menu (${_selectedSlot[0].toUpperCase()}${_selectedSlot.substring(1)} · $_selectedDay)',
+                        'Scan Menu (${_selectedSlot[0].toUpperCase()}${_selectedSlot.substring(1)} · $_selectedDay)',
                         style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
                       ),
                     ),
@@ -499,7 +526,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Type today\'s menu in Hinglish or snap/pick a photo of your whiteboard.',
+                  'Paste your dishes list or pick a photo of your menu board.',
                   style: TextStyle(fontSize: 12, color: ThaliColors.muted),
                 ),
                 const SizedBox(height: 12),
@@ -507,8 +534,8 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                   controller: textCtrl,
                   maxLines: 3,
                   decoration: const InputDecoration(
-                    labelText: 'Hinglish / Hindi Menu Text',
-                    hintText: 'e.g. Aaj rajma chawal, 4 roti, raita, extra gulab jamun 25 rs',
+                    labelText: 'Dishes Text',
+                    hintText: 'e.g. Rajma chawal, 4 roti, raita, extra gulab jamun 25',
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -661,7 +688,7 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                         }
                         if (ctx.mounted) Navigator.pop(ctx);
                         if (mounted) {
-                          showPartnerNotice(context, 'Published AI menu items to $_selectedSlot!');
+                          showPartnerNotice(context, 'Published menu items to $_selectedSlot.');
                           await _loadMenu();
                         }
                       } catch (e) {

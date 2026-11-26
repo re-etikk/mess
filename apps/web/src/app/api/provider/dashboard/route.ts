@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
@@ -8,19 +7,14 @@ import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-
-function getClientSafe() {
+async function getClientSafe() {
   const db = getAdminClient();
   if (db) return db;
   try {
-    const sClient = createClient();
-    if (sClient) return sClient;
-  } catch {}
-  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+    return await createClient();
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -28,7 +22,7 @@ export async function GET(req: NextRequest) {
   const access = await requireProviderOwnership(req, providerId);
   if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
 
-  const client = getClientSafe();
+  const client = await getClientSafe();
   if (!client) return NextResponse.json({ success: false, error: 'Provider data service is not configured.' }, { status: 503 });
 
   try {
@@ -41,11 +35,11 @@ export async function GET(req: NextRequest) {
       client.from('providers').select('id,display_name,status,timezone,locality,city').eq('id', providerId).maybeSingle(),
       client.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', providerId).eq('active', true),
       client.from('subscriptions').select('id,price_paid_paise,payment_mode', { count: 'exact' }).eq('provider_id', providerId).eq('status', 'active'),
-      client.from('subscriptions').select('id,price_paid_paise').eq('provider_id', providerId).eq('status', 'pending_payment'),
+      client.from('subscriptions').select('id,price_paid_paise,payment_mode').eq('provider_id', providerId).eq('status', 'pending_payment'),
       client.from('subscription_plans').select('id', { count: 'exact', head: true }).eq('provider_id', providerId).eq('active', true),
       client
         .from('meal_redemptions')
-        .select('id,redeemed_at,customer_id,subscription_id,confirmation_method,profiles:customer_id(display_name)', { count: 'exact' })
+        .select('id,redeemed_at,customer_id,subscription_id,meal_slot_id,confirmation_method,profiles:customer_id(display_name),meal_slots:meal_slot_id(name)', { count: 'exact' })
         .eq('provider_id', providerId)
         .order('redeemed_at', { ascending: false })
         .limit(15),
@@ -81,19 +75,21 @@ export async function GET(req: NextRequest) {
 
     const recent = (scans?.data ?? []).map((row: any) => {
       const prof = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      const slotRow = Array.isArray(row.meal_slots) ? row.meal_slots[0] : row.meal_slots;
+      const scanDate = row.redeemed_at ? getIndiaDateString(new Date(row.redeemed_at)) : today;
       return {
         id: row.id,
         user_id: row.customer_id,
         customer_name: prof?.display_name || 'Subscriber',
         subscription_id: row.subscription_id,
-        slot: current?.name || 'LUNCH',
-        date: today,
+        slot: String(slotRow?.name || current?.name || 'LUNCH').toUpperCase(),
+        date: scanDate,
         redeemed_at: row.redeemed_at,
         confirmation_method: row.confirmation_method || 'qr_scan',
       };
     });
 
-    const pendingCashList = pendingSubs.data ?? [];
+    const pendingCashList = (pendingSubs.data ?? []).filter((s: any) => s.payment_mode !== 'online');
     const pendingCashInr = Math.round(
       pendingCashList.reduce((acc: number, s: any) => acc + Number(s.price_paid_paise || 0), 0) / 100
     );

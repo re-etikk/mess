@@ -20,13 +20,15 @@ export async function POST(req: NextRequest) {
     }
 
     const access = await requireProviderOwnership(req, providerId);
-    if (!access.ok && access.status !== 401) {
+    if (!access.ok) {
       return NextResponse.json({ success: false, error: access.error }, { status: access.status });
     }
 
     const now = new Date();
     let updatedInDb = false;
     let oldSubToUpgrade: string | null = null;
+    let approvedPlanName = 'Meal Pass';
+    let approvedCustomerId = '';
 
     // 1. Update in Supabase DB if available
     const admin = getAdminClient();
@@ -34,26 +36,40 @@ export async function POST(req: NextRequest) {
       try {
         const { data: currentSub } = await admin
           .from('subscriptions')
-          .select('id, plan_id, duration_days, initial_meal_credits, customer_id')
+          .select('id, status, plan_id, plan_name_snapshot, duration_days, initial_meal_credits, customer_id, starts_at, upgrade_from_subscription_id')
           .eq('id', subscriptionId)
           .eq('provider_id', providerId)
           .maybeSingle();
 
         if (currentSub) {
+          if (currentSub.status !== 'pending_payment') {
+            return NextResponse.json(
+              { success: false, error: `Subscription is already ${currentSub.status}.` },
+              { status: 400 }
+            );
+          }
+
+          approvedCustomerId = currentSub.customer_id || '';
+          approvedPlanName = currentSub.plan_name_snapshot || approvedPlanName;
+          oldSubToUpgrade = currentSub.upgrade_from_subscription_id || null;
+
           const dur = currentSub.duration_days || 30;
-          const expiresAt = new Date(now.getTime() + dur * 24 * 60 * 60 * 1000);
+          const existingStart = currentSub.starts_at ? new Date(currentSub.starts_at) : null;
+          const effectiveStart = existingStart && existingStart.getTime() > now.getTime() ? existingStart : now;
+          const expiresAt = new Date(effectiveStart.getTime() + dur * 24 * 60 * 60 * 1000);
 
           await admin
             .from('subscriptions')
             .update({
               status: 'active',
-              starts_at: now.toISOString(),
+              starts_at: effectiveStart.toISOString(),
               activated_at: now.toISOString(),
               payment_verified_at: now.toISOString(),
               expires_at: expiresAt.toISOString(),
               remaining_meal_credits: currentSub.initial_meal_credits || null,
             })
-            .eq('id', subscriptionId);
+            .eq('id', subscriptionId)
+            .eq('provider_id', providerId);
 
           updatedInDb = true;
         }
@@ -65,15 +81,22 @@ export async function POST(req: NextRequest) {
     // 2. Update in platformStore
     const storeSub = platformStore.subscriptions.get(subscriptionId);
     if (storeSub) {
+      if (!updatedInDb && storeSub.provider_id !== providerId) {
+        return NextResponse.json({ success: false, error: 'Subscription belongs to another kitchen.' }, { status: 403 });
+      }
       storeSub.status = 'active';
-      storeSub.starts_at = now.toISOString();
+      const existingStart = storeSub.starts_at ? new Date(storeSub.starts_at) : null;
+      const effectiveStart = existingStart && existingStart.getTime() > now.getTime() ? existingStart : now;
+      storeSub.starts_at = effectiveStart.toISOString();
       (storeSub as any).activated_at = now.toISOString();
       const dur = (storeSub as any).duration_days || (storeSub.plan_type === 'meal_credits' ? 45 : 30);
-      storeSub.expires_at = new Date(now.getTime() + dur * 24 * 60 * 60 * 1000).toISOString();
+      storeSub.expires_at = new Date(effectiveStart.getTime() + dur * 24 * 60 * 60 * 1000).toISOString();
       if (storeSub.plan_type === 'meal_credits') {
         storeSub.remaining_meal_credits = storeSub.initial_meal_credits || 30;
       }
-      oldSubToUpgrade = (storeSub as any).upgrade_from_subscription_id || null;
+      oldSubToUpgrade = oldSubToUpgrade || (storeSub as any).upgrade_from_subscription_id || null;
+      approvedCustomerId = approvedCustomerId || storeSub.customer_id;
+      approvedPlanName = storeSub.plan_name || approvedPlanName;
       platformStore.subscriptions.set(subscriptionId, storeSub);
 
       // Add in-app notification for customer
@@ -87,6 +110,23 @@ export async function POST(req: NextRequest) {
         is_read: false,
         created_at: now.toISOString(),
       });
+    }
+
+    if (!updatedInDb && !storeSub) {
+      return NextResponse.json({ success: false, error: 'Pending subscription not found.' }, { status: 404 });
+    }
+
+    if (admin && approvedCustomerId) {
+      await admin
+        .from('customer_notifications')
+        .insert({
+          customer_id: approvedCustomerId,
+          title: 'Payment Confirmed & Pass Activated',
+          message: `Your payment for ${approvedPlanName} was verified by the kitchen. Your pass is now active.`,
+          notification_type: 'system',
+          action_route: '/plans',
+        })
+        .then(() => null, () => null);
     }
 
     // Send confirmed invoice email when cash subscription is approved

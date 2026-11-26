@@ -120,10 +120,10 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                               setSheetState(() => drafting = false);
                             }
                           },
-                    icon: const Icon(Icons.auto_awesome_rounded, size: 15, color: ThaliColors.primary),
+                    icon: const Icon(Icons.edit_note_outlined, size: 15, color: ThaliColors.ink),
                     label: Text(
-                      drafting ? 'Drafting...' : 'AI Draft',
-                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ThaliColors.primary),
+                      drafting ? 'Drafting...' : 'Suggest reply',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
                     ),
                   ),
                 ],
@@ -257,17 +257,15 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                 if (_insights != null) ...[
                   const SizedBox(height: 12),
                   CardSurface(
-                    color: ThaliColors.primarySoft.withValues(alpha: 0.45),
-                    borderColor: ThaliColors.primary.withValues(alpha: 0.25),
                     padding: const EdgeInsets.all(14),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.auto_awesome_rounded, size: 16, color: ThaliColors.primary),
+                            Icon(Icons.analytics_outlined, size: 16, color: ThaliColors.ink),
                             SizedBox(width: 6),
-                            Text('AI Feedback Insights', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                            Text('Customer Summary', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -279,7 +277,7 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                           const SizedBox(height: 6),
                           Text(
                             'Focus: ${_insights!['focus_area']}',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.primaryDark),
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.primary),
                           ),
                         ],
                       ],

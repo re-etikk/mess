@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { ensurePlanSlotsLinked } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest) {
 
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -243,6 +244,11 @@ export async function POST(req: NextRequest) {
           { onConflict: 'provider_id,weekday' }
         );
       }
+    }
+
+    const adminClient = getAdminClient();
+    if (adminClient) {
+      await ensurePlanSlotsLinked(adminClient, input.provider_id);
     }
 
     return NextResponse.json({ success: true, message: 'Operating timings persisted successfully.' });

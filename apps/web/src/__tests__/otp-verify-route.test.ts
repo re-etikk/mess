@@ -40,7 +40,9 @@ describe('POST /api/auth/otp/verify', () => {
     };
     const otpUpdate = {
       update: () => otpUpdate,
-      eq: async () => ({ error: null }),
+      eq: () => otpUpdate,
+      select: () => otpUpdate,
+      maybeSingle: async () => ({ data: { id: record.id }, error: null }),
     };
     const profileSelect = {
       select: () => profileSelect,

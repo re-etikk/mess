@@ -31,6 +31,20 @@ export async function handleCashfreeWebhook(req: NextRequest) {
     );
   }
 
+  // Reject stale webhook replays outside a 10-minute window in live environments
+  if (process.env.NODE_ENV !== 'test' && timestamp) {
+    const numTs = Number(timestamp);
+    if (Number.isFinite(numTs) && numTs > 0) {
+      const tsMs = numTs < 1e12 ? numTs * 1000 : numTs;
+      if (Math.abs(Date.now() - tsMs) > 10 * 60 * 1000) {
+        return NextResponse.json(
+          { success: false, error: 'Webhook timestamp expired.' },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
   let payload: any;
   try {
     payload = JSON.parse(rawBody);

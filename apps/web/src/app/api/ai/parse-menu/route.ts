@@ -19,8 +19,11 @@ export async function POST(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
+  }
+  if (imageBase64 && imageBase64.length > 3_500_000) {
+    return NextResponse.json({ success: false, error: 'Image is too large. Keep menu photos under 2.5 MB.' }, { status: 400 });
   }
 
   const prompt = `You are a menu digitizer for an Indian tiffin & mess kitchen (${slot} meal).

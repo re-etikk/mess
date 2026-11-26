@@ -2,15 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { sanitizePostgrestSearch } from '@/lib/auth-session';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-
 function getFallbackClient() {
-  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) return null;
+  return createSupabaseClient(url, anon, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
@@ -61,6 +62,9 @@ export async function GET(req: NextRequest) {
       } catch (_) {}
     }
     supabase = supabase || getFallbackClient();
+    if (!supabase) {
+      return NextResponse.json({ success: true, total: 0, providers: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
 
     let providersQuery = supabase
       .from('providers')
@@ -71,11 +75,16 @@ export async function GET(req: NextRequest) {
       .order('display_name');
 
     if (city) {
-      providersQuery = providersQuery.ilike('city', `%${city.replace(/[\\%_]/g, '\\$&')}%`);
+      const safeCity = sanitizePostgrestSearch(city);
+      if (safeCity) {
+        providersQuery = providersQuery.ilike('city', `%${safeCity}%`);
+      }
     }
     if (area) {
-      const esc = area.replace(/[\\%_]/g, '\\$&');
-      providersQuery = providersQuery.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%,address_line1.ilike.%${esc}%`);
+      const esc = sanitizePostgrestSearch(area);
+      if (esc) {
+        providersQuery = providersQuery.or(`locality.ilike.%${esc}%,city.ilike.%${esc}%,address_line1.ilike.%${esc}%`);
+      }
     }
 
     const { data: dbProviders, error: providersError } = await providersQuery.limit(200);

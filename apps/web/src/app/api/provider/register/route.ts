@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { getClientIp, signSessionToken } from '@/lib/auth-session';
+import { checkRateLimit } from '@/lib/rate-limiter';
 import { sendProviderApprovalNotice } from '@/lib/notifications';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const rl = checkRateLimit(`provider-register:${getClientIp(req)}`, 6, 15 * 60 * 1000);
+  if (!rl.isAllowed) {
+    return NextResponse.json({ success: false, error: 'Too many registration requests. Please wait before retrying.' }, { status: 429 });
+  }
+
   let body: any = {};
   try {
     body = await req.json();
@@ -21,12 +28,14 @@ export async function POST(req: NextRequest) {
   const addressLine1 = String(body.address || body.address_line1 || '').trim();
   const city = String(body.city || '').trim();
   const locality = String(body.locality || addressLine1 || '').trim();
+  const state = String(body.state || '').trim() || 'India';
+  const pincode = String(body.pincode || '').replace(/\D/g, '').slice(0, 6) || '000000';
   const supportsDelivery = body.supports_delivery === true;
   const supportsPickup = body.supports_pickup !== false;
 
-  if (!businessName || !ownerName || !email.includes('@') || password.length < 6) {
+  if (!businessName || !ownerName || !email.includes('@') || password.length < 8) {
     return NextResponse.json(
-      { success: false, error: 'Kitchen name, owner name, valid email, and password (min 6 chars) are required.' },
+      { success: false, error: 'Kitchen name, owner name, valid email, and password (min 8 chars) are required.' },
       { status: 400 }
     );
   }
@@ -89,6 +98,8 @@ export async function POST(req: NextRequest) {
         address_line1: addressLine1 || city,
         locality,
         city: city || locality,
+        state,
+        pincode,
         supports_pickup: supportsPickup,
         supports_delivery: supportsDelivery,
         status: 'active',
@@ -103,6 +114,11 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    await admin.from('provider_memberships').upsert(
+      { provider_id: prov.id, user_id: userId, role: 'owner', active: true },
+      { onConflict: 'provider_id,user_id' }
+    );
 
     await admin.from('meal_slots').insert([
       { provider_id: prov.id, name: 'breakfast', starts_at_local: '07:30:00', ends_at_local: '10:00:00', active: true },
@@ -136,16 +152,13 @@ export async function POST(req: NextRequest) {
       user_id: userId,
     }).catch(() => null);
 
-    const token = `jwt_session_${Buffer.from(
-      JSON.stringify({
-        userId,
-        email,
-        role: 'provider',
-        providerId: prov.id,
-        provider_id: prov.id,
-        verifiedAt: Date.now(),
-      })
-    ).toString('base64url')}`;
+    const token = signSessionToken({
+      userId,
+      email,
+      role: 'provider',
+      providerId: prov.id,
+      name: ownerName,
+    });
 
     return NextResponse.json(
       {

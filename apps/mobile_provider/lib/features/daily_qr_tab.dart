@@ -21,7 +21,7 @@ class _DailyQrTabState extends State<DailyQrTab> {
   bool _loading = true;
   List<Map<String, dynamic>> _todayRedemptions = [];
 
-  static const _slots = ['BREAKFAST', 'LUNCH', 'DINNER', 'ALL'];
+  static const _slots = ['BREAKFAST', 'LUNCH', 'DINNER'];
 
   @override
   void initState() {
@@ -89,7 +89,7 @@ class _DailyQrTabState extends State<DailyQrTab> {
               Row(
                 children: _slots.map((s) {
                   final active = _slot == s;
-                  final label = s == 'ALL' ? 'All Slots' : (s[0] + s.substring(1).toLowerCase());
+                  final label = s[0] + s.substring(1).toLowerCase();
                   return Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 3),

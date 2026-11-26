@@ -39,8 +39,12 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
   });
 
   it('coordinates customer meal reschedule, skip, instruction & partner queue status transitions', async () => {
+    const { signSessionToken } = await import('../lib/auth-session');
+    const custToken = signSessionToken({ userId: customerId, email: 'aarav@example.com', role: 'customer', name: 'Aarav' });
+
     const reqSkip = new NextRequest('https://www.thali.store/api/customer/meals', {
       method: 'POST',
+      headers: { Authorization: `Bearer ${custToken}` },
       body: JSON.stringify({
         action: 'skip',
         subscription_id: subId,
@@ -56,6 +60,7 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
 
     const reqInst = new NextRequest('https://www.thali.store/api/customer/meals', {
       method: 'POST',
+      headers: { Authorization: `Bearer ${custToken}` },
       body: JSON.stringify({
         action: 'instruction',
         subscription_id: subId,
@@ -90,7 +95,11 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
 
     // Customer GET /api/customer/meals sees synchronized status & instruction
     const mealsRes = await (
-      await mealsGet(new NextRequest(`https://www.thali.store/api/customer/meals?customer_id=${customerId}&date=2026-11-26`))
+      await mealsGet(
+        new NextRequest(`https://www.thali.store/api/customer/meals?customer_id=${customerId}&date=2026-11-26`, {
+          headers: { Authorization: `Bearer ${custToken}` },
+        })
+      )
     ).json();
     expect(mealsRes.success).toBe(true);
     const lunch = mealsRes.meals.find((m: any) => m.slot === 'LUNCH');
@@ -101,11 +110,14 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
 
   it('pauses, extends expiry, resumes, and cancels subscription with real reason', async () => {
     const beforeExp = new Date(platformStore.subscriptions.get(subId)!.expires_at).getTime();
+    const { signSessionToken } = await import('../lib/auth-session');
+    const custToken = signSessionToken({ userId: customerId, email: 'aarav@example.com', role: 'customer', name: 'Aarav' });
 
     const pauseRes = await (
       await managePost(
         new NextRequest('https://www.thali.store/api/subscription/manage', {
           method: 'POST',
+          headers: { Authorization: `Bearer ${custToken}` },
           body: JSON.stringify({
             action: 'pause',
             subscription_id: subId,
@@ -124,6 +136,7 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
       await managePost(
         new NextRequest('https://www.thali.store/api/subscription/manage', {
           method: 'POST',
+          headers: { Authorization: `Bearer ${custToken}` },
           body: JSON.stringify({
             action: 'cancel',
             subscription_id: subId,
@@ -137,6 +150,9 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
   });
 
   it('returns honest empty reviews when 0 exist and persists submitted review', async () => {
+    const { signSessionToken } = await import('../lib/auth-session');
+    const custToken = signSessionToken({ userId: customerId, email: 'aarav@example.com', role: 'customer', name: 'Aarav' });
+
     const emptyJson = await (
       await reviewsGet(new NextRequest(`https://www.thali.store/api/mess/reviews?provider_id=${providerId}`))
     ).json();
@@ -147,6 +163,7 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
       await reviewsPost(
         new NextRequest('https://www.thali.store/api/mess/reviews', {
           method: 'POST',
+          headers: { Authorization: `Bearer ${custToken}` },
           body: JSON.stringify({
             provider_id: providerId,
             customer_id: customerId,

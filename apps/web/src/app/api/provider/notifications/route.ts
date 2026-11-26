@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPartnerNotifications, markPartnerNotificationRead, addPartnerNotification } from '@/lib/partner-notifications';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,11 @@ export async function GET(req: NextRequest) {
 
   if (!providerId) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+  }
+
+  const access = await requireProviderOwnership(req, providerId);
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
   let notifications = getPartnerNotifications(providerId);
@@ -63,6 +69,11 @@ export async function POST(req: NextRequest) {
 
   if (!providerId) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+  }
+
+  const access = await requireProviderOwnership(req, String(providerId));
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
   markPartnerNotificationRead(providerId, notifId);

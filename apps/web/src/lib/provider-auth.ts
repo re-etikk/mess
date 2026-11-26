@@ -1,211 +1,162 @@
 import type { NextRequest } from 'next/server';
 import { createClient as createSessionClient } from '@/lib/supabase/server';
 import { getAdminClient, requireAdmin } from '@/lib/supabase/admin';
-import { platformStore } from '@/lib/platform-service';
+import {
+  verifyAdminOrServiceBearer,
+  verifySignedSessionToken,
+} from '@/lib/auth-session';
 
 export type ProviderAuthResult =
   | { ok: true; userId: string; providerId: string; isAdmin: boolean }
   | { ok: false; status: 400 | 401 | 403 | 503; error: string };
 
+async function checkDbProviderOwnership(
+  userId: string,
+  userEmail: string | undefined,
+  targetProviderId: string
+): Promise<boolean> {
+  const db = getAdminClient();
+  if (!db || !userId) return false;
+
+  // 1. Admin role check
+  try {
+    const { data: adminRole } = await db
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId)
+      .eq('role', 'admin')
+      .is('revoked_at', null)
+      .maybeSingle();
+    if (adminRole) return true;
+  } catch {}
+
+  // 2. Explicit owner/manager membership
+  try {
+    const { data: mem } = await db
+      .from('provider_memberships')
+      .select('id')
+      .eq('provider_id', targetProviderId)
+      .eq('user_id', userId)
+      .eq('active', true)
+      .in('role', ['owner', 'manager'])
+      .limit(1)
+      .maybeSingle();
+    if (mem) return true;
+  } catch {}
+
+  // 3. Direct provider owner_user_id or exact verified email match (never substring match)
+  try {
+    const { data: byOwner } = await db
+      .from('providers')
+      .select('id, owner_user_id, public_email')
+      .eq('id', targetProviderId)
+      .maybeSingle();
+
+    if (byOwner) {
+      if (byOwner.owner_user_id && byOwner.owner_user_id === userId) {
+        return true;
+      }
+      if (
+        userEmail &&
+        byOwner.public_email &&
+        byOwner.public_email.toLowerCase() === userEmail.toLowerCase() &&
+        !byOwner.owner_user_id
+      ) {
+        return true;
+      }
+    }
+  } catch {}
+
+  return false;
+}
+
 /**
- * Validates that the requester is authenticated and authorized to access/mutate the target provider's state.
- * Supports:
- * 1. Bearer Supabase JWT access tokens (including auto claim extraction if token recently expired)
- * 2. Mobile session bearer tokens (jwt_session_)
- * 3. Next.js SSR session cookies
- * 4. Administrator roles
- * 5. Active database provider fallback
+ * Validates that the caller is authenticated and authorized to manage `targetProviderId`.
+ * Fails closed: rejects unauthenticated callers (401), unverified tokens (401),
+ * and callers who do not own or manage the target kitchen (403).
  */
 export async function requireProviderOwnership(
   req: NextRequest,
-  targetProviderId: string,
+  targetProviderId: string
 ): Promise<ProviderAuthResult> {
-  if (!targetProviderId) return { ok: false, status: 400, error: 'Provider ID is required.' };
+  if (!targetProviderId) {
+    return { ok: false, status: 400, error: 'Provider ID is required.' };
+  }
 
   const authHeader = req.headers.get('authorization');
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7).trim();
-    if (!token) return { ok: false, status: 401, error: 'Authorization token is empty.' };
+    if (!token) {
+      return { ok: false, status: 401, error: 'Authorization token is empty.' };
+    }
 
-    // Check service role key or admin secret
-    const expectedSecret = process.env.ADMIN_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (expectedSecret && token === expectedSecret) {
+    // 1. Service / Admin API secret (constant-time)
+    if (verifyAdminOrServiceBearer(token)) {
       return { ok: true, userId: 'admin-service', providerId: targetProviderId, isAdmin: true };
     }
 
-    // Support mobile jwt_session_ tokens
-    if (token.startsWith('jwt_session_') || token.startsWith('jwt_mock_')) {
-      try {
-        const payloadStr = Buffer.from(token.replace(/^jwt_(session|mock)_/, ''), 'base64url').toString('utf8');
-        const session = JSON.parse(payloadStr);
-        if (session && typeof session === 'object') {
-          const sessionEmail = String(session.email || '').toLowerCase();
-          const sessionUserId = String(session.userId || session.id || '');
-          const sessionProvId = String(session.provider_id || session.providerId || '');
-
-          if (session.role === 'admin' || sessionEmail === 'admin@thali.store') {
-            return { ok: true, userId: sessionUserId || 'admin', providerId: targetProviderId, isAdmin: true };
-          }
-
-          if (
-            sessionProvId === targetProviderId ||
-            sessionUserId === targetProviderId ||
-            sessionProvId.toLowerCase() === targetProviderId.toLowerCase()
-          ) {
-            return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-          }
-
-          if (session.role === 'provider' || session.role === 'kitchen_partner') {
-            return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-          }
-
-          // Verify with database if admin client is available
-          const db = getAdminClient();
-          if (db && sessionUserId) {
-            const { data: mem } = await db
-              .from('provider_memberships')
-              .select('id')
-              .eq('provider_id', targetProviderId)
-              .eq('user_id', sessionUserId)
-              .eq('active', true)
-              .in('role', ['owner', 'manager'])
-              .limit(1)
-              .maybeSingle();
-            if (mem) return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-
-            const { data: prov } = await db
-              .from('providers')
-              .select('id')
-              .eq('id', targetProviderId)
-              .or(`owner_user_id.eq.${sessionUserId},public_email.ilike.%${sessionEmail}%`)
-              .maybeSingle();
-            if (prov) return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-          }
-
-          if (session.role === 'provider' && sessionProvId) {
-            return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-          }
-        }
-      } catch {
-        // Fall through to standard token verification
+    // 2. HMAC-signed Thali mobile/OTP session token
+    const signed = verifySignedSessionToken(token, 'thali_tok_');
+    if (signed) {
+      if (signed.role === 'admin') {
+        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: true };
       }
+      if (signed.providerId && signed.providerId === targetProviderId) {
+        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: false };
+      }
+      const owns = await checkDbProviderOwnership(signed.userId, signed.email, targetProviderId);
+      if (owns) {
+        return { ok: true, userId: signed.userId, providerId: targetProviderId, isAdmin: false };
+      }
+      return { ok: false, status: 403, error: 'You do not have permission to manage this kitchen.' };
     }
 
-    // Standard Supabase access token verification
+    // 3. Cryptographically verified Supabase access JWT (via auth.getUser — never unverified decode)
     const adminClient = getAdminClient();
     if (adminClient) {
       try {
-        const { data: { user }, error: tokenError } = await adminClient.auth.getUser(token);
+        const {
+          data: { user },
+          error: tokenError,
+        } = await adminClient.auth.getUser(token);
         if (!tokenError && user) {
-          // Check admin role
-          const { data: roles } = await adminClient
+          const { data: adminRole } = await adminClient
             .from('user_roles')
-            .select('id')
+            .select('role')
             .eq('user_id', user.id)
             .eq('role', 'admin')
             .is('revoked_at', null)
-            .limit(1);
-          if (roles?.length) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
-
-          // Check provider membership
-          const { data: memberships } = await adminClient
-            .from('provider_memberships')
-            .select('id')
-            .eq('provider_id', targetProviderId)
-            .eq('user_id', user.id)
-            .eq('active', true)
-            .in('role', ['owner', 'manager'])
-            .limit(1);
-          if (memberships?.length) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
-
-          // Check direct provider ownership or email match
-          const { data: ownedProvider } = await adminClient
-            .from('providers')
-            .select('id')
-            .eq('id', targetProviderId)
-            .or(`owner_user_id.eq.${user.id},public_email.ilike.%${user.email}%`)
             .maybeSingle();
-          if (ownedProvider) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
-
-          // If provider is active in DB, associate or allow authenticated partner session
-          const { data: activeProv } = await adminClient
-            .from('providers')
-            .select('id,status')
-            .eq('id', targetProviderId)
-            .in('status', ['active', 'approved'])
-            .maybeSingle();
-          if (activeProv) {
-            try {
-              await adminClient.from('provider_memberships').upsert({
-                provider_id: targetProviderId,
-                user_id: user.id,
-                role: 'owner',
-                active: true,
-              }, { onConflict: 'provider_id,user_id' });
-            } catch {}
-            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+          if (adminRole) {
+            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
           }
 
-          return { ok: false, status: 403, error: 'You do not have permission to manage this provider.' };
+          const owns = await checkDbProviderOwnership(user.id, user.email, targetProviderId);
+          if (owns) {
+            return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+          }
+          return { ok: false, status: 403, error: 'You do not have permission to manage this kitchen.' };
         }
       } catch {}
     }
 
-    // Fallback: Direct JWT claim parsing (e.g. if token recently expired or adminClient offline)
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        if (payload && (payload.sub || payload.email)) {
-          const sessionEmail = String(payload.email || '').toLowerCase();
-          const sessionUserId = String(payload.sub || '');
-          if (sessionEmail === 'admin@thali.store' || payload.role === 'admin') {
-            return { ok: true, userId: sessionUserId || 'admin', providerId: targetProviderId, isAdmin: true };
-          }
-          if (sessionUserId === targetProviderId) {
-            return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-          }
-          if (adminClient && sessionUserId) {
-            const { data: mem } = await adminClient
-              .from('provider_memberships')
-              .select('id')
-              .eq('provider_id', targetProviderId)
-              .eq('user_id', sessionUserId)
-              .eq('active', true)
-              .in('role', ['owner', 'manager'])
-              .limit(1)
-              .maybeSingle();
-            if (mem) return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-
-            const { data: prov } = await adminClient
-              .from('providers')
-              .select('id')
-              .eq('id', targetProviderId)
-              .or(`owner_user_id.eq.${sessionUserId},public_email.ilike.%${sessionEmail}%`)
-              .maybeSingle();
-            if (prov) return { ok: true, userId: sessionUserId, providerId: targetProviderId, isAdmin: false };
-          }
-          if (payload.role === 'provider' || payload.role === 'kitchen_partner') {
-            return { ok: true, userId: sessionUserId || targetProviderId, providerId: targetProviderId, isAdmin: false };
-          }
-        }
-      }
-    } catch {}
+    return { ok: false, status: 401, error: 'Invalid or expired partner token. Please sign in again.' };
   }
 
-  // Check admin session
+  // 4. Web SSR Admin session
   const admin = await requireAdmin(req);
-  if (admin.ok) return { ok: true, userId: admin.userId, providerId: targetProviderId, isAdmin: true };
+  if (admin.ok) {
+    return { ok: true, userId: admin.userId, providerId: targetProviderId, isAdmin: true };
+  }
 
-  // Check Supabase session cookies
+  // 5. Web SSR Supabase cookie session
   try {
     const session = await createSessionClient();
-    const { data: { user }, error } = await session.auth.getUser();
+    const {
+      data: { user },
+      error,
+    } = await session.auth.getUser();
     if (!error && user) {
-      if (user.email === 'admin@thali.store') {
-        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: true };
-      }
-
       const { data: membership } = await session
         .from('provider_memberships')
         .select('id')
@@ -215,38 +166,23 @@ export async function requireProviderOwnership(
         .in('role', ['owner', 'manager'])
         .limit(1)
         .maybeSingle();
-
-      if (membership) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+      if (membership) {
+        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+      }
 
       const { data: owned } = await session
         .from('providers')
         .select('id')
         .eq('id', targetProviderId)
-        .or(`owner_user_id.eq.${user.id},public_email.ilike.%${user.email}%`)
+        .eq('owner_user_id', user.id)
         .maybeSingle();
+      if (owned) {
+        return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
+      }
 
-      if (owned) return { ok: true, userId: user.id, providerId: targetProviderId, isAdmin: false };
-
-      return { ok: false, status: 403, error: 'You do not have permission to manage this provider.' };
+      return { ok: false, status: 403, error: 'You do not have permission to manage this kitchen.' };
     }
   } catch {}
-
-  // Fallback for platformStore in development / tests
-  const storeProvider = platformStore.providers.get(targetProviderId);
-  if (storeProvider) {
-    return { ok: true, userId: storeProvider.owner_user_id || targetProviderId, providerId: targetProviderId, isAdmin: false };
-  }
-
-  // Fallback if targetProviderId is a known registered active provider in DB
-  const dbFallback = getAdminClient();
-  if (dbFallback) {
-    try {
-      const { data: dbProv } = await dbFallback.from('providers').select('id,status').eq('id', targetProviderId).maybeSingle();
-      if (dbProv && (dbProv.status === 'active' || dbProv.status === 'approved')) {
-        return { ok: true, userId: targetProviderId, providerId: targetProviderId, isAdmin: false };
-      }
-    } catch {}
-  }
 
   return { ok: false, status: 401, error: 'Authentication required. Please sign in.' };
 }

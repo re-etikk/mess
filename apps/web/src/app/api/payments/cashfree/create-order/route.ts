@@ -1,26 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { createCashfreeOrder, cashfreeOrderStore, getCashfreeConfig } from '@/lib/cashfree';
 import { platformStore } from '@/lib/platform-service';
+import { ensurePlanSlotsLinked, requireCustomerIdentity } from '@/lib/auth-session';
 import {
-  cashfreeOrderStore,
-  createCashfreeOrder,
-  getCashfreeConfig,
-} from '@/lib/cashfree';
+  resolveAuthoritativeDiscountPaise,
+  resolveAuthoritativePlan,
+  resolveVerifiedUpgradeQuote,
+} from '@/lib/checkout-pricing';
 
 export const dynamic = 'force-dynamic';
-
-export async function GET() {
-  const cfg = getCashfreeConfig();
-  return NextResponse.json(
-    {
-      success: true,
-      configured: cfg.configured,
-      env: cfg.env,
-    },
-    { headers: { 'Cache-Control': 'private, no-store' } },
-  );
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -30,348 +20,319 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           code: 'cashfree_not_configured',
-          error:
-            'Cashfree Payment Gateway is not configured on the server yet. Please set CASHFREE_APP_ID and CASHFREE_SECRET_KEY in environment variables.',
+          error: 'Cashfree Payment Gateway is not configured on the server.',
         },
-        { status: 503 },
+        { status: 503 }
       );
     }
 
     const body = await req.json().catch(() => ({}));
-    const {
-      purpose = 'subscription_purchase',
-      provider_id,
-      plan_id,
-      subscription_id,
-      target_plan_id,
-      customer_id,
-      customer_name,
-      customer_phone,
-      customer_email,
-      plan_type,
-      plan_name,
-      duration_days,
-      meal_credits,
-      price_paise,
-      add_ons_paise = 0,
-      discount_paise = 0,
-      promo_code = '',
-      selected_slots = {},
-      repeat_days = [1, 2, 3, 4, 5, 6, 7],
-      packaging_preference = 'reusable_tiffin',
-      fulfillment_mode: requestedFulfillment,
-      delivery_address = '',
-      delivery_instructions = '',
-      starts_at: requestedStart,
-      slot = 'LUNCH',
-      current_subscription,
-    } = body;
+    type CashfreePurpose = 'subscription_purchase' | 'plan_upgrade' | 'single_meal_purchase' | 'add_ons';
+    const rawPurpose = String(body.purpose || 'subscription_purchase').trim();
+    const purpose: CashfreePurpose =
+      rawPurpose === 'plan_upgrade' || rawPurpose === 'single_meal_purchase' || rawPurpose === 'add_ons'
+        ? rawPurpose
+        : 'subscription_purchase';
+    const providerIdParam = String(body.provider_id || '').trim();
+    const planIdParam = String(body.target_plan_id || body.plan_id || '').trim();
+    const subscriptionIdParam = String(body.subscription_id || '').trim();
+    const claimedCustomerId = String(body.customer_id || '').trim();
+    const customerName = String(body.customer_name || '').trim().slice(0, 80) || 'Thali Customer';
+    const customerEmail = String(body.customer_email || '').trim();
+    const customerPhone = String(body.customer_phone || '').replace(/\D/g, '').slice(-10);
+    const slot = String(body.slot || 'LUNCH').toUpperCase().trim();
+    const promoCode = String(body.promo_code || '').trim();
+    const selectedSlots = body.selected_slots && typeof body.selected_slots === 'object' ? body.selected_slots : {};
+    const repeatDays =
+      Array.isArray(body.repeat_days) && body.repeat_days.length > 0
+        ? body.repeat_days.map((d: any) => Number(d)).filter((d: number) => d >= 1 && d <= 7)
+        : [1, 2, 3, 4, 5, 6, 7];
+    const packagingPreference = String(body.packaging_preference || 'reusable_tiffin').trim();
+    const requestedFulfillment = String(body.fulfillment_mode || '').trim();
+    const deliveryAddress = String(body.delivery_address || '').trim().slice(0, 300);
+    const deliveryInstructions = String(body.delivery_instructions || '').trim().slice(0, 500);
+    const requestedStart = body.starts_at;
 
-    if (!provider_id && purpose !== 'plan_upgrade') {
-      return NextResponse.json(
-        { success: false, error: 'provider_id is required.' },
-        { status: 400 },
-      );
+    const auth = await requireCustomerIdentity(req, claimedCustomerId || undefined);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+    const resolvedCustomerId = auth.userId;
+
+    if (!providerIdParam && purpose !== 'plan_upgrade') {
+      return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
     }
 
     const admin = getAdminClient();
     const now = new Date();
-    const origin =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      req.nextUrl.origin ||
-      'https://www.thali.store';
+    const siteBase = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.thali.store').replace(/\/$/, '');
 
-    let resolvedProviderId = provider_id || current_subscription?.providerId || '';
+    let resolvedProviderId = providerIdParam;
     let providerName = 'Mess Partner';
     let providerSupportsDelivery = false;
+    let disposableFeePaise = 500;
 
     if (admin && resolvedProviderId) {
       try {
         const { data: prov } = await admin
           .from('providers')
-          .select('id, display_name, supports_delivery')
+          .select('id, display_name, supports_delivery, disposable_fee_paise')
           .eq('id', resolvedProviderId)
           .maybeSingle();
         if (prov) {
           providerName = prov.display_name;
           providerSupportsDelivery = prov.supports_delivery === true;
+          disposableFeePaise = Math.max(0, Number(prov.disposable_fee_paise ?? 500));
         }
       } catch {}
     } else if (resolvedProviderId) {
       const sp = platformStore.providers.get(resolvedProviderId);
       if (sp) providerName = sp.display_name;
     }
-    const effectiveFulfillmentMode: 'pickup' | 'delivery' =
-      providerSupportsDelivery && requestedFulfillment === 'delivery'
-        ? 'delivery'
-        : 'pickup';
 
-    // Resolve Plan
-    const effectiveTargetPlanId =
-      purpose === 'plan_upgrade' ? target_plan_id || plan_id : plan_id;
-    let plan: any = null;
-    if (admin && effectiveTargetPlanId) {
-      try {
-        const { data: p } = await admin
+    const effectiveFulfillmentMode: 'pickup' | 'delivery' =
+      providerSupportsDelivery && requestedFulfillment === 'delivery' ? 'delivery' : 'pickup';
+
+    let durDays = 30;
+    let effectivePlanType: 'fixed_period' | 'meal_credits' = 'fixed_period';
+    let effectivePlanName = 'Meal Pass';
+    let effectivePlanId = planIdParam;
+    let initialCredits: number | null = null;
+    let basePlanPricePaise = 0;
+    let upgradeFromSubId = '';
+
+    if (purpose === 'single_meal_purchase') {
+      durDays = 1;
+      effectivePlanType = 'meal_credits';
+      initialCredits = 1;
+
+      if (admin && resolvedProviderId) {
+        let { data: dailyPlan } = await admin
           .from('subscription_plans')
           .select('*')
-          .eq('id', effectiveTargetPlanId)
+          .eq('provider_id', resolvedProviderId)
+          .eq('plan_type', 'meal_credits')
+          .eq('meal_credits', 1)
+          .eq('active', true)
           .maybeSingle();
-        plan = p;
-      } catch {}
-    }
-    if (!plan && effectiveTargetPlanId) {
-      plan = platformStore.plans.get(effectiveTargetPlanId);
-    }
 
-    let durDays = Number(plan?.duration_days || duration_days) || 30;
-    let effectivePlanType: 'fixed_period' | 'meal_credits' | 'daily' =
-      plan?.plan_type === 'meal_credits' || plan_type === 'meal_credits'
-        ? 'meal_credits'
-        : plan?.plan_type === 'daily' || plan_type === 'daily'
-          ? 'daily'
-          : 'fixed_period';
-    let effectivePlanName =
-      plan?.name || plan_name || `${durDays}-Day Meal Pass`;
-    let effectivePlanId =
-      plan?.id || effectiveTargetPlanId || `plan-${Date.now()}`;
-    let initialCredits =
-      effectivePlanType === 'meal_credits'
-        ? Number(plan?.meal_credits || meal_credits) || 60
-        : effectivePlanType === 'daily'
-          ? 1
-          : null;
+        if (!dailyPlan) {
+          const { data: menuPrices } = await admin
+            .from('menu_items')
+            .select('price_paise')
+            .eq('provider_id', resolvedProviderId)
+            .eq('active', true)
+            .eq('is_add_on', false)
+            .gt('price_paise', 0)
+            .order('price_paise', { ascending: true })
+            .limit(1);
 
-    let payablePaise = Math.max(
-      100,
-      (Number(plan?.price_paise || price_paise) || 0) +
-        (Number(add_ons_paise) || 0) -
-        (Number(discount_paise) || 0)
-    );
+          const singlePricePaise =
+            menuPrices && menuPrices.length > 0 && Number(menuPrices[0].price_paise) >= 1000
+              ? Number(menuPrices[0].price_paise)
+              : 8000;
 
-    // Handle OTT pro-rata upgrade calculation if purpose === 'plan_upgrade'
-    let upgradeFromSubId = '';
-    if (purpose === 'plan_upgrade') {
-      upgradeFromSubId = subscription_id || '';
-      let currentSub: any = null;
-      if (admin && upgradeFromSubId) {
-        try {
-          const { data: s } = await admin
-            .from('subscriptions')
+          const { data: createdDaily } = await admin
+            .from('subscription_plans')
+            .insert({
+              provider_id: resolvedProviderId,
+              name: `Daily ${slot} Pass`,
+              description: 'Single meal coupon for today',
+              plan_type: 'meal_credits',
+              duration_months: null,
+              meal_credits: 1,
+              price_paise: singlePricePaise,
+              daily_meal_limit: 1,
+              cancellation_policy: 'Valid for today only.',
+              missed_meal_policy: 'Unused pass expires at end of day.',
+              published: false,
+              active: true,
+            })
             .select('*')
-            .eq('id', upgradeFromSubId)
-            .maybeSingle();
-          if (s) currentSub = s;
-        } catch {}
-      }
-      if (!currentSub && upgradeFromSubId) {
-        currentSub = platformStore.subscriptions.get(upgradeFromSubId);
-      }
-      if (!currentSub && current_subscription) {
-        currentSub = {
-          id: upgradeFromSubId,
-          customer_id: customer_id || current_subscription.customerId,
-          provider_id: current_subscription.providerId || resolvedProviderId,
-          plan_name: current_subscription.planName || 'Current Pass',
-          plan_type: current_subscription.type || 'fixed_period',
-          expires_at:
-            current_subscription.endDate ||
-            new Date(Date.now() + 25 * 86400000).toISOString(),
-          duration_days: current_subscription.durationDays || 30,
-          price_paid_paise: Number(current_subscription.price || 2400) * 100,
-          remaining_meal_credits: current_subscription.mealsRemaining ?? null,
-          initial_meal_credits: current_subscription.totalMeals ?? null,
-        };
-      }
-
-      if (currentSub) {
-        if (!resolvedProviderId) resolvedProviderId = currentSub.provider_id || '';
-        const expiresAtMs = new Date(currentSub.expires_at).getTime();
-        const remainingMs = Math.max(0, expiresAtMs - Date.now());
-        const remainingDays = Math.ceil(remainingMs / (1000 * 60 * 60 * 24));
-        const totalDays = currentSub.duration_days || 30;
-        const paidPaise = Number(currentSub.price_paid_paise) || 240000;
-        const targetPaise =
-          Number(plan?.price_paise || body.target_plan_price_paise || price_paise) ||
-          210000;
-
-        let unusedFraction = 0;
-        if (
-          currentSub.plan_type === 'meal_credits' ||
-          currentSub.plan_type_snapshot === 'meal_credits'
-        ) {
-          const remC = currentSub.remaining_meal_credits ?? 0;
-          const initC = currentSub.initial_meal_credits ?? 60;
-          unusedFraction =
-            initC > 0 ? Math.min(1, Math.max(0, remC / initC)) : 0;
-        } else {
-          unusedFraction =
-            totalDays > 0 ? Math.min(1, Math.max(0, remainingDays / totalDays)) : 0;
+            .single();
+          dailyPlan = createdDaily;
         }
-        const residualCreditPaise = Math.round(paidPaise * unusedFraction);
-        payablePaise = Math.max(100, targetPaise - residualCreditPaise);
-      }
-    }
-
-    if (payablePaise < 100) {
-      // Cashfree requires >= ₹1.00 (100 paise)
-      payablePaise = Math.max(100, payablePaise);
-    }
-
-    // Resolve Customer UUID
-    let resolvedCustomerId = customer_id || `cust-${Date.now()}`;
-    const cleanPhone = (customer_phone || '').replace(/\D/g, '');
-    const clientName = (customer_name || '').trim() || 'Thali Customer';
-    const isUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-    if (admin) {
-      try {
-        if (!isUuid.test(resolvedCustomerId)) {
-          if (cleanPhone.length >= 10) {
-            const { data: existingProfile } = await admin
-              .from('profiles')
-              .select('id')
-              .eq('phone_e164', cleanPhone.slice(-10))
-              .maybeSingle();
-            if (existingProfile) resolvedCustomerId = existingProfile.id;
-          }
-          if (!isUuid.test(resolvedCustomerId)) {
-            const newId = crypto.randomUUID();
-            await admin.from('profiles').insert({
-              id: newId,
-              display_name: clientName,
-              phone_e164: cleanPhone.length >= 7 ? cleanPhone.slice(-10) : null,
-            });
-            resolvedCustomerId = newId;
-          }
-        }
-      } catch (e) {
-        console.warn('Profile resolution error:', e);
-      }
-    }
-
-    // Create pending subscription when purchasing a pass or upgrade
-    let createdSubId = '';
-    if (
-      purpose === 'subscription_purchase' ||
-      purpose === 'plan_upgrade'
-    ) {
-      createdSubId =
-        admin && isUuid.test(resolvedCustomerId)
-          ? crypto.randomUUID()
-          : `sub-cf-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-      const expiresAt = new Date(
-        now.getTime() + durDays * 24 * 60 * 60 * 1000,
-      );
-
-      if (admin && isUuid.test(resolvedCustomerId) && isUuid.test(resolvedProviderId) && isUuid.test(effectivePlanId)) {
-        const startIso = requestedStart ? new Date(requestedStart).toISOString() : now.toISOString();
-        const baseSubRow = {
-          id: createdSubId,
-          customer_id: resolvedCustomerId,
-          provider_id: resolvedProviderId,
-          plan_id: effectivePlanId,
-          status: 'pending_payment',
-          plan_type_snapshot:
-            effectivePlanType === 'meal_credits' ? 'meal_credits' : 'fixed_period',
-          plan_name_snapshot: effectivePlanName,
-          terms_version_snapshot: 'v2.0-cashfree',
-          price_paid_paise: payablePaise,
-          initial_meal_credits: initialCredits,
-          remaining_meal_credits: initialCredits,
-          starts_at: startIso,
-          expires_at: expiresAt.toISOString(),
-        };
-        try {
-          const resExt = await admin.from('subscriptions').insert({
-            ...baseSubRow,
-            duration_days: durDays,
-            selected_slots: selected_slots || {},
-            repeat_days: Array.isArray(repeat_days) && repeat_days.length > 0 ? repeat_days : [1, 2, 3, 4, 5, 6, 7],
-            packaging_preference: packaging_preference || 'reusable_tiffin',
-            fulfillment_mode: effectiveFulfillmentMode,
-            delivery_address: delivery_address ? String(delivery_address).trim() : null,
-            delivery_instructions: delivery_instructions || null,
-            promo_code: promo_code || null,
-            discount_paise: Number(discount_paise || 0),
-            payment_mode: 'cashfree_online',
-          });
-          if (resExt.error) {
-            await admin.from('subscriptions').insert(baseSubRow);
-          }
-        } catch (err) {
-          console.warn('DB error creating pending subscription for Cashfree:', err);
+        if (dailyPlan) {
+          effectivePlanId = dailyPlan.id;
+          effectivePlanName = dailyPlan.name;
+          basePlanPricePaise = Number(dailyPlan.price_paise || 8000);
+          await ensurePlanSlotsLinked(admin, resolvedProviderId);
         }
       }
 
-      platformStore.subscriptions.set(createdSubId, {
+      if (basePlanPricePaise <= 0) {
+        basePlanPricePaise = 8000;
+        effectivePlanName = `Daily ${slot} Pass`;
+      }
+    } else {
+      const plan = await resolveAuthoritativePlan({
+        admin,
+        providerId: resolvedProviderId,
+        planId: planIdParam,
+      });
+
+      if (!plan) {
+        return NextResponse.json(
+          { success: false, error: 'Selected plan was not found for this kitchen.' },
+          { status: 404 }
+        );
+      }
+
+      resolvedProviderId = plan.provider_id || resolvedProviderId;
+      durDays = plan.duration_days;
+      effectivePlanType = plan.plan_type;
+      effectivePlanName = plan.name;
+      effectivePlanId = plan.id;
+      initialCredits = plan.meal_credits;
+      basePlanPricePaise = plan.price_paise;
+
+      if (purpose === 'plan_upgrade') {
+        const quote = await resolveVerifiedUpgradeQuote({
+          admin,
+          subscriptionId: subscriptionIdParam,
+          customerId: resolvedCustomerId,
+          isAdmin: auth.isAdmin,
+          targetPlan: plan,
+        });
+        if (!quote.ok) {
+          return NextResponse.json({ success: false, error: quote.error }, { status: quote.status });
+        }
+        upgradeFromSubId = subscriptionIdParam;
+        basePlanPricePaise = quote.payablePaise;
+      }
+    }
+
+    const packagingFeePaise =
+      purpose === 'subscription_purchase' &&
+      effectiveFulfillmentMode === 'delivery' &&
+      packagingPreference === 'disposable'
+        ? disposableFeePaise * durDays
+        : 0;
+
+    const addOnsPaise = Math.max(0, Math.min(200_000, Math.round(Number(body.add_ons_paise || 0))));
+    const grossPaise = basePlanPricePaise + packagingFeePaise + addOnsPaise;
+
+    const promoResult = await resolveAuthoritativeDiscountPaise({
+      admin,
+      providerId: resolvedProviderId,
+      promoCode,
+      orderAmountPaise: grossPaise,
+    });
+    const verifiedDiscountPaise = promoResult.discountPaise;
+    const payablePaise = Math.max(100, grossPaise - verifiedDiscountPaise);
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const createdSubId =
+      admin && isUuid.test(resolvedCustomerId) && isUuid.test(effectivePlanId)
+        ? crypto.randomUUID()
+        : `sub-cf-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+
+    const requestedStartDt = requestedStart ? new Date(requestedStart) : now;
+    const effectiveStart =
+      isNaN(requestedStartDt.getTime()) || requestedStartDt.getTime() < now.getTime() ? now : requestedStartDt;
+    const expiresAt = new Date(effectiveStart.getTime() + durDays * 24 * 60 * 60 * 1000);
+
+    if (admin && isUuid.test(resolvedCustomerId) && isUuid.test(resolvedProviderId) && isUuid.test(effectivePlanId)) {
+      const baseSubRow = {
         id: createdSubId,
         customer_id: resolvedCustomerId,
-        customer_name: clientName,
-        customer_phone: cleanPhone,
-        customer_email: customer_email || '',
         provider_id: resolvedProviderId,
         plan_id: effectivePlanId,
-        plan_type: effectivePlanType,
-        plan_name: effectivePlanName,
         status: 'pending_payment',
-        starts_at: now.toISOString(),
-        expires_at: expiresAt.toISOString(),
-        remaining_meal_credits: initialCredits,
-        initial_meal_credits: initialCredits,
+        plan_type_snapshot: effectivePlanType,
+        plan_name_snapshot: effectivePlanName,
+        terms_version_snapshot: 'v2.0-cashfree',
         price_paid_paise: payablePaise,
-        payment_mode: 'online',
-        created_at: now.toISOString(),
-        ...(upgradeFromSubId
-          ? ({ upgrade_from_subscription_id: upgradeFromSubId } as any)
-          : {}),
-      });
+        initial_meal_credits: initialCredits,
+        remaining_meal_credits: initialCredits,
+        starts_at: effectiveStart.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      };
+      try {
+        const resExt = await admin.from('subscriptions').insert({
+          ...baseSubRow,
+          duration_days: durDays,
+          selected_slots: selectedSlots,
+          repeat_days: repeatDays.length > 0 ? repeatDays : [1, 2, 3, 4, 5, 6, 7],
+          packaging_preference: packagingPreference || 'reusable_tiffin',
+          fulfillment_mode: effectiveFulfillmentMode,
+          delivery_address: deliveryAddress || null,
+          delivery_instructions: deliveryInstructions || null,
+          promo_code: promoResult.code || null,
+          discount_paise: verifiedDiscountPaise,
+          payment_mode: 'cashfree_online',
+        });
+        if (resExt.error) {
+          await admin.from('subscriptions').insert(baseSubRow);
+        }
+      } catch (err) {
+        console.warn('DB error creating pending subscription for Cashfree:', err);
+      }
     }
+
+    platformStore.subscriptions.set(createdSubId, {
+      id: createdSubId,
+      customer_id: resolvedCustomerId,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: auth.email || customerEmail,
+      provider_id: resolvedProviderId,
+      plan_id: effectivePlanId,
+      plan_type: effectivePlanType,
+      plan_name: effectivePlanName,
+      status: 'pending_payment',
+      starts_at: effectiveStart.toISOString(),
+      expires_at: expiresAt.toISOString(),
+      remaining_meal_credits: initialCredits,
+      initial_meal_credits: initialCredits,
+      price_paid_paise: payablePaise,
+      payment_mode: 'online',
+      fulfillment_mode: effectiveFulfillmentMode,
+      delivery_address: deliveryAddress,
+      created_at: now.toISOString(),
+      ...(upgradeFromSubId ? ({ upgrade_from_subscription_id: upgradeFromSubId } as any) : {}),
+    });
 
     const orderId = `cf_thali_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
     const amountInr = Number((payablePaise / 100).toFixed(2));
-    const returnUrl = `${origin}/payment/cashfree/return?order_id=${encodeURIComponent(orderId)}`;
-    const notifyUrl = `${origin}/api/payments/cashfree/webhook`;
+    const returnUrl = `${siteBase}/payment/cashfree/return?order_id=${encodeURIComponent(orderId)}`;
+    const notifyUrl = `${siteBase}/api/payments/cashfree/webhook`;
 
     const { order, env } = await createCashfreeOrder({
       orderId,
       orderAmountInr: amountInr,
       customerId: resolvedCustomerId,
-      customerName: clientName,
-      customerEmail: customer_email || '',
-      customerPhone: cleanPhone || '9999999999',
+      customerName,
+      customerEmail: auth.email || customerEmail,
+      customerPhone: customerPhone || '9999999999',
       returnUrl,
       notifyUrl,
       orderNote: `${effectivePlanName} - ${providerName}`,
       idempotencyKey: orderId,
       orderTags: {
-        purpose: String(purpose).slice(0, 40),
+        purpose: purpose === 'single_meal_purchase' ? 'subscription_purchase' : String(purpose).slice(0, 40),
         prov_id: String(resolvedProviderId).slice(0, 64),
         cust_id: String(resolvedCustomerId).slice(0, 64),
         sub_id: String(createdSubId).slice(0, 64),
         plan_id: String(effectivePlanId).slice(0, 64),
         plan_name: String(effectivePlanName).slice(0, 64),
-        cust_name: String(clientName).slice(0, 64),
+        cust_name: String(customerName).slice(0, 64),
         duration_days: String(durDays),
-        ...(upgradeFromSubId
-          ? { upgrade_from: String(upgradeFromSubId).slice(0, 64) }
-          : {}),
+        ...(upgradeFromSubId ? { upgrade_from: String(upgradeFromSubId).slice(0, 64) } : {}),
       },
     });
 
-    // Save in memory store
     cashfreeOrderStore.set(orderId, {
       order_id: orderId,
       cf_order_id: order.cf_order_id ? String(order.cf_order_id) : undefined,
       payment_session_id: order.payment_session_id,
-      purpose,
-      subscription_id: createdSubId || undefined,
+      purpose: purpose === 'single_meal_purchase' ? 'subscription_purchase' : purpose,
+      subscription_id: createdSubId,
       upgrade_from_subscription_id: upgradeFromSubId || undefined,
       customer_id: resolvedCustomerId,
-      customer_name: clientName,
-      customer_phone: cleanPhone,
-      customer_email: customer_email || '',
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: auth.email || customerEmail,
       provider_id: resolvedProviderId,
       provider_name: providerName,
       plan_id: effectivePlanId,
@@ -385,13 +346,7 @@ export async function POST(req: NextRequest) {
       created_at: now.toISOString(),
     });
 
-    // Persist payment_transactions row if valid DB UUIDs exist
-    if (
-      admin &&
-      isUuid.test(resolvedCustomerId) &&
-      createdSubId &&
-      isUuid.test(createdSubId)
-    ) {
+    if (admin && isUuid.test(resolvedCustomerId) && isUuid.test(createdSubId)) {
       try {
         await admin.from('payment_transactions').insert({
           customer_id: resolvedCustomerId,
@@ -408,6 +363,7 @@ export async function POST(req: NextRequest) {
             cf_order_id: order.cf_order_id || null,
             env,
             purpose,
+            upgrade_from_subscription_id: upgradeFromSubId || null,
           },
         });
       } catch (err) {
@@ -418,14 +374,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       order_id: order.order_id,
-      cf_order_id: order.cf_order_id,
+      cf_order_id: order.cf_order_id || null,
       payment_session_id: order.payment_session_id,
       environment: env,
       amount_inr: amountInr,
-      amount_paise: payablePaise,
-      subscription_id: createdSubId || null,
-      provider_name: providerName,
-      plan_name: effectivePlanName,
+      subscription_id: createdSubId,
+      purpose,
+      return_url: returnUrl,
     });
   } catch (err: any) {
     console.error('Cashfree create-order error:', err);
@@ -434,7 +389,7 @@ export async function POST(req: NextRequest) {
         success: false,
         error: err?.message || 'Unable to initiate Cashfree payment order.',
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

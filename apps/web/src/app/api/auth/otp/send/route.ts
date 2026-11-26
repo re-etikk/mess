@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { randomInt } from 'crypto';
+import { getClientIp } from '@/lib/auth-session';
+import { checkRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +31,13 @@ export async function POST(req: NextRequest) {
   }
 
   const identifier = raw.toLowerCase();
+  const rl = checkRateLimit(`otp_send:${getClientIp(req)}:${identifier}`, 5, 15 * 60 * 1000);
+  if (!rl.isAllowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many verification code requests. Please wait a few minutes.' },
+      { status: 429 }
+    );
+  }
   const otpCode = randomInt(100000, 1000000).toString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 

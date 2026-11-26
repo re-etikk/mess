@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { isAllowedMediaUrl } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -55,9 +56,12 @@ export async function POST(req: NextRequest) {
   // Handle cover image upload: base64 data URI -> upload to Supabase Storage `thali-media` bucket (fallback to data URI or HTTPS URL)
   if (typeof body.cover_image_base64 === 'string' && body.cover_image_base64.trim()) {
     const raw = body.cover_image_base64.trim();
-    const match = raw.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (raw.length > 3_500_000) {
+      return NextResponse.json({ success: false, error: 'Cover image exceeds 2.5 MB limit.' }, { status: 400 });
+    }
+    const match = raw.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/i);
     if (match) {
-      const ext = match[1] === 'png' ? 'png' : 'jpg';
+      const ext = match[1].toLowerCase() === 'png' ? 'png' : 'jpg';
       const bytes = Buffer.from(match[2], 'base64');
       const filePath = `providers/${providerId}/cover-${Date.now()}.${ext}`;
       try {
@@ -74,11 +78,17 @@ export async function POST(req: NextRequest) {
       } catch {
         updates.cover_path = raw;
       }
-    } else if (raw.startsWith('http') || raw.startsWith('data:image')) {
+    } else if (isAllowedMediaUrl(raw)) {
       updates.cover_path = raw;
+    } else {
+      return NextResponse.json({ success: false, error: 'Unsupported cover image URL or format.' }, { status: 400 });
     }
   } else if (typeof body.cover_path === 'string' && body.cover_path.trim()) {
-    updates.cover_path = body.cover_path.trim();
+    const trimmed = body.cover_path.trim();
+    if (!isAllowedMediaUrl(trimmed)) {
+      return NextResponse.json({ success: false, error: 'Invalid cover image URL.' }, { status: 400 });
+    }
+    updates.cover_path = trimmed;
   }
 
   const { data, error } = await admin

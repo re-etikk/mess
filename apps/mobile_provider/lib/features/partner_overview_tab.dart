@@ -541,11 +541,11 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded, size: 17, color: ThaliColors.primary),
+              const Icon(Icons.kitchen_outlined, size: 17, color: ThaliColors.ink),
               const SizedBox(width: 6),
               const Expanded(
                 child: Text(
-                  'Today Kitchen Demand Forecast',
+                  'Today\'s Kitchen Plan',
                   style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
                 ),
               ),

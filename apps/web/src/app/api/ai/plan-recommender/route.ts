@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
       try {
         const { data } = await admin
           .from('subscription_plans')
-          .select('id,name,plan_type,duration_days,price_paise,meal_credits')
+          .select('id,name,plan_type,duration_months,price_paise,meal_credits')
           .eq('provider_id', providerId)
           .eq('active', true);
         if (data && data.length > 0) {
@@ -28,7 +28,10 @@ export async function POST(req: NextRequest) {
             id: p.id,
             name: p.name,
             plan_type: p.plan_type || 'fixed_period',
-            duration_days: Number(p.duration_days || 30),
+            duration_days:
+              p.plan_type === 'meal_credits'
+                ? Math.max(30, Number(p.meal_credits || 30))
+                : Math.max(1, Number(p.duration_months || 1)) * 30,
             price_inr: Math.round(Number(p.price_paise || 0) / 100),
             meal_credits: p.meal_credits,
           }));

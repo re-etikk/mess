@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase/admin';
+import { requireProviderOwnership } from '@/lib/provider-auth';
 import { platformStore } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,11 @@ export async function GET(req: NextRequest) {
 
   if (!providerId) {
     return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
+  }
+
+  const access = await requireProviderOwnership(req, providerId);
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
   const pendingList: any[] = [];
@@ -29,6 +35,7 @@ export async function GET(req: NextRequest) {
           status,
           plan_type_snapshot,
           plan_name_snapshot,
+          payment_mode,
           price_paid_paise,
           initial_meal_credits,
           remaining_meal_credits,
@@ -44,6 +51,7 @@ export async function GET(req: NextRequest) {
 
       if (!error && dbSubs) {
         for (const sub of dbSubs) {
+          if (sub.payment_mode === 'online') continue;
           seenIds.add(sub.id);
           const profile = Array.isArray(sub.profiles) ? sub.profiles[0] : sub.profiles;
           pendingList.push({
@@ -58,7 +66,7 @@ export async function GET(req: NextRequest) {
             price_paise: sub.price_paid_paise || 0,
             price_inr: (sub.price_paid_paise || 0) / 100,
             status: sub.status,
-            payment_mode: 'counter_cash',
+            payment_mode: sub.payment_mode || 'counter_cash',
             created_at: sub.created_at,
           });
         }

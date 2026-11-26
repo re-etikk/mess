@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -71,6 +71,16 @@ export async function GET(req: NextRequest) {
 
   const queue = subs
     .filter((s) => {
+      const startIso = s.starts_at ? String(s.starts_at).slice(0, 10) : '';
+      const endIso = s.expires_at ? String(s.expires_at).slice(0, 10) : '';
+      if (startIso && serviceDate < startIso) return false;
+      if (endIso && serviceDate > endIso) return false;
+
+      if (s.selected_slots && typeof s.selected_slots === 'object' && Object.keys(s.selected_slots).length > 0) {
+        const cfg = s.selected_slots[slotFilter.toLowerCase()];
+        if (!cfg || (typeof cfg === 'object' && cfg.enabled === false)) return false;
+      }
+
       const rDays = Array.isArray(s.repeat_days) && s.repeat_days.length > 0 ? s.repeat_days.map((x: any) => Number(x)) : [1, 2, 3, 4, 5, 6, 7];
       return rDays.includes(dow1To7);
     })
@@ -100,6 +110,10 @@ export async function GET(req: NextRequest) {
         rider_id: ev?.rider_id || null,
         rider_name: ev?.rider_name || null,
         rider_phone: ev?.rider_phone || null,
+        rider_lat: ev?.rider_lat != null ? Number(ev.rider_lat) : null,
+        rider_lng: ev?.rider_lng != null ? Number(ev.rider_lng) : null,
+        rider_updated_at: ev?.rider_updated_at || null,
+        eta_minutes: ev?.eta_minutes != null ? Number(ev.eta_minutes) : null,
         time_window: ev?.custom_time_slot || slotCfg.time_slot || '',
         instructions: ev?.instructions || s.delivery_instructions || '',
         packaging_preference: s.packaging_preference || 'reusable_tiffin',
@@ -146,7 +160,7 @@ export async function POST(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -154,6 +168,15 @@ export async function POST(req: NextRequest) {
   const nowIso = new Date().toISOString();
 
   if (admin) {
+    const { data: ownedSub } = await admin
+      .from('subscriptions')
+      .select('id')
+      .eq('id', subscriptionId)
+      .eq('provider_id', providerId)
+      .maybeSingle();
+    if (!ownedSub) {
+      return NextResponse.json({ success: false, error: 'Subscription not found for this kitchen.' }, { status: 404 });
+    }
     const { data: ev, error } = await admin
       .from('daily_meal_events')
       .upsert(

@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
+import { ensurePlanSlotsLinked } from '@/lib/auth-session';
 import { platformStore, PlanData } from '@/lib/platform-service';
 
 export const dynamic = 'force-dynamic';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://mrbtwsrknqofjkrbssww.supabase.co';
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnR3c3JrbnFvZmprcmJzc3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MzEzNDcsImV4cCI6MjEwODUwNzM0N30.TzKjZ593n_ku_81ZCAuzOkeHl-7pGmQjylzIP3cHssc';
-
-function getFallbackClient() {
-  return createSupabaseClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+async function getDbClient() {
+  const admin = getAdminClient();
+  if (admin) return admin;
+  try {
+    return await createClient();
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -23,23 +24,19 @@ export async function GET(req: NextRequest) {
   if (!providerId) return NextResponse.json({ success: false, error: 'provider_id is required.' }, { status: 400 });
 
   const access = await requireProviderOwnership(req, providerId);
-  const db = getAdminClient();
 
   try {
-    let client = db;
+    const client = await getDbClient();
     if (!client) {
-      try {
-        client = await createClient();
-      } catch (_) {}
+      throw new Error('Database client unavailable');
     }
-    client = client || getFallbackClient();
     let query = client
       .from('subscription_plans')
       .select('*')
       .eq('provider_id', providerId);
 
     if (!access.ok) {
-      query = query.eq('active', true);
+      query = query.eq('active', true).neq('published', false);
     }
 
     const { data: rawPlans, error } = await query.order('created_at', { ascending: false });
@@ -47,7 +44,9 @@ export async function GET(req: NextRequest) {
       console.error('Error fetching plans from DB:', error.message);
     }
 
-    const plans = (rawPlans ?? []).map((p) => {
+    const plans = (rawPlans ?? [])
+      .filter((p: any) => access.ok || p.published !== false)
+      .map((p) => {
       const durMonths = p.duration_months || 1;
       const durDays = p.duration_days || durMonths * 30;
       const pricePaise = Number(p.price_paise || 0);
@@ -151,26 +150,26 @@ export async function POST(req: NextRequest) {
 
   const input = parsed.data;
   const access = await requireProviderOwnership(req, input.provider_id);
-  if (!access.ok && access.status !== 401) {
-    const dbCheck = getAdminClient() || getFallbackClient();
-    if (dbCheck) {
-      const { data: prov } = await dbCheck.from('providers').select('id,status').eq('id', input.provider_id).maybeSingle();
-      if (!prov || (prov.status !== 'active' && prov.status !== 'approved')) {
-        return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-      }
-    } else {
-      return NextResponse.json({ success: false, error: access.error }, { status: access.status });
-    }
+  if (!access.ok) {
+    return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
-  const db = getAdminClient() || getFallbackClient();
+  const db = await getDbClient();
 
   const planType = input.plan_type === 'meal_credits' ? 'meal_credits' : 'fixed_period';
-  const durationDays = input.duration_days || (input.duration_months ? input.duration_months * 30 : 30);
-  const durationMonths = Math.max(1, Math.round(durationDays / 30));
-  const pricePaise = input.price_paise ?? Math.round((input.price_inr || 0) * 100);
-  const promoPricePaise = input.discount_percent && input.discount_percent > 0
-    ? Math.round(pricePaise * (1 - input.discount_percent / 100))
+  const durationDays = Math.max(1, Number(input.duration_days || (input.duration_months ? input.duration_months * 30 : 30)));
+  const rawMonths = Math.max(1, Math.round(durationDays / 30));
+  const durationMonths = rawMonths >= 12 ? 12 : rawMonths >= 6 ? 6 : rawMonths >= 3 ? 3 : 1;
+  const pricePaise = Math.round(input.price_paise ?? (input.price_inr || 0) * 100);
+  if (!Number.isFinite(pricePaise) || pricePaise < 100) {
+    return NextResponse.json({ success: false, error: 'Plan price must be at least ₹1.' }, { status: 400 });
+  }
+  const safeDiscount =
+    input.discount_percent && input.discount_percent > 0 && input.discount_percent <= 90
+      ? input.discount_percent
+      : undefined;
+  const promoPricePaise = safeDiscount
+    ? Math.max(100, Math.round(pricePaise * (1 - safeDiscount / 100)))
     : null;
 
   const planId = input.id || `plan-${Date.now()}`;
@@ -218,10 +217,16 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (!updateError && updated) {
+        const adminClient = getAdminClient();
+        if (adminClient) {
+          await ensurePlanSlotsLinked(adminClient, input.provider_id);
+        }
         return NextResponse.json({ success: true, plan: updated });
       }
       return NextResponse.json({ success: true, plan: storePlan });
     }
+
+    const { data: provRow } = await db.from('providers').select('supports_delivery').eq('id', input.provider_id).maybeSingle();
 
     // Insert new plan
     const { data: newPlan, error: insertError } = await db
@@ -237,8 +242,8 @@ export async function POST(req: NextRequest) {
         promo_price_paise: promoPricePaise,
         daily_meal_limit: input.daily_meal_limit,
         allow_pickup: true,
-        allow_delivery: false,
-        published: true,
+        allow_delivery: provRow?.supports_delivery === true,
+        published: input.published !== false,
         active: true,
         cancellation_policy: 'Standard refund terms apply.',
         missed_meal_policy: 'A meal credit is consumed only after a verified on-premise redemption; unused entitlements expire under the plan validity terms.',
@@ -289,7 +294,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   const access = await requireProviderOwnership(req, providerId);
-  if (!access.ok && access.status !== 401) {
+  if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
@@ -300,10 +305,28 @@ export async function DELETE(req: NextRequest) {
   if (!db) return NextResponse.json({ success: true, message: 'Plan removed.' });
 
   try {
+    const { count: linkedSubsCount } = await db
+      .from('subscriptions')
+      .select('id', { count: 'exact', head: true })
+      .eq('plan_id', planId)
+      .in('status', ['active', 'paused', 'pending_payment']);
+
+    if ((linkedSubsCount ?? 0) > 0) {
+      await db
+        .from('subscription_plans')
+        .update({ published: false, updated_at: new Date().toISOString() })
+        .eq('id', planId)
+        .eq('provider_id', providerId);
+      return NextResponse.json({
+        success: true,
+        archived: true,
+        message: 'Plan unlisted for new sign-ups while preserving active subscriber passes.',
+      });
+    }
+
     await db.from('plan_meal_slots').delete().eq('plan_id', planId);
     const { error } = await db.from('subscription_plans').delete().eq('id', planId).eq('provider_id', providerId);
     if (error) {
-      // If records depend on it, soft-delete
       await db.from('subscription_plans').update({ active: false, published: false }).eq('id', planId).eq('provider_id', providerId);
     }
     return NextResponse.json({ success: true, message: 'Plan deleted successfully.' });

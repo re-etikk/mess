@@ -46,7 +46,7 @@ export default async function ProviderPage({ params }: { params: { id: string } 
     const column = /^[0-9a-f-]{36}$/i.test(params.id) ? 'id' : 'slug';
     const { data: provider } = await supabase
       .from('providers')
-      .select('id,display_name,description,locality,city,state,pincode,supports_pickup,public_phone,is_open_today')
+      .select('id,display_name,description,locality,city,state,pincode,supports_pickup,public_phone,is_open')
       .eq(column, params.id)
       .eq('status', 'active')
       .maybeSingle();
@@ -57,10 +57,10 @@ export default async function ProviderPage({ params }: { params: { id: string } 
     const [slotsResult, menuResult, plansResult] = await Promise.all([
       supabase
         .from('meal_slots')
-        .select('id,name,start_time,end_time')
+        .select('id,name,starts_at_local,ends_at_local')
         .eq('provider_id', provider.id)
         .eq('active', true)
-        .order('start_time'),
+        .order('starts_at_local'),
       supabase
         .from('menu_items')
         .select('id,name,description,category,dietary_type,price_paise')
@@ -110,15 +110,15 @@ export default async function ProviderPage({ params }: { params: { id: string } 
                 </div>
               </div>
 
-              {typeof provider.is_open_today === 'boolean' && (
+              {typeof provider.is_open === 'boolean' && (
                 <span
                   className={`rounded-full px-3 py-1 text-xs font-extrabold ${
-                    provider.is_open_today
+                    provider.is_open
                       ? 'bg-emerald-100 text-emerald-800'
                       : 'bg-slate-100 text-slate-600'
                   }`}
                 >
-                  {provider.is_open_today ? '🟢 Open Today' : '🔴 Closed Today'}
+                  {provider.is_open ? 'Open Today' : 'Closed Today'}
                 </span>
               )}
             </div>
@@ -142,9 +142,9 @@ export default async function ProviderPage({ params }: { params: { id: string } 
                       className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-xs font-semibold text-slate-800"
                     >
                       <span className="capitalize font-bold text-slate-950">{s.name}</span>
-                      {s.start_time && s.end_time && (
+                      {s.starts_at_local && s.ends_at_local && (
                         <span className="ml-2 text-slate-500 font-normal">
-                          {s.start_time.slice(0, 5)} – {s.end_time.slice(0, 5)}
+                          {String(s.starts_at_local).slice(0, 5)} – {String(s.ends_at_local).slice(0, 5)}
                         </span>
                       )}
                     </div>

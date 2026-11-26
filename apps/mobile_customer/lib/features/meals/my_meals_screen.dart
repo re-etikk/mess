@@ -1023,6 +1023,10 @@ class _MealManageScreenState extends State<MealManageScreen> {
           cutoffTime: _meal.cutoffTime,
           providerLat: _meal.providerLat,
           providerLng: _meal.providerLng,
+          riderName: _meal.riderName,
+          riderPhone: _meal.riderPhone,
+          riderLat: _meal.riderLat,
+          riderLng: _meal.riderLng,
         );
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1074,6 +1078,10 @@ class _MealManageScreenState extends State<MealManageScreen> {
           cutoffTime: _meal.cutoffTime,
           providerLat: _meal.providerLat,
           providerLng: _meal.providerLng,
+          riderName: _meal.riderName,
+          riderPhone: _meal.riderPhone,
+          riderLat: _meal.riderLat,
+          riderLng: _meal.riderLng,
         );
       });
     }
@@ -1168,6 +1176,10 @@ class _MealManageScreenState extends State<MealManageScreen> {
           cutoffTime: _meal.cutoffTime,
           providerLat: _meal.providerLat,
           providerLng: _meal.providerLng,
+          riderName: _meal.riderName,
+          riderPhone: _meal.riderPhone,
+          riderLat: _meal.riderLat,
+          riderLng: _meal.riderLng,
         );
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1963,13 +1975,32 @@ class _ExtendedMapScreen extends StatelessWidget {
                             const Icon(Icons.location_on_rounded, color: ThaliColors.primary, size: 18),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: Text(
-                                '${meal.providerName}${meal.providerLocality.isNotEmpty ? ' · ${meal.providerLocality}' : ''}${customerLocation.isNotEmpty ? ' -> $customerLocation' : ''}',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '${meal.providerName}${meal.providerLocality.isNotEmpty ? ' · ${meal.providerLocality}' : ''}${customerLocation.isNotEmpty ? ' -> $customerLocation' : ''}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+                                  ),
+                                  if (meal.riderLat != null && meal.riderLng != null)
+                                    Text(
+                                      'Live rider GPS: ${meal.riderLat!.toStringAsFixed(4)}, ${meal.riderLng!.toStringAsFixed(4)}',
+                                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: ThaliColors.green),
+                                    ),
+                                ],
                               ),
                             ),
+                            if (meal.riderLat != null && meal.riderLng != null)
+                              TextButton(
+                                onPressed: () => launchUrl(
+                                  Uri.parse('https://www.google.com/maps/search/?api=1&query=${meal.riderLat},${meal.riderLng}'),
+                                  mode: LaunchMode.externalApplication,
+                                ),
+                                child: const Text('Maps', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.primary)),
+                              ),
                           ],
                         ),
                       ),

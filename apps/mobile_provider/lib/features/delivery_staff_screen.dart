@@ -190,29 +190,13 @@ class _DeliveryStaffScreenState extends State<DeliveryStaffScreen> {
                     physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
-                      CardSurface(
-                        color: ThaliColors.primarySoft,
-                        borderColor: ThaliColors.primary.withValues(alpha: 0.25),
-                        padding: const EdgeInsets.all(14),
-                        child: const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.public_rounded, size: 18, color: ThaliColors.primary),
-                                SizedBox(width: 8),
-                                Text('Zero-App Rider Web Portal', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
-                              ],
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              'Send your tiffin delivery boy the link & 4-digit PIN on WhatsApp. They open thali.store/rider/portal in Chrome, tap Start Delivery (with optional GPS tracking), and mark tiffins Delivered.',
-                              style: TextStyle(fontSize: 12, color: ThaliColors.body, height: 1.35),
-                            ),
-                          ],
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          'Share link (thali.store/rider/portal) & 4-digit PIN with your riders.',
+                          style: TextStyle(fontSize: 12.5, color: ThaliColors.muted),
                         ),
                       ),
-                      const SizedBox(height: 14),
                       if (_riders.isEmpty)
                         CardSurface(
                           padding: const EdgeInsets.all(24),
@@ -272,12 +256,13 @@ class _DeliveryStaffScreenState extends State<DeliveryStaffScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                         decoration: BoxDecoration(
-                                          color: ThaliColors.greenSoft,
+                                          color: ThaliColors.subtle,
                                           borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: ThaliColors.stroke),
                                         ),
                                         child: Text(
                                           'PIN: $pin',
-                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: ThaliColors.greenDark),
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: ThaliColors.ink),
                                         ),
                                       ),
                                     ],
@@ -287,9 +272,9 @@ class _DeliveryStaffScreenState extends State<DeliveryStaffScreen> {
                                     children: [
                                       Expanded(
                                         child: PartnerActionButton(
-                                          label: 'Share on WhatsApp',
+                                          label: 'Share Invite',
                                           height: 38,
-                                          color: ThaliColors.green,
+                                          icon: Icons.share_outlined,
                                           onPressed: () {
                                             if (waUrl.isNotEmpty) {
                                               launchUrl(Uri.parse(waUrl), mode: LaunchMode.externalApplication);
