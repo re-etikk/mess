@@ -20,6 +20,7 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
   int _totalReviews = 0;
   Map<String, dynamic> _breakdown = const {};
   List<Map<String, dynamic>> _reviews = const [];
+  Map<String, dynamic>? _insights;
 
   @override
   void initState() {
@@ -34,14 +35,22 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
     });
     try {
       final data = await ProviderApiService.fetchReviews(widget.session.providerId);
+      final reviewsList = ((data['reviews'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      Map<String, dynamic>? insights;
+      if (reviewsList.length >= 2) {
+        try {
+          insights = await ProviderApiService.fetchReviewInsights(widget.session.providerId);
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         _avgRating = (data['average_rating'] as num?)?.toDouble();
         _totalReviews = (data['total_reviews'] as num?)?.toInt() ?? 0;
         _breakdown = (data['breakdown'] as Map<String, dynamic>?) ?? const {};
-        _reviews = ((data['reviews'] as List?) ?? const [])
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
+        _reviews = reviewsList;
+        _insights = insights;
       });
     } catch (e) {
       if (mounted) {
@@ -55,6 +64,7 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
   Future<void> _replySheet(Map<String, dynamic> review) async {
     final ctrl = TextEditingController(text: review['partner_reply']?.toString() ?? '');
     bool submitting = false;
+    bool drafting = false;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -81,9 +91,42 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                'Reply to ${review['customer_name'] ?? 'Customer'}',
-                style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Reply to ${review['customer_name'] ?? 'Customer'}',
+                      style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: drafting
+                        ? null
+                        : () async {
+                            setSheetState(() => drafting = true);
+                            try {
+                              final draft = await ProviderApiService.draftReviewReply(
+                                providerId: widget.session.providerId,
+                                customerName: review['customer_name']?.toString() ?? 'Customer',
+                                rating: (review['rating'] as num?)?.toInt() ?? 5,
+                                reviewText: review['review_text']?.toString() ?? '',
+                              );
+                              if (draft.isNotEmpty) {
+                                ctrl.text = draft;
+                              }
+                            } catch (e) {
+                              if (mounted) showPartnerNotice(context, '$e', isError: true);
+                            } finally {
+                              setSheetState(() => drafting = false);
+                            }
+                          },
+                    icon: const Icon(Icons.auto_awesome_rounded, size: 15, color: ThaliColors.primary),
+                    label: Text(
+                      drafting ? 'Drafting...' : 'AI Draft',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ThaliColors.primary),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               TextField(
@@ -211,6 +254,38 @@ class _PartnerReviewsScreenState extends State<PartnerReviewsScreen> {
                     ],
                   ),
                 ),
+                if (_insights != null) ...[
+                  const SizedBox(height: 12),
+                  CardSurface(
+                    color: ThaliColors.primarySoft.withValues(alpha: 0.45),
+                    borderColor: ThaliColors.primary.withValues(alpha: 0.25),
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.auto_awesome_rounded, size: 16, color: ThaliColors.primary),
+                            SizedBox(width: 6),
+                            Text('AI Feedback Insights', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _insights!['summary']?.toString() ?? '',
+                          style: const TextStyle(fontSize: 12.5, color: ThaliColors.body, height: 1.35),
+                        ),
+                        if ((_insights!['focus_area']?.toString() ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Focus: ${_insights!['focus_area']}',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.primaryDark),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 if (_reviews.isEmpty)
                   const CardSurface(

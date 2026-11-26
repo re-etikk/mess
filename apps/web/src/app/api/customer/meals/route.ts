@@ -215,6 +215,15 @@ export async function GET(req: NextRequest) {
 
     const status = redeemed ? 'delivered' : ev?.status || 'scheduled';
 
+    const effectiveFulfillment =
+      ev?.fulfillment_mode ||
+      primarySub.fulfillment_mode ||
+      (primarySub.packaging_preference === 'dine_in'
+        ? 'pickup'
+        : provider?.supports_delivery === true
+          ? 'delivery'
+          : 'pickup');
+
     return {
       id: ev?.id || `${primarySub.id}_${dateStr}_${slotUpper}`,
       subscription_id: primarySub.id,
@@ -224,15 +233,21 @@ export async function GET(req: NextRequest) {
       provider_phone: provider?.public_phone || '',
       provider_lat: provider?.latitude ? Number(provider.latitude) : null,
       provider_lng: provider?.longitude ? Number(provider.longitude) : null,
+      supports_delivery: provider?.supports_delivery === true,
       service_date: dateStr,
       slot: slotUpper,
       slot_label: slotUpper.slice(0, 1) + slotUpper.slice(1).toLowerCase(),
       menu_summary: itemsSummary,
       time_window: preferredWindow,
       status,
-      fulfillment_mode: ev?.fulfillment_mode || (primarySub.packaging_preference === 'dine_in' ? 'dine_in' : 'delivery'),
+      fulfillment_mode: effectiveFulfillment,
       instructions: ev?.instructions || primarySub.delivery_instructions || '',
       eta_minutes: ev?.eta_minutes || null,
+      rider_name: ev?.rider_name || null,
+      rider_phone: ev?.rider_phone || null,
+      rider_lat: ev?.rider_lat != null ? Number(ev.rider_lat) : null,
+      rider_lng: ev?.rider_lng != null ? Number(ev.rider_lng) : null,
+      rider_updated_at: ev?.rider_updated_at || null,
       cutoff_time: displayClock(slotRow.starts_at_local),
     };
   });

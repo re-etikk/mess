@@ -92,6 +92,11 @@ class KitchenQueueItem {
     required this.instructions,
     required this.packagingPreference,
     required this.addons,
+    this.fulfillmentMode = 'pickup',
+    this.deliveryAddress = '',
+    this.riderId = '',
+    this.riderName = '',
+    this.riderPhone = '',
   });
 
   final String subscriptionId;
@@ -106,6 +111,11 @@ class KitchenQueueItem {
   final String instructions;
   final String packagingPreference;
   final List<dynamic> addons;
+  final String fulfillmentMode;
+  final String deliveryAddress;
+  final String riderId;
+  final String riderName;
+  final String riderPhone;
 
   factory KitchenQueueItem.fromJson(Map<String, dynamic> j) => KitchenQueueItem(
         subscriptionId: j['subscription_id']?.toString() ?? '',
@@ -120,6 +130,11 @@ class KitchenQueueItem {
         instructions: j['instructions']?.toString() ?? '',
         packagingPreference: j['packaging_preference']?.toString() ?? 'reusable_tiffin',
         addons: (j['addons'] as List<dynamic>?) ?? const [],
+        fulfillmentMode: j['fulfillment_mode']?.toString() ?? 'pickup',
+        deliveryAddress: j['delivery_address']?.toString() ?? '',
+        riderId: j['rider_id']?.toString() ?? '',
+        riderName: j['rider_name']?.toString() ?? '',
+        riderPhone: j['rider_phone']?.toString() ?? '',
       );
 }
 
@@ -134,6 +149,7 @@ class KitchenQueueResponse {
     required this.delivered,
     required this.skipped,
     required this.items,
+    this.supportsDelivery = false,
   });
 
   final String date;
@@ -145,6 +161,7 @@ class KitchenQueueResponse {
   final int delivered;
   final int skipped;
   final List<KitchenQueueItem> items;
+  final bool supportsDelivery;
 
   factory KitchenQueueResponse.fromJson(Map<String, dynamic> j) {
     final counts = (j['counts'] as Map<String, dynamic>?) ?? const {};
@@ -158,6 +175,7 @@ class KitchenQueueResponse {
       outCount: (counts['out'] as num?)?.toInt() ?? 0,
       delivered: (counts['delivered'] as num?)?.toInt() ?? 0,
       skipped: (counts['skipped'] as num?)?.toInt() ?? 0,
+      supportsDelivery: j['supports_delivery'] == true,
       items: list.map((e) => KitchenQueueItem.fromJson(Map<String, dynamic>.from(e as Map))).toList(),
     );
   }

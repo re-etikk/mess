@@ -304,6 +304,8 @@ class HttpMessRepository implements MessRepository {
     List<int>? repeatDays,
     String packagingPreference = 'reusable_tiffin',
     String? deliveryInstructions,
+    String fulfillmentMode = 'pickup',
+    String? deliveryAddress,
     String? promoCode,
     int discountPaise = 0,
     DateTime? startsAt,
@@ -331,6 +333,8 @@ class HttpMessRepository implements MessRepository {
               if (repeatDays != null) 'repeat_days': repeatDays,
               'packaging_preference': packagingPreference,
               if (deliveryInstructions != null && deliveryInstructions.isNotEmpty) 'delivery_instructions': deliveryInstructions,
+              'fulfillment_mode': fulfillmentMode,
+              if (deliveryAddress != null && deliveryAddress.isNotEmpty) 'delivery_address': deliveryAddress,
               if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
               'discount_paise': discountPaise,
               if (startsAt != null) 'starts_at': startsAt.toIso8601String(),
@@ -429,6 +433,8 @@ class HttpMessRepository implements MessRepository {
     List<int>? repeatDays,
     String packagingPreference = 'reusable_tiffin',
     String? deliveryInstructions,
+    String fulfillmentMode = 'pickup',
+    String? deliveryAddress,
     DateTime? startsAt,
   }) async {
     final uri = Uri.parse('$baseUrl/api/payments/cashfree/create-order');
@@ -475,6 +481,8 @@ class HttpMessRepository implements MessRepository {
             if (repeatDays != null) 'repeat_days': repeatDays,
             'packaging_preference': packagingPreference,
             if (deliveryInstructions != null && deliveryInstructions.isNotEmpty) 'delivery_instructions': deliveryInstructions,
+            'fulfillment_mode': fulfillmentMode,
+            if (deliveryAddress != null && deliveryAddress.isNotEmpty) 'delivery_address': deliveryAddress,
             if (startsAt != null) 'starts_at': startsAt.toIso8601String(),
           }),
         )
@@ -1102,5 +1110,53 @@ class HttpMessRepository implements MessRepository {
       disposableFeeInr: ((json['disposable_fee_paise'] as num?)?.toInt() ?? 500) ~/ 100,
       maxSkipsPerWeek: (json['max_skips_per_week'] as num?)?.toInt() ?? 2,
     );
+  }
+
+  @override
+  Future<Map<String, dynamic>> recommendPlans({
+    required String providerId,
+    required int weeklyDays,
+    required int weeklySkips,
+    int mealsPerDay = 2,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/ai/plan-recommender');
+    final resp = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'provider_id': providerId,
+            'weekly_days': weeklyDays,
+            'weekly_skips': weeklySkips,
+            'meals_per_day': mealsPerDay,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final map = _safeJsonMap(resp, action: 'compare plans');
+    if (resp.statusCode >= 400 || map['success'] == false) {
+      throw RepositoryException(
+        map['error']?.toString() ?? 'Unable to compute plan savings right now.',
+      );
+    }
+    return map;
+  }
+
+  @override
+  Future<Map<String, dynamic>> smartSearchParse(String query) async {
+    final uri = Uri.parse('$baseUrl/api/ai/smart-search');
+    final resp = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'query': query}),
+        )
+        .timeout(const Duration(seconds: 12));
+    final map = _safeJsonMap(resp, action: 'parse smart search');
+    if (resp.statusCode >= 400 || map['success'] == false) {
+      throw RepositoryException(
+        map['error']?.toString() ?? 'Smart search unavailable.',
+      );
+    }
+    return map;
   }
 }

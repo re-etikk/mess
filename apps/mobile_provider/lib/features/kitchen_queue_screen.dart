@@ -26,6 +26,7 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
   bool _loading = true;
   String? _error;
   KitchenQueueResponse? _data;
+  List<Map<String, dynamic>> _riders = const [];
 
   static const _slots = ['BREAKFAST', 'LUNCH', 'DINNER'];
 
@@ -50,8 +51,15 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
         date: _isoDate(_date),
         slot: _slot,
       );
+      List<Map<String, dynamic>> riders = const [];
+      try {
+        riders = await ProviderApiService.fetchRiders(widget.session.providerId);
+      } catch (_) {}
       if (!mounted) return;
-      setState(() => _data = res);
+      setState(() {
+        _data = res;
+        _riders = riders;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
@@ -81,7 +89,37 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
     }
   }
 
+  Future<void> _assignRiderAndDispatch(KitchenQueueItem item, Map<String, dynamic> rider) async {
+    try {
+      await ProviderApiService.assignRider(
+        providerId: widget.session.providerId,
+        riderId: rider['id'].toString(),
+        subscriptionId: item.subscriptionId,
+        customerId: item.customerId,
+        slot: item.slot,
+        serviceDate: item.serviceDate.isNotEmpty ? item.serviceDate : _isoDate(_date),
+      );
+      await ProviderApiService.updateKitchenQueueStatus(
+        providerId: widget.session.providerId,
+        subscriptionId: item.subscriptionId,
+        customerId: item.customerId,
+        serviceDate: item.serviceDate.isNotEmpty ? item.serviceDate : _isoDate(_date),
+        slot: item.slot,
+        status: 'out_for_delivery',
+        etaMinutes: 20,
+      );
+      if (!mounted) return;
+      showPartnerNotice(context, 'Assigned ${rider['name']} to ${item.customerName}');
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+      }
+    }
+  }
+
   Future<void> _pickDispatchOption(KitchenQueueItem item) async {
+    final isDeliveryOrder = item.fulfillmentMode == 'delivery' || (_data?.supportsDelivery == true && item.fulfillmentMode != 'pickup');
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: ThaliColors.card,
@@ -89,49 +127,92 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                'Update ${item.customerName}',
-                style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
-              ),
-              const SizedBox(height: 14),
-              PartnerActionButton(
-                label: 'Ready at Counter (Pickup / Dine-in)',
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _updateStatus(item, 'ready_at_counter');
-                },
-              ),
-              const SizedBox(height: 10),
-              PartnerActionButton(
-                label: 'Out for Delivery (~20 mins)',
-                secondary: true,
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _updateStatus(item, 'out_for_delivery', eta: 20);
-                },
-              ),
-              const SizedBox(height: 10),
-              PartnerActionButton(
-                label: 'Mark Delivered / Completed',
-                color: ThaliColors.green,
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _updateStatus(item, 'delivered');
-                },
-              ),
-            ],
+                const SizedBox(height: 14),
+                Text(
+                  'Update ${item.customerName}',
+                  style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                ),
+                const SizedBox(height: 14),
+                if (!isDeliveryOrder) ...[
+                  PartnerActionButton(
+                    label: 'Ready at Counter (Pickup / Dine-in)',
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _updateStatus(item, 'ready_at_counter');
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  PartnerActionButton(
+                    label: 'Picked Up / Completed',
+                    color: ThaliColors.green,
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _updateStatus(item, 'delivered');
+                    },
+                  ),
+                ] else ...[
+                  PartnerActionButton(
+                    label: 'Out for Delivery (~20 mins)',
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _updateStatus(item, 'out_for_delivery', eta: 20);
+                    },
+                  ),
+                  if (_riders.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Or Assign Delivery Staff:',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.muted),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final r in _riders) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: PartnerActionButton(
+                          label: 'Assign to ${r['name']} (${r['phone']})',
+                          secondary: true,
+                          height: 40,
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _assignRiderAndDispatch(item, r);
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                  const SizedBox(height: 6),
+                  PartnerActionButton(
+                    label: 'Ready at Counter Instead',
+                    secondary: true,
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _updateStatus(item, 'ready_at_counter');
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  PartnerActionButton(
+                    label: 'Mark Delivered / Completed',
+                    color: ThaliColors.green,
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _updateStatus(item, 'delivered');
+                    },
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
@@ -350,9 +431,15 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
             runSpacing: 6,
             children: [
               _tag(
+                item.fulfillmentMode == 'delivery' ? 'Self Delivery' : 'Counter Pickup',
+                item.fulfillmentMode == 'delivery' ? Icons.delivery_dining_rounded : Icons.storefront_outlined,
+              ),
+              _tag(
                 item.packagingPreference == 'disposable' ? 'Disposable Container' : 'Reusable Tiffin',
                 Icons.inventory_2_outlined,
               ),
+              if (item.riderName.isNotEmpty)
+                _tag('Rider: ${item.riderName}', Icons.person_pin_circle_outlined),
               if (item.customerPhone.isNotEmpty)
                 GestureDetector(
                   onTap: () => _callCustomer(item.customerPhone),
@@ -360,6 +447,13 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
                 ),
             ],
           ),
+          if (item.deliveryAddress.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Address: ${item.deliveryAddress}',
+              style: const TextStyle(fontSize: 12, color: ThaliColors.body),
+            ),
+          ],
           if (item.addons.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(

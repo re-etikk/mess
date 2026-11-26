@@ -313,6 +313,12 @@ class DailyMealItem {
     this.cutoffTime = '',
     this.providerLat,
     this.providerLng,
+    this.supportsDelivery = false,
+    this.riderName,
+    this.riderPhone,
+    this.riderLat,
+    this.riderLng,
+    this.riderUpdatedAt,
   });
 
   final String id;
@@ -333,6 +339,12 @@ class DailyMealItem {
   final String cutoffTime;
   final double? providerLat;
   final double? providerLng;
+  final bool supportsDelivery;
+  final String? riderName;
+  final String? riderPhone;
+  final double? riderLat;
+  final double? riderLng;
+  final String? riderUpdatedAt;
 
   factory DailyMealItem.fromJson(Map<String, dynamic> j) => DailyMealItem(
         id: j['id']?.toString() ?? '',
@@ -353,6 +365,12 @@ class DailyMealItem {
         cutoffTime: j['cutoff_time']?.toString() ?? '',
         providerLat: (j['provider_lat'] as num?)?.toDouble(),
         providerLng: (j['provider_lng'] as num?)?.toDouble(),
+        supportsDelivery: j['supports_delivery'] == true,
+        riderName: j['rider_name']?.toString(),
+        riderPhone: j['rider_phone']?.toString(),
+        riderLat: (j['rider_lat'] as num?)?.toDouble(),
+        riderLng: (j['rider_lng'] as num?)?.toDouble(),
+        riderUpdatedAt: j['rider_updated_at']?.toString(),
       );
 }
 

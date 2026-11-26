@@ -50,6 +50,8 @@ export interface SubscriptionData {
   razorpay_subscription_id?: string;
   razorpay_payment_id?: string;
   payment_mode?: 'online' | 'cash' | 'counter_upi' | 'complimentary' | string;
+  fulfillment_mode?: 'pickup' | 'delivery';
+  delivery_address?: string;
   created_at: string;
 }
 
@@ -144,6 +146,7 @@ class PlatformStore {
   announcements: Map<string, Announcement> = new Map();
   notifications: Map<string, CustomerNotification> = new Map();
   dailyMealEvents: Map<string, any> = new Map();
+  providerRiders: Map<string, any> = new Map();
   chatMessages: any[] = [];
 
   constructor() {

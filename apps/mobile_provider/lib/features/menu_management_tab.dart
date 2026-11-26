@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/theme/thali_partner_theme.dart';
 import '../core/widgets/partner_widgets.dart';
@@ -259,6 +262,11 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                         ),
                       ),
                       TextButton.icon(
+                        onPressed: _aiSnapMenuSheet,
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 17, color: ThaliColors.greenDark),
+                        label: const Text('AI Snap', style: TextStyle(color: ThaliColors.greenDark, fontWeight: FontWeight.w700)),
+                      ),
+                      TextButton.icon(
                         onPressed: _addItemSheet,
                         icon: const Icon(Icons.add_circle_outline_rounded, size: 18, color: ThaliColors.primary),
                         label: const Text('Add Dish', style: TextStyle(color: ThaliColors.primary, fontWeight: FontWeight.w700)),
@@ -435,6 +443,237 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                     ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _aiSnapMenuSheet() async {
+    final textCtrl = TextEditingController();
+    String? imageBase64;
+    String? imageName;
+    bool parsing = false;
+    bool publishing = false;
+    List<String> included = [];
+    List<Map<String, dynamic>> extras = [];
+    String dietaryGuess = 'veg';
+    int? calories;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ThaliColors.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 14,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    const Icon(Icons.auto_awesome_rounded, size: 20, color: ThaliColors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'AI Snap Menu (${_selectedSlot[0].toUpperCase()}${_selectedSlot.substring(1)} · $_selectedDay)',
+                        style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Type today\'s menu in Hinglish or snap/pick a photo of your whiteboard.',
+                  style: TextStyle(fontSize: 12, color: ThaliColors.muted),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: textCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Hinglish / Hindi Menu Text',
+                    hintText: 'e.g. Aaj rajma chawal, 4 roti, raita, extra gulab jamun 25 rs',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: parsing || publishing
+                            ? null
+                            : () async {
+                                final picked = await ImagePicker().pickImage(
+                                  source: ImageSource.gallery,
+                                  maxWidth: 1280,
+                                  imageQuality: 80,
+                                );
+                                if (picked == null) return;
+                                final bytes = await picked.readAsBytes();
+                                final ext = picked.name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+                                setSheetState(() {
+                                  imageBase64 = 'data:image/$ext;base64,${base64Encode(bytes)}';
+                                  imageName = picked.name;
+                                });
+                              },
+                        icon: const Icon(Icons.photo_camera_outlined, size: 17),
+                        label: Text(
+                          imageName == null ? 'Pick Menu Photo' : 'Photo: $imageName',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 40,
+                      child: ElevatedButton(
+                        onPressed: parsing || publishing
+                            ? null
+                            : () async {
+                                setSheetState(() => parsing = true);
+                                try {
+                                  final res = await ProviderApiService.parseMenuAi(
+                                    providerId: widget.session.providerId,
+                                    slot: _selectedSlot,
+                                    textInput: textCtrl.text,
+                                    imageBase64: imageBase64,
+                                  );
+                                  setSheetState(() {
+                                    included = ((res['included'] as List?) ?? const []).map((e) => e.toString()).toList();
+                                    extras = ((res['extras'] as List?) ?? const [])
+                                        .map((e) => Map<String, dynamic>.from(e as Map))
+                                        .toList();
+                                    dietaryGuess = res['dietary_guess']?.toString() ?? 'veg';
+                                    calories = (res['estimated_calories'] as num?)?.toInt();
+                                  });
+                                } catch (e) {
+                                  if (mounted) showPartnerNotice(context, '$e', isError: true);
+                                } finally {
+                                  setSheetState(() => parsing = false);
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: ThaliColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: Text(parsing ? 'Parsing...' : 'Extract', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                ),
+                if (included.isNotEmpty || extras.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: ThaliColors.subtle,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: ThaliColors.stroke),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Detected ${dietaryGuess.toUpperCase()}${calories != null ? ' · ~$calories kcal' : ''}',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: ThaliColors.greenDark),
+                        ),
+                        if (included.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const Text('Included Items (tap to remove):', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.muted)),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: included
+                                .map((item) => InputChip(
+                                      label: Text(item, style: const TextStyle(fontSize: 12)),
+                                      onDeleted: () => setSheetState(() => included.remove(item)),
+                                    ))
+                                .toList(),
+                          ),
+                        ],
+                        if (extras.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const Text('Extras / Specials:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.muted)),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: extras
+                                .map((ex) => InputChip(
+                                      label: Text('${ex['name']} (${rupee((ex['price'] as num?)?.toInt() ?? 0)})', style: const TextStyle(fontSize: 12)),
+                                      onDeleted: () => setSheetState(() => extras.remove(ex)),
+                                    ))
+                                .toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  PartnerActionButton(
+                    label: 'Publish ${included.length + extras.length} Item(s) to Menu',
+                    loading: publishing,
+                    onPressed: () async {
+                      setSheetState(() => publishing = true);
+                      try {
+                        for (final dish in included) {
+                          await ProviderApiService.addMenuItem(
+                            providerId: widget.session.providerId,
+                            name: dish,
+                            slot: _selectedSlot,
+                            price: 0,
+                            isExtra: false,
+                            dayOfWeek: _selectedDay,
+                            itemKind: 'included',
+                          );
+                        }
+                        for (final ex in extras) {
+                          final kind = ex['kind']?.toString() == 'special' ? 'special' : 'addon';
+                          await ProviderApiService.addMenuItem(
+                            providerId: widget.session.providerId,
+                            name: ex['name']?.toString() ?? 'Extra',
+                            slot: _selectedSlot,
+                            price: (ex['price'] as num?)?.toInt() ?? 25,
+                            isExtra: kind == 'addon',
+                            dayOfWeek: _selectedDay,
+                            itemKind: kind,
+                          );
+                        }
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          showPartnerNotice(context, 'Published AI menu items to $_selectedSlot!');
+                          await _loadMenu();
+                        }
+                      } catch (e) {
+                        setSheetState(() => publishing = false);
+                        if (mounted) showPartnerNotice(context, '$e', isError: true);
+                      }
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

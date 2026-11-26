@@ -8,6 +8,7 @@ import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
 import '../mess/mess_detail_screen.dart';
 import '../profile/profile_screen.dart';
+import '../scan/scan_screen.dart';
 import '../search/search_screen.dart';
 import '../setup/profile_location_setup_screen.dart';
 
@@ -220,6 +221,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ],
                           ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: () => Navigator.push(context, messRoute(const ScanScreen())),
+                        borderRadius: BorderRadius.circular(99),
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.qr_code_scanner_rounded, size: 19, color: ThaliColors.primary),
                         ),
                       ),
                       const SizedBox(width: 8),

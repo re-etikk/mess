@@ -27,6 +27,10 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
   };
 
   String _packaging = 'reusable_tiffin'; // reusable_tiffin | disposable | dine_in
+  String _fulfillmentMode = 'pickup'; // pickup | delivery
+  int _expectedWeeklySkips = 1;
+  Map<String, dynamic>? _aiRecommendation;
+  bool _loadingRecommendation = false;
   final _instructionsController = TextEditingController();
   final _promoController = TextEditingController();
   String _appliedPromo = '';
@@ -42,11 +46,33 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
   @override
   void initState() {
     super.initState();
+    _fulfillmentMode = widget.provider.supportsDelivery ? 'delivery' : 'pickup';
     if (!widget.provider.supportsDelivery) {
       _packaging = 'dine_in';
     }
     if (widget.provider.plans.isNotEmpty) {
       _selectedPlan = widget.provider.plans.first;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshRecommendation());
+  }
+
+  Future<void> _refreshRecommendation() async {
+    if (!mounted || widget.provider.plans.isEmpty) return;
+    setState(() => _loadingRecommendation = true);
+    try {
+      final res = await AppStateScope.of(context).repository.recommendPlans(
+            providerId: widget.provider.id,
+            weeklyDays: _deliveryDays.length,
+            weeklySkips: _expectedWeeklySkips,
+            mealsPerDay: 2,
+          );
+      if (mounted) {
+        setState(() => _aiRecommendation = res);
+      }
+    } catch (_) {
+      // Non-blocking smart savings insight; silently keep checkout smooth.
+    } finally {
+      if (mounted) setState(() => _loadingRecommendation = false);
     }
   }
 
@@ -189,6 +215,8 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           repeatDays: _deliveryDays.toList()..sort(),
           packagingPreference: _packaging,
           deliveryInstructions: _instructionsController.text.trim(),
+          fulfillmentMode: _fulfillmentMode,
+          deliveryAddress: _fulfillmentMode == 'delivery' ? state.location : null,
           startsAt: _startDate,
         );
         final subMap = verified['subscription'] as Map<String, dynamic>?;
@@ -204,6 +232,8 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           repeatDays: _deliveryDays.toList()..sort(),
           packagingPreference: _packaging,
           deliveryInstructions: _instructionsController.text.trim(),
+          fulfillmentMode: _fulfillmentMode,
+          deliveryAddress: _fulfillmentMode == 'delivery' ? state.location : null,
           promoCode: _appliedPromo,
           discountPaise: _discountInr * 100,
           startsAt: _startDate,
@@ -429,6 +459,10 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 ),
               ),
             ),
+        if (widget.provider.plans.length > 1) ...[
+          const SizedBox(height: 8),
+          _buildSavingsCalculatorCard(),
+        ],
         const SizedBox(height: 12),
         const Text('Delivery / Dining Days', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
         const SizedBox(height: 8),
@@ -438,13 +472,16 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
             final dayNum = i + 1;
             final active = _deliveryDays.contains(dayNum);
             return InkWell(
-              onTap: () => setState(() {
-                if (active && _deliveryDays.length > 1) {
-                  _deliveryDays.remove(dayNum);
-                } else {
-                  _deliveryDays.add(dayNum);
-                }
-              }),
+              onTap: () {
+                setState(() {
+                  if (active && _deliveryDays.length > 1) {
+                    _deliveryDays.remove(dayNum);
+                  } else {
+                    _deliveryDays.add(dayNum);
+                  }
+                });
+                _refreshRecommendation();
+              },
               child: Container(
                 width: 40,
                 height: 40,
@@ -587,30 +624,94 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
             ),
           ),
         ] else ...[
-          const Text('Packaging & Dining Preference', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+          const Text('Fulfillment Mode', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
           const SizedBox(height: 8),
           CardSurface(
-            borderColor: _packaging == 'reusable_tiffin' ? ThaliColors.primary : null,
-            onTap: () => setState(() => _packaging = 'reusable_tiffin'),
+            borderColor: _fulfillmentMode == 'delivery' ? ThaliColors.primary : null,
+            onTap: () => setState(() {
+              _fulfillmentMode = 'delivery';
+              if (_packaging == 'dine_in') _packaging = 'reusable_tiffin';
+            }),
             child: Row(
               children: [
-                Radio<String>(value: 'reusable_tiffin', groupValue: _packaging, activeColor: ThaliColors.primary, onChanged: (v) => setState(() => _packaging = v!)),
-                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Reusable Tiffin', style: TextStyle(fontWeight: FontWeight.w700)), Text('No charges applied', style: TextStyle(fontSize: 11.5, color: ThaliColors.muted))])),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: ThaliColors.greenSoft, borderRadius: BorderRadius.circular(99)), child: const Text('Included', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.greenDark))),
+                Radio<String>(
+                  value: 'delivery',
+                  groupValue: _fulfillmentMode,
+                  activeColor: ThaliColors.primary,
+                  onChanged: (v) => setState(() {
+                    _fulfillmentMode = v!;
+                    if (_packaging == 'dine_in') _packaging = 'reusable_tiffin';
+                  }),
+                ),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Kitchen Self Delivery', style: TextStyle(fontWeight: FontWeight.w700)),
+                      Text('Delivered by the mess rider with live link tracking', style: TextStyle(fontSize: 11.5, color: ThaliColors.muted)),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
           const SizedBox(height: 8),
           CardSurface(
-            borderColor: _packaging == 'disposable' ? ThaliColors.primary : null,
-            onTap: () => setState(() => _packaging = 'disposable'),
+            borderColor: _fulfillmentMode == 'pickup' ? ThaliColors.primary : null,
+            onTap: () => setState(() {
+              _fulfillmentMode = 'pickup';
+              _packaging = 'dine_in';
+            }),
             child: Row(
               children: [
-                Radio<String>(value: 'disposable', groupValue: _packaging, activeColor: ThaliColors.primary, onChanged: (v) => setState(() => _packaging = v!)),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Disposable Container', style: TextStyle(fontWeight: FontWeight.w700)), Text('+ ₹${widget.provider.disposableFeeInr} per day charges apply', style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted))])),
+                Radio<String>(
+                  value: 'pickup',
+                  groupValue: _fulfillmentMode,
+                  activeColor: ThaliColors.primary,
+                  onChanged: (v) => setState(() {
+                    _fulfillmentMode = v!;
+                    _packaging = 'dine_in';
+                  }),
+                ),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Counter Pickup / Dine-in', style: TextStyle(fontWeight: FontWeight.w700)),
+                      Text('Scan counter QR at kitchen when picking up or dining in', style: TextStyle(fontSize: 11.5, color: ThaliColors.muted)),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
+          if (_fulfillmentMode == 'delivery') ...[
+            const SizedBox(height: 12),
+            const Text('Packaging & Dining Preference', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+            const SizedBox(height: 8),
+            CardSurface(
+              borderColor: _packaging == 'reusable_tiffin' ? ThaliColors.primary : null,
+              onTap: () => setState(() => _packaging = 'reusable_tiffin'),
+              child: Row(
+                children: [
+                  Radio<String>(value: 'reusable_tiffin', groupValue: _packaging, activeColor: ThaliColors.primary, onChanged: (v) => setState(() => _packaging = v!)),
+                  const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Reusable Tiffin', style: TextStyle(fontWeight: FontWeight.w700)), Text('No charges applied', style: TextStyle(fontSize: 11.5, color: ThaliColors.muted))])),
+                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: ThaliColors.greenSoft, borderRadius: BorderRadius.circular(99)), child: const Text('Included', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.greenDark))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            CardSurface(
+              borderColor: _packaging == 'disposable' ? ThaliColors.primary : null,
+              onTap: () => setState(() => _packaging = 'disposable'),
+              child: Row(
+                children: [
+                  Radio<String>(value: 'disposable', groupValue: _packaging, activeColor: ThaliColors.primary, onChanged: (v) => setState(() => _packaging = v!)),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Disposable Container', style: TextStyle(fontWeight: FontWeight.w700)), Text('+ ₹${widget.provider.disposableFeeInr} per day charges apply', style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted))])),
+                ],
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 12),
         const Text('Special Instructions', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
@@ -725,6 +826,110 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildSavingsCalculatorCard() {
+    final rec = _aiRecommendation;
+    final recId = rec?['recommended_plan_id']?.toString();
+    final headline = rec?['headline']?.toString() ?? 'Pick your skip days/week to compare real per-meal value.';
+    MealPlan? recPlan;
+    if (recId != null) {
+      for (final p in widget.provider.plans) {
+        if (p.id == recId) {
+          recPlan = p;
+          break;
+        }
+      }
+    }
+
+    return CardSurface(
+      color: ThaliColors.primarySoft.withValues(alpha: 0.45),
+      borderColor: ThaliColors.primary.withValues(alpha: 0.25),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, size: 16, color: ThaliColors.primary),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Smart Plan Savings',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: ThaliColors.card,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: ThaliColors.stroke),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      onTap: _expectedWeeklySkips > 0
+                          ? () {
+                              setState(() => _expectedWeeklySkips--);
+                              _refreshRecommendation();
+                            }
+                          : null,
+                      child: const Padding(
+                        padding: EdgeInsets.all(2),
+                        child: Icon(Icons.remove_rounded, size: 14, color: ThaliColors.ink),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Text(
+                        '$_expectedWeeklySkips skip${_expectedWeeklySkips == 1 ? '' : 's'}/wk',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: _expectedWeeklySkips < 6
+                          ? () {
+                              setState(() => _expectedWeeklySkips++);
+                              _refreshRecommendation();
+                            }
+                          : null,
+                      child: const Padding(
+                        padding: EdgeInsets.all(2),
+                        child: Icon(Icons.add_rounded, size: 14, color: ThaliColors.ink),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _loadingRecommendation && rec == null ? 'Calculating cost per meal...' : headline,
+            style: const TextStyle(fontSize: 12, color: ThaliColors.body, height: 1.35),
+          ),
+          if (recPlan != null && _selectedPlan?.id != recPlan.id) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 32,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() => _selectedPlan = recPlan),
+                icon: const Icon(Icons.check_circle_outline_rounded, size: 15),
+                label: Text('Switch to ${recPlan.name}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ThaliColors.primary,
+                  side: BorderSide(color: ThaliColors.primary.withValues(alpha: 0.45)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

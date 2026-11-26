@@ -8,6 +8,7 @@ import '../core/widgets/partner_widgets.dart';
 import '../models/models.dart';
 import '../services/provider_api_service.dart';
 import 'customer_chats_screen.dart';
+import 'delivery_staff_screen.dart';
 import 'kitchen_queue_screen.dart';
 import 'notifications_screen.dart';
 import 'payment_settings_screen.dart';
@@ -76,6 +77,13 @@ class PartnerMoreScreen extends StatelessWidget {
                   title: 'Live Kitchen Queue',
                   accent: true,
                   onTap: () => Navigator.push(context, partnerRoute(KitchenQueueScreen(session: session))),
+                ),
+                const Divider(height: 1),
+                _item(
+                  icon: Icons.delivery_dining_rounded,
+                  title: 'My Delivery Staff (/rider Link)',
+                  accent: true,
+                  onTap: () => Navigator.push(context, partnerRoute(DeliveryStaffScreen(session: session))),
                 ),
                 const Divider(height: 1),
                 _item(

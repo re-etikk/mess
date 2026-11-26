@@ -5,6 +5,7 @@ import '../core/widgets/partner_widgets.dart';
 import '../models/models.dart';
 import '../services/provider_api_service.dart';
 import 'customer_chats_screen.dart';
+import 'delivery_staff_screen.dart';
 import 'kitchen_queue_screen.dart';
 import 'notifications_screen.dart';
 import 'partner_more_screens.dart';
@@ -33,6 +34,7 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
   bool _isOpenToday = ProviderApiService.staticKitchenStatus ?? true;
   DashboardMetrics? _metrics;
   KitchenQueueResponse? _queueSummary;
+  Map<String, dynamic>? _forecast;
   int _unreadNotifs = 0;
 
   @override
@@ -53,6 +55,10 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
           slot: metrics.currentSlot,
         );
       } catch (_) {}
+      Map<String, dynamic>? forecast;
+      try {
+        forecast = await ProviderApiService.fetchKitchenForecast(widget.session.providerId);
+      } catch (_) {}
       int unread = 0;
       try {
         final notifRes = await ProviderApiService.fetchNotifications(widget.session.providerId);
@@ -64,6 +70,7 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
         _isOpenToday = isOpen;
         _metrics = metrics;
         _queueSummary = queue;
+        _forecast = forecast;
         _unreadNotifs = unread;
       });
     } catch (e) {
@@ -348,6 +355,11 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
 
                     const SizedBox(height: 16),
 
+                    if (_forecast != null) ...[
+                      _buildAiForecastCard(_forecast!),
+                      const SizedBox(height: 16),
+                    ],
+
                     // Live Kitchen Queue Summary Card
                     CardSurface(
                       padding: const EdgeInsets.all(15),
@@ -433,6 +445,15 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
                           ),
                         ),
                         _quickTile(
+                          icon: Icons.delivery_dining_rounded,
+                          title: 'Delivery Staff',
+                          sub: 'Zero-app web link',
+                          onTap: () => Navigator.push(
+                            context,
+                            partnerRoute(DeliveryStaffScreen(session: widget.session)),
+                          ),
+                        ),
+                        _quickTile(
                           icon: Icons.schedule_rounded,
                           title: 'Meal Timings',
                           sub: 'B / L / D hours',
@@ -500,6 +521,107 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAiForecastCard(Map<String, dynamic> f) {
+    final totalPlates = (f['total_recommended_plates'] as num?)?.toInt() ?? 0;
+    final totalSkipped = (f['total_skipped'] as num?)?.toInt() ?? 0;
+    final wasteSaved = (f['total_waste_saved_inr'] as num?)?.toInt() ?? 0;
+    final slots = ((f['slots'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    final churn = ((f['churn_alerts'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+    return CardSurface(
+      color: ThaliColors.primarySoft.withValues(alpha: 0.4),
+      borderColor: ThaliColors.primary.withValues(alpha: 0.28),
+      padding: const EdgeInsets.all(15),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, size: 17, color: ThaliColors.primary),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Today Kitchen Demand Forecast',
+                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: ThaliColors.greenSoft, borderRadius: BorderRadius.circular(99)),
+                child: Text(
+                  'Saved ${rupee(wasteSaved)}',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.greenDark),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Cook ~$totalPlates plates total today ($totalSkipped skip${totalSkipped == 1 ? '' : 's'} subtracted).',
+            style: const TextStyle(fontSize: 12.5, color: ThaliColors.body),
+          ),
+          if (slots.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: slots.map((s) {
+                final slotName = (s['slot']?.toString() ?? 'LUNCH').toLowerCase();
+                final label = slotName[0].toUpperCase() + slotName.substring(1);
+                final plates = (s['recommended_plates'] as num?)?.toInt() ?? 0;
+                final dlv = (s['delivery_count'] as num?)?.toInt() ?? 0;
+                final pkp = (s['pickup_count'] as num?)?.toInt() ?? 0;
+                return Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: ThaliColors.card,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: ThaliColors.stroke),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: ThaliColors.muted)),
+                        const SizedBox(height: 2),
+                        Text('$plates', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                        Text(
+                          '${pkp}P / ${dlv}D',
+                          style: const TextStyle(fontSize: 10, color: ThaliColors.muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+          if (churn.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: () => Navigator.push(context, partnerRoute(SubscribersScreen(session: widget.session))),
+              child: Row(
+                children: [
+                  const Icon(Icons.notifications_active_outlined, size: 16, color: ThaliColors.amberDark),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Retention Watch (${churn.length}): ${churn.first['customer_name'] ?? 'Subscriber'} - ${churn.first['risk_reason'] ?? 'Needs renewal follow-up'}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.amberDark),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, size: 17, color: ThaliColors.amberDark),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

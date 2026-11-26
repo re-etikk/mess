@@ -24,13 +24,14 @@ export async function GET(req: NextRequest) {
   const admin = getAdminClient();
   let subs: any[] = [];
   let events: any[] = [];
+  let supportsDelivery = false;
 
   if (admin) {
     try {
-      const [subsRes, evRes] = await Promise.all([
+      const [subsRes, evRes, provRes] = await Promise.all([
         admin
           .from('subscriptions')
-          .select('*, profiles:customer_id(id,display_name,phone_e164)')
+          .select('*, profiles:customer_id(id,display_name,phone_e164,default_address,default_locality)')
           .eq('provider_id', providerId)
           .eq('status', 'active')
           .order('created_at', { ascending: false }),
@@ -40,9 +41,15 @@ export async function GET(req: NextRequest) {
           .eq('provider_id', providerId)
           .eq('service_date', serviceDate)
           .then((r) => r, () => ({ data: [] as any[] })),
+        admin
+          .from('providers')
+          .select('supports_delivery')
+          .eq('id', providerId)
+          .maybeSingle(),
       ]);
       subs = subsRes.data ?? [];
       events = (evRes as any)?.data ?? [];
+      supportsDelivery = provRes?.data?.supports_delivery === true;
     } catch (e: any) {
       console.warn('provider/kitchen-queue GET error:', e?.message);
     }
@@ -71,6 +78,14 @@ export async function GET(req: NextRequest) {
       const profile = Array.isArray(s.profiles) ? s.profiles[0] : s.profiles;
       const ev = events.find((e) => e.subscription_id === s.id && e.slot === slotFilter);
       const slotCfg = s.selected_slots?.[slotFilter.toLowerCase()] || {};
+      const fMode =
+        ev?.fulfillment_mode ||
+        s.fulfillment_mode ||
+        (s.packaging_preference === 'dine_in' ? 'pickup' : (supportsDelivery ? 'delivery' : 'pickup'));
+      const dropAddr =
+        ev?.delivery_address ||
+        s.delivery_address ||
+        [profile?.default_address, profile?.default_locality].filter(Boolean).join(', ');
       return {
         subscription_id: s.id,
         customer_id: s.customer_id,
@@ -80,6 +95,11 @@ export async function GET(req: NextRequest) {
         slot: slotFilter,
         service_date: serviceDate,
         status: ev?.status || 'scheduled',
+        fulfillment_mode: fMode,
+        delivery_address: dropAddr,
+        rider_id: ev?.rider_id || null,
+        rider_name: ev?.rider_name || null,
+        rider_phone: ev?.rider_phone || null,
         time_window: ev?.custom_time_slot || slotCfg.time_slot || '',
         instructions: ev?.instructions || s.delivery_instructions || '',
         packaging_preference: s.packaging_preference || 'reusable_tiffin',
@@ -92,6 +112,7 @@ export async function GET(req: NextRequest) {
       success: true,
       date: serviceDate,
       slot: slotFilter,
+      supports_delivery: supportsDelivery,
       counts: {
         total: queue.length,
         scheduled: queue.filter((q) => q.status === 'scheduled').length,

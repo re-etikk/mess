@@ -154,12 +154,41 @@ export async function rejectUnimplementedRedemption(
         );
       }
       try {
+        const slotUpper = (qrVerification.slot || 'lunch').toUpperCase();
+        const serviceDateStr = String(qrVerification.date || new Date().toISOString().slice(0, 10));
+        const { data: activeSub } = await admin
+          .from('subscriptions')
+          .select('id')
+          .eq('customer_id', user.id)
+          .eq('provider_id', qrVerification.providerId)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (activeSub?.id) {
+          await admin.from('daily_meal_events').upsert(
+            {
+              subscription_id: activeSub.id,
+              customer_id: user.id,
+              provider_id: qrVerification.providerId,
+              service_date: serviceDateStr,
+              slot: slotUpper,
+              status: 'delivered',
+              fulfillment_mode: 'pickup',
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'subscription_id,service_date,slot' }
+          );
+        }
+      } catch (_) {}
+      try {
         if (qrVerification.providerId) {
           addPartnerNotification({
             provider_id: qrVerification.providerId,
             type: 'redemption',
-            title: 'Meal Redeemed 🍽️',
-            message: `${user.email?.split('@')[0] || 'Student'} redeemed ${(qrVerification.slot || 'lunch').toUpperCase()}`,
+            title: 'Meal Redeemed',
+            message: `${user.email?.split('@')[0] || 'Student'} checked in at counter for ${(qrVerification.slot || 'lunch').toUpperCase()}`,
             customer_name: user.email?.split('@')[0] || 'Student',
           });
         }

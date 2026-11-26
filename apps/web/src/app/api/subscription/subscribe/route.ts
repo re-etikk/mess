@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
       selected_slots = {},
       repeat_days = [1, 2, 3, 4, 5, 6, 7],
       packaging_preference = 'reusable_tiffin',
+      fulfillment_mode: requestedFulfillment,
+      delivery_address = '',
       delivery_instructions = '',
       promo_code = '',
       discount_paise = 0,
@@ -47,21 +49,29 @@ export async function POST(req: NextRequest) {
 
     const admin = getAdminClient();
     let providerName = 'Mess Partner';
+    let providerSupportsDelivery = false;
 
     // 1. Verify Provider
     if (admin) {
       try {
         const { data: provider } = await admin
           .from('providers')
-          .select('id, display_name, status')
+          .select('id, display_name, status, supports_delivery')
           .eq('id', provider_id)
           .maybeSingle();
-        if (provider) providerName = provider.display_name;
+        if (provider) {
+          providerName = provider.display_name;
+          providerSupportsDelivery = provider.supports_delivery === true;
+        }
       } catch {}
     } else {
       const storeProv = platformStore.providers.get(provider_id);
       if (storeProv) providerName = storeProv.display_name;
     }
+    const effectiveFulfillmentMode: 'pickup' | 'delivery' =
+      providerSupportsDelivery && requestedFulfillment === 'delivery'
+        ? 'delivery'
+        : 'pickup';
 
     // 2. Resolve Plan
     let plan: any = null;
@@ -156,6 +166,8 @@ export async function POST(req: NextRequest) {
             selected_slots: selected_slots || {},
             repeat_days: Array.isArray(repeat_days) && repeat_days.length > 0 ? repeat_days : [1, 2, 3, 4, 5, 6, 7],
             packaging_preference: packaging_preference || 'reusable_tiffin',
+            fulfillment_mode: effectiveFulfillmentMode,
+            delivery_address: delivery_address ? String(delivery_address).trim() : null,
             delivery_instructions: delivery_instructions || null,
             promo_code: promo_code || null,
             discount_paise: Number(discount_paise || 0),
@@ -193,6 +205,8 @@ export async function POST(req: NextRequest) {
       initial_meal_credits: initialCredits,
       price_paid_paise: netPayablePaise,
       payment_mode: 'counter_cash',
+      fulfillment_mode: effectiveFulfillmentMode,
+      delivery_address: delivery_address ? String(delivery_address).trim() : '',
       created_at: now.toISOString(),
       ...({
         receipt_url,

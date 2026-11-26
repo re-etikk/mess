@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
       selected_slots = {},
       repeat_days = [1, 2, 3, 4, 5, 6, 7],
       packaging_preference = 'reusable_tiffin',
+      fulfillment_mode: requestedFulfillment,
+      delivery_address = '',
       delivery_instructions = '',
       starts_at: requestedStart,
       slot = 'LUNCH',
@@ -81,20 +83,28 @@ export async function POST(req: NextRequest) {
 
     let resolvedProviderId = provider_id || current_subscription?.providerId || '';
     let providerName = 'Mess Partner';
+    let providerSupportsDelivery = false;
 
     if (admin && resolvedProviderId) {
       try {
         const { data: prov } = await admin
           .from('providers')
-          .select('id, display_name')
+          .select('id, display_name, supports_delivery')
           .eq('id', resolvedProviderId)
           .maybeSingle();
-        if (prov) providerName = prov.display_name;
+        if (prov) {
+          providerName = prov.display_name;
+          providerSupportsDelivery = prov.supports_delivery === true;
+        }
       } catch {}
     } else if (resolvedProviderId) {
       const sp = platformStore.providers.get(resolvedProviderId);
       if (sp) providerName = sp.display_name;
     }
+    const effectiveFulfillmentMode: 'pickup' | 'delivery' =
+      providerSupportsDelivery && requestedFulfillment === 'delivery'
+        ? 'delivery'
+        : 'pickup';
 
     // Resolve Plan
     const effectiveTargetPlanId =
@@ -280,6 +290,8 @@ export async function POST(req: NextRequest) {
             selected_slots: selected_slots || {},
             repeat_days: Array.isArray(repeat_days) && repeat_days.length > 0 ? repeat_days : [1, 2, 3, 4, 5, 6, 7],
             packaging_preference: packaging_preference || 'reusable_tiffin',
+            fulfillment_mode: effectiveFulfillmentMode,
+            delivery_address: delivery_address ? String(delivery_address).trim() : null,
             delivery_instructions: delivery_instructions || null,
             promo_code: promo_code || null,
             discount_paise: Number(discount_paise || 0),

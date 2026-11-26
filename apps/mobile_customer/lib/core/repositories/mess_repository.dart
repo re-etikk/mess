@@ -34,6 +34,8 @@ abstract interface class MessRepository {
     Map<String, dynamic>? selectedSlots,
     List<int>? repeatDays,
     String packagingPreference = 'reusable_tiffin',
+    String fulfillmentMode = 'pickup',
+    String? deliveryAddress,
     String? deliveryInstructions,
     String? promoCode,
     int discountPaise = 0,
@@ -63,6 +65,8 @@ abstract interface class MessRepository {
     Map<String, dynamic>? selectedSlots,
     List<int>? repeatDays,
     String packagingPreference = 'reusable_tiffin',
+    String fulfillmentMode = 'pickup',
+    String? deliveryAddress,
     String? deliveryInstructions,
     DateTime? startsAt,
   });
@@ -152,6 +156,15 @@ abstract interface class MessRepository {
   Future<List<Map<String, dynamic>>> fetchAddresses(String customerId);
   Future<void> saveAddress(Map<String, dynamic> address);
   Future<void> deleteAddress(String id, String customerId);
+
+  Future<Map<String, dynamic>> recommendPlans({
+    required String providerId,
+    required int weeklyDays,
+    required int weeklySkips,
+    int mealsPerDay = 2,
+  });
+
+  Future<Map<String, dynamic>> smartSearchParse(String query);
 }
 
 class RepositoryException implements Exception {

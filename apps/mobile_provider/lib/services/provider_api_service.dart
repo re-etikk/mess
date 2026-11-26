@@ -1397,4 +1397,204 @@ class ProviderApiService {
     }
     return data;
   }
+
+  static Future<Map<String, dynamic>> fetchKitchenForecast(String providerId, {String? date}) async {
+    final qp = <String, String>{'provider_id': providerId};
+    if (date != null && date.isNotEmpty) qp['date'] = date;
+    final uri = Uri.parse('$baseUrl/api/ai/kitchen-forecast').replace(queryParameters: qp);
+    http.Response response;
+    try {
+      response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'load kitchen forecast'));
+    }
+    final data = _decodeResponse(response, action: 'load kitchen forecast');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to load kitchen forecast.');
+    }
+    return data;
+  }
+
+  static Future<Map<String, dynamic>> parseMenuAi({
+    required String providerId,
+    required String slot,
+    String? textInput,
+    String? imageBase64,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/ai/parse-menu');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              'slot': slot.toUpperCase(),
+              if (textInput != null && textInput.trim().isNotEmpty) 'text_input': textInput.trim(),
+              if (imageBase64 != null && imageBase64.isNotEmpty) 'image_base64': imageBase64,
+            }),
+          )
+          .timeout(const Duration(seconds: 25));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'parse menu'));
+    }
+    final data = _decodeResponse(response, action: 'parse menu');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to parse menu.');
+    }
+    return data;
+  }
+
+  static Future<Map<String, dynamic>> fetchReviewInsights(String providerId) async {
+    final uri = Uri.parse('$baseUrl/api/ai/review-insights');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({'provider_id': providerId, 'mode': 'summary'}),
+          )
+          .timeout(const Duration(seconds: 15));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'load review insights'));
+    }
+    final data = _decodeResponse(response, action: 'load review insights');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to load review insights.');
+    }
+    return data;
+  }
+
+  static Future<String> draftReviewReply({
+    required String providerId,
+    required String customerName,
+    required int rating,
+    required String reviewText,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/ai/review-insights');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              'mode': 'draft_reply',
+              'customer_name': customerName,
+              'rating': rating,
+              'review_text': reviewText,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'draft reply'));
+    }
+    final data = _decodeResponse(response, action: 'draft reply');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to draft reply.');
+    }
+    return data['reply']?.toString() ?? '';
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchRiders(String providerId) async {
+    final uri = Uri.parse('$baseUrl/api/delivery/riders?provider_id=$providerId');
+    http.Response response;
+    try {
+      response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'load delivery staff'));
+    }
+    final data = _decodeResponse(response, action: 'load delivery staff');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to load delivery staff.');
+    }
+    return ((data['riders'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  static Future<Map<String, dynamic>> saveRider({
+    required String providerId,
+    required String name,
+    required String phone,
+    String? pinCode,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/delivery/riders');
+    http.Response response;
+    try {
+      response = await http
+          .post(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              'name': name,
+              'phone': phone,
+              if (pinCode != null && pinCode.trim().isNotEmpty) 'pin_code': pinCode.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'save delivery staff'));
+    }
+    final data = _decodeResponse(response, action: 'save delivery staff');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to save delivery staff.');
+    }
+    return Map<String, dynamic>.from(data['rider'] as Map? ?? const {});
+  }
+
+  static Future<void> assignRider({
+    required String providerId,
+    required String riderId,
+    required String subscriptionId,
+    required String customerId,
+    required String slot,
+    required String serviceDate,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/delivery/riders');
+    http.Response response;
+    try {
+      response = await http
+          .patch(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              'provider_id': providerId,
+              'rider_id': riderId,
+              'subscription_id': subscriptionId,
+              'customer_id': customerId,
+              'slot': slot,
+              'service_date': serviceDate,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'assign delivery rider'));
+    }
+    final data = _decodeResponse(response, action: 'assign delivery rider');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to assign delivery rider.');
+    }
+  }
+
+  static Future<void> removeRider({
+    required String providerId,
+    required String riderId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/delivery/riders?provider_id=$providerId&rider_id=$riderId');
+    http.Response response;
+    try {
+      response = await http.delete(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
+    } catch (e) {
+      throw Exception(friendlyError(e, action: 'remove delivery staff'));
+    }
+    final data = _decodeResponse(response, action: 'remove delivery staff');
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to remove delivery staff.');
+    }
+  }
 }

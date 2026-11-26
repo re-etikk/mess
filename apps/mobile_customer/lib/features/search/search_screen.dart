@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
@@ -19,6 +21,8 @@ class _SearchScreenState extends State<SearchScreen> {
   List<MessProvider> _results = [];
   bool _loading = true;
   String? _error;
+  Timer? _debounce;
+  Map<String, dynamic>? _smartFilters;
 
   @override
   void initState() {
@@ -28,19 +32,102 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  bool _looksNaturalQuery(String q) {
+    final trimmed = q.trim();
+    if (trimmed.isEmpty) return false;
+    final words = trimmed.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    if (words >= 2 || RegExp(r'\d').hasMatch(trimmed)) return true;
+    final lower = trimmed.toLowerCase();
+    return ['veg', 'jain', 'lunch', 'dinner', 'breakfast', 'delivery', 'budget', 'under']
+        .any((kw) => lower.contains(kw));
+  }
+
+  void _onQueryChanged(String q) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 280), () {
+      if (mounted) _search(q);
+    });
   }
 
   Future<void> _search(String q) async {
     setState(() {
       _loading = true;
       _error = null;
+      if (q.trim().isEmpty) _smartFilters = null;
     });
+    final appState = AppStateScope.of(context);
     try {
-      final list = await AppStateScope.of(context).searchProviders(q);
+      if (_looksNaturalQuery(q)) {
+        try {
+          final parsed = await appState.repository.smartSearchParse(q);
+          final filters = parsed['filters'] is Map<String, dynamic>
+              ? Map<String, dynamic>.from(parsed['filters'] as Map)
+              : <String, dynamic>{};
+
+          final dietary = filters['dietary']?.toString() ?? 'all';
+          final slot = filters['slot']?.toString() ?? '';
+          final deliveryOnly = filters['delivery_only'] == true;
+          final maxBudget = (filters['max_monthly_inr'] as num?)?.toInt();
+          final keywords = filters['keywords']?.toString().trim() ?? '';
+
+          final apiDietary = dietary == 'veg'
+              ? 'vegetarian'
+              : (dietary == 'non_veg' ? 'non_vegetarian' : (dietary == 'jain' ? 'jain' : null));
+
+          var list = await appState.getProviders(
+            slot: slot.isNotEmpty ? slot.toUpperCase() : null,
+            deliveryOnly: deliveryOnly,
+            dietary: apiDietary,
+          );
+
+          if (keywords.isNotEmpty) {
+            final kwLower = keywords.toLowerCase();
+            final matched = list
+                .where((p) =>
+                    p.name.toLowerCase().contains(kwLower) ||
+                    p.area.toLowerCase().contains(kwLower) ||
+                    p.city.toLowerCase().contains(kwLower) ||
+                    p.description.toLowerCase().contains(kwLower))
+                .toList();
+            if (matched.isNotEmpty) list = matched;
+          }
+
+          if (maxBudget != null && maxBudget > 0) {
+            list = list.where((p) {
+              if (p.plans.isNotEmpty) {
+                return p.plans.any((pl) => pl.price <= maxBudget);
+              }
+              if (p.startingMealPrice != null) {
+                return (p.startingMealPrice! * 30) <= maxBudget;
+              }
+              return true;
+            }).toList();
+          }
+
+          if (!mounted) return;
+          setState(() {
+            _smartFilters = (dietary != 'all' || slot.isNotEmpty || deliveryOnly || maxBudget != null || keywords.isNotEmpty)
+                ? filters
+                : null;
+            _results = list;
+          });
+          return;
+        } catch (_) {
+          // Gracefully fall back to standard keyword search if smart parse is unavailable.
+        }
+      }
+
+      final list = await appState.searchProviders(q);
       if (!mounted) return;
-      setState(() => _results = list);
+      setState(() {
+        _smartFilters = null;
+        _results = list;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -57,6 +144,21 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final appState = AppStateScope.of(context);
     final recent = appState.recentSearches;
+    final smartChips = <String>[];
+    final sf = _smartFilters;
+    if (sf != null) {
+      final d = sf['dietary']?.toString() ?? 'all';
+      if (d == 'veg') smartChips.add('Pure Veg');
+      if (d == 'jain') smartChips.add('Jain');
+      if (d == 'non_veg') smartChips.add('Non-Veg');
+      final s = sf['slot']?.toString() ?? '';
+      if (s.isNotEmpty) smartChips.add(s[0].toUpperCase() + s.substring(1));
+      if (sf['delivery_only'] == true) smartChips.add('Self Delivery');
+      final maxB = (sf['max_monthly_inr'] as num?)?.toInt();
+      if (maxB != null && maxB > 0) smartChips.add('Under ₹$maxB');
+      final kw = sf['keywords']?.toString().trim() ?? '';
+      if (kw.isNotEmpty) smartChips.add('"$kw"');
+    }
 
     return Scaffold(
       backgroundColor: ThaliColors.card,
@@ -69,13 +171,14 @@ class _SearchScreenState extends State<SearchScreen> {
               TextField(
                 controller: _controller,
                 autofocus: true,
-                onChanged: _search,
+                onChanged: _onQueryChanged,
                 onSubmitted: (v) {
+                  _debounce?.cancel();
                   appState.recordRecentSearch(v);
                   _search(v);
                 },
                 decoration: InputDecoration(
-                  hintText: 'Search messes or areas',
+                  hintText: 'Try "pure veg lunch under 3500 delivery"',
                   prefixIcon: IconButton(
                     icon: const Icon(Icons.chevron_left_rounded, color: ThaliColors.ink),
                     onPressed: () => Navigator.maybePop(context),
@@ -84,13 +187,35 @@ class _SearchScreenState extends State<SearchScreen> {
                       ? IconButton(
                           icon: const Icon(Icons.close_rounded, size: 18),
                           onPressed: () {
+                            _debounce?.cancel();
                             _controller.clear();
                             _search('');
                           },
                         )
-                      : const Icon(Icons.search_rounded, color: ThaliColors.primary),
+                      : const Icon(Icons.auto_awesome_rounded, color: ThaliColors.primary, size: 20),
                 ),
               ),
+              if (smartChips.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Icon(Icons.auto_awesome_rounded, size: 14, color: ThaliColors.primary),
+                    const Text('Smart filters:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.primary)),
+                    for (final c in smartChips)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: ThaliColors.primarySoft,
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: Text(c, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.primaryDark)),
+                      ),
+                  ],
+                ),
+              ],
               if (recent.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Row(

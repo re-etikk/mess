@@ -9,6 +9,7 @@ import '../chat/customer_chat_screen.dart';
 import '../checkout/create_subscription_screen.dart';
 import '../history/history_screen.dart';
 import '../mess/mess_detail_screen.dart';
+import '../scan/scan_screen.dart';
 import 'plan_upgrade_sheet.dart';
 
 class PlansScreen extends StatefulWidget {
@@ -425,6 +426,19 @@ class _PlansScreenState extends State<PlansScreen> with SingleTickerProviderStat
                 ),
               ],
             ),
+            if (!sub.isPaused && sub.status == 'active') ...[
+              const SizedBox(height: 10),
+              MessActionButton(
+                label: 'Scan Counter QR',
+                icon: Icons.qr_code_scanner_rounded,
+                secondary: true,
+                height: 42,
+                onPressed: () async {
+                  await Navigator.push(context, messRoute(const ScanScreen()));
+                  if (mounted) await _refreshSubscriptions();
+                },
+              ),
+            ],
           ],
         ),
       ),

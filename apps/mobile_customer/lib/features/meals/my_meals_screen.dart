@@ -291,6 +291,32 @@ class _MyMealsScreenState extends State<MyMealsScreen> {
                           ),
                         ),
                         PressScale(
+                          onTap: () async {
+                            await Navigator.push(context, messRoute(const ScanScreen()));
+                            if (mounted) _loadMeals();
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: ThaliColors.primarySoft,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: ThaliColors.primary.withValues(alpha: 0.35)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.qr_code_scanner_rounded, size: 15, color: ThaliColors.primary),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Scan QR',
+                                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: ThaliColors.primary),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        PressScale(
                           onTap: _pickDate,
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
@@ -762,9 +788,71 @@ class _MyMealsScreenState extends State<MyMealsScreen> {
                                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ThaliColors.muted),
                                 ),
                               ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: meal.fulfillmentMode == 'delivery' ? ThaliColors.primarySoft : ThaliColors.subtle,
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Text(
+                                  meal.fulfillmentMode == 'delivery' ? 'Self Delivery' : 'Counter Pickup',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: meal.fulfillmentMode == 'delivery' ? ThaliColors.primary : ThaliColors.muted,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
                               const Icon(Icons.chevron_right_rounded, size: 18, color: ThaliColors.muted),
                             ],
                           ),
+                          if (meal.riderName != null && meal.riderName!.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: ThaliColors.greenSoft,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: ThaliColors.green.withValues(alpha: 0.25)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.delivery_dining_rounded, size: 15, color: ThaliColors.greenDark),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      meal.riderLat != null && meal.riderLng != null
+                                          ? 'Rider: ${meal.riderName} (Live GPS)'
+                                          : 'Rider: ${meal.riderName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.greenDark),
+                                    ),
+                                  ),
+                                  if (meal.riderPhone != null && meal.riderPhone!.isNotEmpty)
+                                    InkWell(
+                                      onTap: () => launchUrl(Uri.parse('tel:${meal.riderPhone}')),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        child: Icon(Icons.call_rounded, size: 15, color: ThaliColors.greenDark),
+                                      ),
+                                    ),
+                                  if (meal.riderLat != null && meal.riderLng != null)
+                                    InkWell(
+                                      onTap: () => launchUrl(
+                                        Uri.parse('https://www.google.com/maps/search/?api=1&query=${meal.riderLat},${meal.riderLng}'),
+                                        mode: LaunchMode.externalApplication,
+                                      ),
+                                      child: const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                        child: Icon(Icons.location_on_rounded, size: 15, color: ThaliColors.primary),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -1429,6 +1517,63 @@ class _MealManageScreenState extends State<MealManageScreen> {
                           ),
                         ),
                       )),
+                ],
+
+                if (_meal.riderName != null && _meal.riderName!.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  CardSurface(
+                    borderColor: ThaliColors.green.withValues(alpha: 0.35),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: ThaliColors.greenSoft,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.delivery_dining_rounded, size: 18, color: ThaliColors.greenDark),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Assigned Delivery Rider', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.muted)),
+                                  Text(_meal.riderName!, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                                ],
+                              ),
+                            ),
+                            if (_meal.riderPhone != null && _meal.riderPhone!.isNotEmpty)
+                              IconButton(
+                                icon: const Icon(Icons.call_rounded, color: ThaliColors.greenDark),
+                                tooltip: 'Call rider',
+                                onPressed: () => launchUrl(Uri.parse('tel:${_meal.riderPhone}')),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (_meal.riderLat != null && _meal.riderLng != null)
+                          MessActionButton(
+                            label: 'Track Rider Live Pin',
+                            height: 40,
+                            onPressed: () => launchUrl(
+                              Uri.parse('https://www.google.com/maps/search/?api=1&query=${_meal.riderLat},${_meal.riderLng}'),
+                              mode: LaunchMode.externalApplication,
+                            ),
+                          )
+                        else
+                          Text(
+                            _meal.riderPhone != null && _meal.riderPhone!.isNotEmpty
+                                ? 'Kitchen self-delivery staff assigned (${_meal.riderPhone}). Live map pin appears once rider enables GPS sharing.'
+                                : 'Kitchen self-delivery staff assigned. Live map pin appears once rider starts route.',
+                            style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted),
+                          ),
+                      ],
+                    ),
+                  ),
                 ],
 
                 const SizedBox(height: 14),
