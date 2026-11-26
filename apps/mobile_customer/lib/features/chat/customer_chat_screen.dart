@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/animations/thali_animations.dart';
+import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 
@@ -196,7 +197,7 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Message saved locally: $e')),
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'send message'))),
         );
       }
     }
@@ -213,7 +214,9 @@ class _CustomerChatScreenState extends State<CustomerChatScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to pick photo: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'pick photo'))),
+        );
       }
     }
   }

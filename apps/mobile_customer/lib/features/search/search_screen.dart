@@ -43,7 +43,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final words = trimmed.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
     if (words >= 2 || RegExp(r'\d').hasMatch(trimmed)) return true;
     final lower = trimmed.toLowerCase();
-    return ['veg', 'jain', 'lunch', 'dinner', 'breakfast', 'delivery', 'budget', 'under']
+    return ['veg', 'jain', 'lunch', 'snacks', 'snack', 'dinner', 'breakfast', 'delivery', 'budget', 'under']
         .any((kw) => lower.contains(kw));
   }
 

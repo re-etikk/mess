@@ -24,7 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
   String? _error;
 
-  String? _selectedSlot; // 'breakfast' | 'lunch' | 'dinner'
+  String? _selectedSlot; // 'breakfast' | 'lunch' | 'snacks' | 'dinner'
   double? _minRating;
   bool _openNowOnly = false;
   bool _deliveryOnly = false;
@@ -43,13 +43,17 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
     });
     try {
-      final list = await AppStateScope.of(context).getProviders(
+      var list = await AppStateScope.of(context).getProviders(
         slot: _selectedSlot,
         minRating: _minRating,
         openNow: _openNowOnly,
         deliveryOnly: _deliveryOnly,
         sort: _sortBy.isEmpty ? null : _sortBy,
       );
+      if (_selectedSlot != null && _selectedSlot!.isNotEmpty) {
+        final sKey = _selectedSlot!.toLowerCase();
+        list = list.where((p) => p.mealSlots.any((m) => m.id.toLowerCase() == sKey && m.enabled)).toList();
+      }
       if (!mounted) return;
       setState(() => _providers = list);
     } catch (e) {
@@ -330,7 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 108),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // 3 Quick Slot Category Cards
+                // 4 Quick Slot Category Cards (Breakfast · Lunch · Snacks · Dinner)
                 Row(
                   children: [
                     _SlotCategoryTile(
@@ -343,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _loadProviders();
                       },
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 7),
                     _SlotCategoryTile(
                       label: 'Lunch',
                       svgPath: 'assets/images/ui/icon_lunch.svg',
@@ -354,7 +358,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         _loadProviders();
                       },
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 7),
+                    _SlotCategoryTile(
+                      label: 'Snacks',
+                      svgPath: 'assets/images/ui/icon_snacks.svg',
+                      bg: ThaliColors.snacksTile,
+                      selected: _selectedSlot == 'snacks',
+                      onTap: () {
+                        setState(() => _selectedSlot = _selectedSlot == 'snacks' ? null : 'snacks');
+                        _loadProviders();
+                      },
+                    ),
+                    const SizedBox(width: 7),
                     _SlotCategoryTile(
                       label: 'Dinner',
                       svgPath: 'assets/images/ui/icon_dinner.svg',
@@ -694,9 +709,14 @@ class _SlotCategoryTile extends StatelessWidget {
           ),
           child: Column(
             children: [
-              SvgPicture.asset(svgPath, width: 44, height: 44),
-              const SizedBox(height: 6),
-              Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
+              SvgPicture.asset(svgPath, width: 38, height: 38),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+              ),
             ],
           ),
         ),

@@ -35,7 +35,7 @@ class _DeliveryStaffScreenState extends State<DeliveryStaffScreen> {
       final list = await ProviderApiService.fetchRiders(widget.session.providerId);
       if (mounted) setState(() => _riders = list);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      if (mounted) setState(() => _error = ProviderApiService.friendlyError(e, action: 'load staff'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -123,7 +123,7 @@ class _DeliveryStaffScreenState extends State<DeliveryStaffScreen> {
                     }
                   } catch (e) {
                     setSheetState(() => saving = false);
-                    if (mounted) showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+                    if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'add staff'), isError: true);
                   }
                 },
               ),
@@ -145,7 +145,7 @@ class _DeliveryStaffScreenState extends State<DeliveryStaffScreen> {
         _load();
       }
     } catch (e) {
-      if (mounted) showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+      if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'remove staff'), isError: true);
     }
   }
 

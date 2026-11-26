@@ -13,10 +13,11 @@ class ProviderApiService {
     Object error, {
     int? statusCode,
     String? body,
-    String action = 'load data',
+    String action = 'complete request',
   }) {
     final raw = error.toString();
-    final lower = raw.toLowerCase();
+    final cleaned = raw.replaceFirst('Exception: ', '').trim();
+    final lower = cleaned.toLowerCase();
 
     if (lower.contains('socketexception') ||
         lower.contains('failed host lookup') ||
@@ -24,39 +25,49 @@ class ProviderApiService {
         lower.contains('connection refused') ||
         lower.contains('connection reset') ||
         lower.contains('clientexception')) {
-      return 'No internet connection or unable to reach Thali servers right now. Check your network and pull down to retry.';
+      return 'No internet connection. Check your network and try again.';
     }
     if (lower.contains('timeoutexception') || lower.contains('timed out')) {
-      return 'Server took too long to respond while trying to $action. Pull down to retry.';
+      return 'Request took too long. Please try again.';
     }
 
     final bodyTrim = (body ?? '').trimLeft().toLowerCase();
-    if (statusCode == 404 ||
+    final looksTechnical = statusCode == 404 ||
         lower.contains('formatexception') ||
         bodyTrim.startsWith('<!doctype') ||
-        bodyTrim.startsWith('<html')) {
-      if (statusCode == 404) {
-        return 'This feature is not live on thali.store yet (404). Redeploy the web backend to enable $action.';
-      }
-      return 'Could not $action because the server returned a web page instead of app data. Please redeploy the web backend.';
+        bodyTrim.startsWith('<html') ||
+        lower.contains('permission denied') ||
+        lower.contains('postgres') ||
+        lower.contains('42501') ||
+        lower.contains('42p01') ||
+        lower.contains('pgrst') ||
+        lower.contains('violates') ||
+        lower.contains('relation ') ||
+        lower.contains('column ') ||
+        lower.contains('supabase') ||
+        lower.contains('sql') ||
+        lower.contains("type '") ||
+        lower.contains('rangeerror') ||
+        lower.contains('nosuchmethod') ||
+        lower.contains('null check') ||
+        lower.contains('http ');
+
+    if (looksTechnical) {
+      return 'Something went wrong while trying to $action. Please try again.';
     }
     if (statusCode == 401) {
-      return 'Your partner session expired. Please sign in again.';
+      return 'Session expired. Please sign in again.';
     }
     if (statusCode == 403) {
       return 'You do not have permission for this kitchen action.';
     }
-    if (statusCode == 503) {
-      return 'Database table or server credentials are not configured yet on the backend.';
+    if (statusCode == 503 || (statusCode != null && statusCode >= 500)) {
+      return 'Service is temporarily busy. Please try again.';
     }
-    if (raw.startsWith('Exception: ')) {
-      final clean = raw.substring(11).trim();
-      if (clean.toLowerCase().contains('persisted provider review table')) {
-        return 'Reviews table is missing in Supabase or the web update is not deployed yet. Run the SQL migration and redeploy.';
-      }
-      return clean;
+    if (raw.startsWith('Exception: ') && cleaned.isNotEmpty) {
+      return cleaned;
     }
-    return 'Unable to $action right now. Pull down to refresh.';
+    return 'Something went wrong. Please try again.';
   }
 
   static Map<String, dynamic> _decodeResponse(http.Response response, {String action = 'load data'}) {
@@ -1282,18 +1293,34 @@ class ProviderApiService {
     }
     final data = _decodeResponse(response, action: 'load kitchen settings');
     if (response.statusCode >= 400 || data['success'] == false) {
-      throw Exception(data['error'] ?? 'Failed to load kitchen settings.');
+      throw Exception(
+        friendlyError(
+          data['error'] ?? 'HTTP ${response.statusCode}',
+          statusCode: response.statusCode,
+          body: response.body,
+          action: 'load kitchen settings',
+        ),
+      );
     }
     return data['provider'] as Map<String, dynamic>? ?? {};
   }
 
   static Future<Map<String, dynamic>> updateProviderProfile({
     required String providerId,
+    String? displayName,
+    String? description,
+    String? addressLine1,
+    String? locality,
+    String? city,
     bool? supportsDelivery,
     bool? supportsPickup,
     bool? allowsTakeaway,
-    String? description,
     String? coverImageBase64,
+    String? logoImageBase64,
+    String? publicPhone,
+    String? publicEmail,
+    String? otpCode,
+    String? verificationEmail,
   }) async {
     final uri = Uri.parse('$baseUrl/api/provider/profile');
     http.Response response;
@@ -1304,20 +1331,36 @@ class ProviderApiService {
             headers: _authHeaders(json: true),
             body: jsonEncode({
               'provider_id': providerId,
+              if (displayName != null) 'display_name': displayName,
+              if (description != null) 'description': description,
+              if (addressLine1 != null) 'address_line1': addressLine1,
+              if (locality != null) 'locality': locality,
+              if (city != null) 'city': city,
               if (supportsDelivery != null) 'supports_delivery': supportsDelivery,
               if (supportsPickup != null) 'supports_pickup': supportsPickup,
               if (allowsTakeaway != null) 'allows_takeaway': allowsTakeaway,
-              if (description != null) 'description': description,
               if (coverImageBase64 != null) 'cover_image_base64': coverImageBase64,
+              if (logoImageBase64 != null) 'logo_image_base64': logoImageBase64,
+              if (publicPhone != null) 'public_phone': publicPhone,
+              if (publicEmail != null) 'public_email': publicEmail,
+              if (otpCode != null && otpCode.isNotEmpty) 'otp_code': otpCode,
+              if (verificationEmail != null && verificationEmail.isNotEmpty) 'verification_email': verificationEmail,
             }),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 25));
     } catch (e) {
-      throw Exception(friendlyError(e, action: 'update kitchen settings'));
+      throw Exception(friendlyError(e, action: 'update kitchen profile'));
     }
-    final data = _decodeResponse(response, action: 'update kitchen settings');
+    final data = _decodeResponse(response, action: 'update kitchen profile');
     if (response.statusCode >= 400 || data['success'] == false) {
-      throw Exception(data['error'] ?? 'Failed to update kitchen settings.');
+      throw Exception(
+        friendlyError(
+          data['error'] ?? 'HTTP ${response.statusCode}',
+          statusCode: response.statusCode,
+          body: response.body,
+          action: 'update kitchen profile',
+        ),
+      );
     }
     return data;
   }

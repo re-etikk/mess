@@ -6,12 +6,17 @@ export type AdminAccess =
   | { ok: true; userId: string; admin: SupabaseClient<any> }
   | { ok: false; status: 401 | 403 | 503; error: string };
 
+/** Forces Next.js Data Cache bypass on all Supabase REST queries. */
+export const noStoreFetch: typeof fetch = (input, init) =>
+  fetch(input, { ...init, cache: 'no-store' });
+
 /** Server-only client. Never return this client or its credential to the browser. */
 export function getAdminClient(): SupabaseClient<any> | null {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!serviceKey || !url) return null;
   return createSupabaseClient<any>(url, serviceKey, {
+    global: { fetch: noStoreFetch },
     auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   });
 }

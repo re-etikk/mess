@@ -74,6 +74,10 @@ void main() {
     expect(find.text('Explore'), findsOneWidget);
     expect(find.text('My meals'), findsOneWidget);
     expect(find.text('Subscriptions'), findsOneWidget);
+    expect(find.text('Breakfast'), findsOneWidget);
+    expect(find.text('Lunch'), findsOneWidget);
+    expect(find.text('Snacks'), findsOneWidget);
+    expect(find.text('Dinner'), findsOneWidget);
   });
 
   testWidgets('MealStatusBadge renders all 6 Behance meal statuses', (tester) async {

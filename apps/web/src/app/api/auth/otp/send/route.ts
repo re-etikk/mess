@@ -5,6 +5,7 @@ import { getClientIp } from '@/lib/auth-session';
 import { checkRateLimit } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 function maskIdentifier(val: string): string {
   if (val.includes('@')) {
@@ -45,10 +46,14 @@ export async function POST(req: NextRequest) {
   if (!admin) {
     return NextResponse.json({ success: false, error: 'Authentication service is not configured on this server.' }, { status: 503 });
   }
-  const { error: deleteError } = await admin.from('auth_otps').delete().eq('identifier', identifier);
-  if (deleteError) {
-    console.error('Could not invalidate previous OTP:', deleteError.message);
-    return NextResponse.json({ success: false, error: 'Could not send the verification code. Please try again later.' }, { status: 503 });
+  const nowIso = new Date().toISOString();
+  const { error: cleanupError } = await admin
+    .from('auth_otps')
+    .delete()
+    .eq('identifier', identifier)
+    .or(`verified.eq.true,expires_at.lt.${nowIso}`);
+  if (cleanupError) {
+    console.warn('Could not clean previous expired OTPs:', cleanupError.message);
   }
   const { error: insertError } = await admin.from('auth_otps').insert({
     identifier,

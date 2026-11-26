@@ -28,7 +28,7 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
   KitchenQueueResponse? _data;
   List<Map<String, dynamic>> _riders = const [];
 
-  static const _slots = ['BREAKFAST', 'LUNCH', 'DINNER'];
+  static const _slots = ['BREAKFAST', 'LUNCH', 'SNACKS', 'DINNER'];
 
   @override
   void initState() {
@@ -62,7 +62,7 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = ProviderApiService.friendlyError(e, action: 'load queue'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -84,7 +84,7 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
       await _load();
     } catch (e) {
       if (mounted) {
-        showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update status'), isError: true);
       }
     }
   }
@@ -113,7 +113,7 @@ class _KitchenQueueScreenState extends State<KitchenQueueScreen> {
       await _load();
     } catch (e) {
       if (mounted) {
-        showPartnerNotice(context, e.toString().replaceFirst('Exception: ', ''), isError: true);
+        showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'assign rider'), isError: true);
       }
     }
   }

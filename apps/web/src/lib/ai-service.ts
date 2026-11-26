@@ -362,7 +362,7 @@ export const SmartSearchSchema = z.object({
   keywords: z.string().default(''),
   max_monthly_inr: z.number().nullable().default(null),
   dietary: z.enum(['all', 'veg', 'non_veg', 'jain']).default('all'),
-  slot: z.enum(['', 'breakfast', 'lunch', 'dinner']).default(''),
+  slot: z.enum(['', 'breakfast', 'lunch', 'snacks', 'dinner']).default(''),
   delivery_only: z.boolean().default(false),
 });
 
@@ -386,15 +386,16 @@ export function heuristicSmartSearch(query: string): z.infer<typeof SmartSearchS
   else if (/\b(non[-\s]?veg|chicken|mutton|egg)\b/.test(lower)) dietary = 'non_veg';
   else if (/\b(veg|pure veg|vegetarian|shudh)\b/.test(lower)) dietary = 'veg';
 
-  let slot: '' | 'breakfast' | 'lunch' | 'dinner' = '';
+  let slot: '' | 'breakfast' | 'lunch' | 'snacks' | 'dinner' = '';
   if (/\b(breakfast|nashta|morning|subah)\b/.test(lower)) slot = 'breakfast';
+  else if (/\b(snacks?|chai|evening|sham)\b/.test(lower)) slot = 'snacks';
   else if (/\b(lunch|dopahar|afternoon)\b/.test(lower)) slot = 'lunch';
   else if (/\b(dinner|raat|night)\b/.test(lower)) slot = 'dinner';
 
   const delivery_only = /\b(delivery|home delivery|deliver|ghar)\b/.test(lower);
 
   const stopWords =
-    /\b(under|below|within|upto|budget|ke|andar|me|mein|wala|chahiye|pure|veg|non|vegetarian|jain|breakfast|lunch|dinner|delivery|home|mess|tiffin|rs|inr)\b/gi;
+    /\b(under|below|within|upto|budget|ke|andar|me|mein|wala|chahiye|pure|veg|non|vegetarian|jain|breakfast|lunch|snacks?|dinner|delivery|home|mess|tiffin|rs|inr)\b/gi;
   const cleanedKeywords = q
     .replace(stopWords, ' ')
     .replace(/\d{3,5}/g, ' ')

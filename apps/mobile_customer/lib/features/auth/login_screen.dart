@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../core/repositories/mess_repository.dart';
 import '../../core/services/customer_auth_service.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
@@ -85,6 +87,9 @@ class _LoginScreenState extends State<LoginScreen> {
       final res = await CustomerAuthService.sendOtp(identifier: id, purpose: 'signin');
       if (!mounted) return;
       _startTimer();
+      for (final c in _otpControllers) {
+        c.clear();
+      }
       setState(() {
         _isOtpStep = true;
         _verified = false;
@@ -95,13 +100,14 @@ class _LoginScreenState extends State<LoginScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = friendlyCustomerError(e, action: 'send code'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _verifyOtp() async {
+    if (_loading || _verified) return;
     final code = _otpValue;
     if (code.length != 6) {
       setState(() => _error = 'Enter all 6 digits of your OTP.');
@@ -136,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = friendlyCustomerError(e, action: 'verify OTP'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -166,7 +172,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = friendlyCustomerError(e, action: 'sign in'));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -414,7 +420,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   focusNode: _otpFocus[i],
                   textAlign: TextAlign.center,
                   keyboardType: TextInputType.number,
-                  maxLength: 1,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
@@ -430,12 +436,24 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   onChanged: (v) {
                     setState(() => _error = null);
-                    if (v.isNotEmpty && i < 5) {
+                    final digits = v.replaceAll(RegExp(r'\D'), '');
+                    if (digits.length > 1) {
+                      for (int j = 0; j < 6 && j < digits.length; j++) {
+                        _otpControllers[j].text = digits[j];
+                      }
+                      final focusIdx = digits.length.clamp(0, 6) - 1;
+                      _otpFocus[focusIdx].requestFocus();
+                      if (_otpValue.length == 6 && !_verified && !_loading) {
+                        _verifyOtp();
+                      }
+                      return;
+                    }
+                    if (digits.isNotEmpty && i < 5) {
                       _otpFocus[i + 1].requestFocus();
-                    } else if (v.isEmpty && i > 0) {
+                    } else if (digits.isEmpty && i > 0) {
                       _otpFocus[i - 1].requestFocus();
                     }
-                    if (_otpValue.length == 6 && !_verified) {
+                    if (_otpValue.length == 6 && !_verified && !_loading) {
                       _verifyOtp();
                     }
                   },

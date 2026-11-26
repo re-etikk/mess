@@ -183,4 +183,20 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
     expect(filledJson.total_reviews).toBe(1);
     expect(filledJson.average_rating).toBe(5);
   });
+
+  it('sanitizes internal SQL errors and supports snacks smart-search parsing', async () => {
+    const { publicErrorMessage } = await import('../lib/auth-session');
+    const { heuristicSmartSearch } = await import('../lib/ai-service');
+
+    expect(publicErrorMessage(new Error('permission denied for table providers'))).toBe(
+      'Something went wrong. Please try again.'
+    );
+    expect(publicErrorMessage(new Error('Kitchen name is required.'))).toBe('Kitchen name is required.');
+
+    const parsed = heuristicSmartSearch('evening snacks pure veg under 2500 delivery');
+    expect(parsed.slot).toBe('snacks');
+    expect(parsed.dietary).toBe('veg');
+    expect(parsed.delivery_only).toBe(true);
+    expect(parsed.max_monthly_inr).toBe(2500);
+  });
 });

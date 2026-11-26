@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/models/app_notification.dart';
+import '../../core/repositories/mess_repository.dart';
 import '../../core/services/customer_auth_service.dart';
 import '../../core/state/app_state.dart';
 import '../../core/theme/thali_theme.dart';
@@ -158,7 +159,7 @@ class ProfileScreen extends StatelessWidget {
                     _row(
                       icon: Icons.location_on_outlined,
                       title: 'Delivery Locality & Pin',
-                      subtitle: state.location.isNotEmpty ? state.location : 'Set your delivery area',
+                      subtitle: state.location.isNotEmpty ? state.location : null,
                       onTap: () => Navigator.push(
                         context,
                         messRoute(const ProfileLocationSetupScreen(locationOnly: true)),
@@ -168,21 +169,19 @@ class ProfileScreen extends StatelessWidget {
                     _row(
                       icon: Icons.bookmark_border_rounded,
                       title: 'Saved Addresses',
-                      subtitle: 'Manage home, hostel or office delivery addresses',
                       onTap: () => _openAddressesSheet(context, state),
                     ),
                     const Divider(height: 1),
                     _row(
                       icon: Icons.history_rounded,
                       title: 'Meal Redemption History',
-                      subtitle: '${state.history.length} check-ins recorded',
+                      subtitle: state.history.isNotEmpty ? '${state.history.length} check-ins' : null,
                       onTap: () => Navigator.push(context, messRoute(const HistoryScreen())),
                     ),
                     const Divider(height: 1),
                     _row(
                       icon: Icons.notifications_none_rounded,
                       title: 'Notifications',
-                      subtitle: unreadCount > 0 ? '$unreadCount unread updates' : 'All caught up',
                       trailing: unreadCount > 0
                           ? Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -213,21 +212,18 @@ class ProfileScreen extends StatelessWidget {
                     _row(
                       icon: Icons.support_agent_outlined,
                       title: 'Customer Support',
-                      subtitle: 'Submit a help ticket or report an order issue',
                       onTap: () => _showSupportSheet(context, state),
                     ),
                     const Divider(height: 1),
                     _row(
                       icon: Icons.description_outlined,
                       title: 'Terms of Service',
-                      subtitle: 'Usage rules and subscription terms',
                       onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: false))),
                     ),
                     const Divider(height: 1),
                     _row(
                       icon: Icons.privacy_tip_outlined,
                       title: 'Privacy Policy',
-                      subtitle: 'Data protection and retention policy',
                       onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: true))),
                     ),
                   ],
@@ -264,7 +260,7 @@ class ProfileScreen extends StatelessWidget {
   Widget _row({
     required IconData icon,
     required String title,
-    required String subtitle,
+    String? subtitle,
     required VoidCallback onTap,
     Widget? trailing,
   }) {
@@ -289,13 +285,15 @@ class ProfileScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: ThaliColors.muted),
-                  ),
+                  if (subtitle != null && subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: ThaliColors.muted),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -835,7 +833,9 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unable to select photo: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'update photo'))),
+        );
       }
     }
   }
@@ -878,7 +878,9 @@ class _CustomerEditProfileScreenState extends State<CustomerEditProfileScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'save profile'))),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

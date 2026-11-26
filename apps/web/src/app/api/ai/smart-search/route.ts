@@ -24,7 +24,7 @@ Fields:
 - "keywords": locality, area, or dish words left after extracting filters (empty string if none).
 - "max_monthly_inr": integer budget cap if mentioned (e.g. 3500) else null.
 - "dietary": "veg" | "non_veg" | "jain" | "all"
-- "slot": "breakfast" | "lunch" | "dinner" | ""
+- "slot": "breakfast" | "lunch" | "snacks" | "dinner" | ""
 - "delivery_only": boolean (true if user mentions home delivery / tiffin delivery)`;
 
   const res = await callGeminiJson({

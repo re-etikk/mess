@@ -175,16 +175,16 @@ class RepositoryException implements Exception {
   String toString() => message;
 }
 
-/// Converts raw transport/HTTP/HTML failures into clear, actionable human English.
+/// Converts raw transport/HTTP/SQL failures into clear, user-friendly English.
 String friendlyCustomerError(
   Object error, {
   int? statusCode,
   String? body,
-  String action = 'load data',
+  String action = 'complete request',
 }) {
-  if (error is RepositoryException) return error.message;
-  final raw = error.toString();
-  final lower = raw.toLowerCase();
+  final raw = error is RepositoryException ? error.message : error.toString();
+  final cleaned = raw.replaceFirst('Exception: ', '').replaceFirst('RepositoryException: ', '').trim();
+  final lower = cleaned.toLowerCase();
 
   if (lower.contains('socketexception') ||
       lower.contains('failed host lookup') ||
@@ -192,36 +192,50 @@ String friendlyCustomerError(
       lower.contains('connection refused') ||
       lower.contains('connection reset') ||
       lower.contains('clientexception')) {
-    return 'No internet connection or unable to reach Thali servers right now. Check Wi-Fi or mobile data and pull down to retry.';
+    return 'No internet connection. Check your network and try again.';
   }
   if (lower.contains('timeoutexception') || lower.contains('timed out')) {
-    return 'Server took too long to respond while trying to $action. Pull down to try again.';
+    return 'Request took too long. Please try again.';
   }
 
   final bodyTrim = (body ?? '').trimLeft().toLowerCase();
-  if (statusCode == 404 ||
+  final looksTechnical = statusCode == 404 ||
       lower.contains('formatexception') ||
       bodyTrim.startsWith('<!doctype') ||
-      bodyTrim.startsWith('<html')) {
-    if (statusCode == 404) {
-      return 'This feature is not live on the web server yet (404). The latest server update needs to be deployed to thali.store.';
-    }
-    return 'Could not $action because the web server returned a webpage instead of app data. Make sure the latest backend update is deployed.';
+      bodyTrim.startsWith('<html') ||
+      lower.contains('permission denied') ||
+      lower.contains('postgres') ||
+      lower.contains('42501') ||
+      lower.contains('42p01') ||
+      lower.contains('pgrst') ||
+      lower.contains('violates') ||
+      lower.contains('relation ') ||
+      lower.contains('column ') ||
+      lower.contains('supabase') ||
+      lower.contains('sql') ||
+      lower.contains("type '") ||
+      lower.contains('rangeerror') ||
+      lower.contains('nosuchmethod') ||
+      lower.contains('null check') ||
+      lower.contains('http ');
+
+  if (looksTechnical) {
+    return 'Something went wrong while trying to $action. Please try again.';
   }
   if (statusCode == 401) {
-    return 'Your session expired. Please sign in again to continue.';
+    return 'Session expired. Please sign in again.';
   }
   if (statusCode == 403) {
-    return 'You do not have permission to $action.';
+    return 'Permission denied. Please sign in again.';
   }
-  if (statusCode == 503) {
-    return 'Server database setup is incomplete (missing server credentials or SQL table migration).';
+  if (statusCode == 503 || (statusCode != null && statusCode >= 500)) {
+    return 'Service is temporarily busy. Please try again.';
   }
-  if (statusCode != null && statusCode >= 500) {
-    return 'Thali server ran into an issue ($statusCode) while trying to $action. Please try again in a moment.';
+  if (error is RepositoryException && cleaned.isNotEmpty) {
+    return cleaned;
   }
-  if (raw.startsWith('Exception: ')) {
-    return raw.substring(11);
+  if (raw.startsWith('Exception: ') && cleaned.isNotEmpty) {
+    return cleaned;
   }
-  return 'Unable to $action right now. Pull down to refresh.';
+  return 'Something went wrong. Please try again.';
 }

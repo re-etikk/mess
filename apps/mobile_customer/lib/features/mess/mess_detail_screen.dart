@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/mess_models.dart';
+import '../../core/repositories/mess_repository.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
@@ -271,7 +272,9 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
                       await _loadReviews();
                     } catch (e) {
                       if (ctx.mounted) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(e.toString())));
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text(friendlyCustomerError(e, action: 'submit review'))),
+                        );
                       }
                     } finally {
                       if (ctx.mounted) setModalState(() => submitting = false);
