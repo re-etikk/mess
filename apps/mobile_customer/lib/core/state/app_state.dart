@@ -287,11 +287,11 @@ class AppState extends ChangeNotifier {
       final cfg = results[0] as Map<String, dynamic>;
       final banners = results[1] as List<Map<String, dynamic>>;
       if (cfg.isNotEmpty) {
-        final h = cfg['hero_headline']?.toString().trim() ?? '';
-        final sh = cfg['hero_subheadline']?.toString().trim() ?? '';
+        final h = (cfg['hero_title'] ?? cfg['hero_headline'])?.toString().trim() ?? '';
+        final sh = (cfg['hero_subtitle'] ?? cfg['hero_subheadline'])?.toString().trim() ?? '';
         if (h.isNotEmpty) heroHeadline = h;
         if (sh.isNotEmpty) heroSubheadline = sh;
-        maintenanceMode = cfg['maintenance_mode'] == true;
+        maintenanceMode = (cfg['customer_maintenance'] ?? cfg['maintenance_mode']) == true;
         maintenanceMessage = cfg['maintenance_message']?.toString() ?? '';
         platformFeeInr = ((cfg['platform_fee_paise'] as num?)?.toInt() ?? 0) ~/ 100;
         deliveryFeeInr = ((cfg['default_delivery_fee_paise'] as num?)?.toInt() ?? 0) ~/ 100;
