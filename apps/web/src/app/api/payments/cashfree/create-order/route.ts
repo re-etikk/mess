@@ -7,6 +7,7 @@ import { ensurePlanSlotsLinked, requireCustomerIdentity } from '@/lib/auth-sessi
 import {
   resolveAuthoritativeDiscountPaise,
   resolveAuthoritativePlan,
+  resolveAuthoritativeSingleMealOrder,
   resolveVerifiedUpgradeQuote,
 } from '@/lib/checkout-pricing';
 
@@ -101,69 +102,64 @@ export async function POST(req: NextRequest) {
     let basePlanPricePaise = 0;
     let upgradeFromSubId = '';
 
+    let extraAddOnsPaise = Math.max(0, Math.min(200_000, Math.round(Number(body.add_ons_paise || 0))));
+    let normalizedSlotsPayload: Record<string, any> = selectedSlots;
+
     if (purpose === 'single_meal_purchase') {
+      const singleRes = await resolveAuthoritativeSingleMealOrder({
+        admin,
+        providerId: resolvedProviderId,
+        selectedSlots,
+        fallbackSlot: slot,
+      });
+      if (!singleRes.ok) {
+        return NextResponse.json({ success: false, error: singleRes.error }, { status: singleRes.status });
+      }
       durDays = 1;
       effectivePlanType = 'meal_credits';
-      initialCredits = 1;
+      initialCredits = singleRes.totalMealsCount;
+      effectivePlanName = `Single Order (${singleRes.itemsSummary})`.slice(0, 120);
+      basePlanPricePaise = singleRes.baseMealsPaise;
+      extraAddOnsPaise = singleRes.verifiedAddOnsPaise;
+      normalizedSlotsPayload = singleRes.normalizedSelectedSlots;
 
       if (admin && resolvedProviderId) {
-        let { data: dailyPlan } = await admin
+        const { data: dailyPlan } = await admin
           .from('subscription_plans')
-          .select('*')
+          .select('id')
           .eq('provider_id', resolvedProviderId)
           .eq('plan_type', 'meal_credits')
           .eq('meal_credits', 1)
+          .eq('published', false)
           .eq('active', true)
           .maybeSingle();
 
-        if (!dailyPlan) {
-          const { data: menuPrices } = await admin
-            .from('menu_items')
-            .select('price_paise')
-            .eq('provider_id', resolvedProviderId)
-            .eq('active', true)
-            .eq('is_add_on', false)
-            .gt('price_paise', 0)
-            .order('price_paise', { ascending: true })
-            .limit(1);
-
-          const singlePricePaise =
-            menuPrices && menuPrices.length > 0 && Number(menuPrices[0].price_paise) >= 1000
-              ? Number(menuPrices[0].price_paise)
-              : 8000;
-
+        if (dailyPlan) {
+          effectivePlanId = dailyPlan.id;
+        } else {
           const { data: createdDaily } = await admin
             .from('subscription_plans')
             .insert({
               provider_id: resolvedProviderId,
-              name: `Daily ${slot} Pass`,
-              description: 'Single meal coupon for today',
+              name: 'Pay-Per-Meal Single Order',
+              description: 'Single meal order for today',
               plan_type: 'meal_credits',
               duration_months: null,
               meal_credits: 1,
-              price_paise: singlePricePaise,
-              daily_meal_limit: 1,
+              price_paise: Math.max(100, singleRes.baseMealsPaise),
+              daily_meal_limit: 5,
               cancellation_policy: 'Valid for today only.',
-              missed_meal_policy: 'Unused pass expires at end of day.',
+              missed_meal_policy: 'Unused single order expires at end of day.',
               published: false,
               active: true,
             })
-            .select('*')
+            .select('id')
             .single();
-          dailyPlan = createdDaily;
+          if (createdDaily) effectivePlanId = createdDaily.id;
         }
-        if (dailyPlan) {
-          effectivePlanId = dailyPlan.id;
-          effectivePlanName = dailyPlan.name;
-          basePlanPricePaise = Number(dailyPlan.price_paise || 8000);
-          await ensurePlanSlotsLinked(admin, resolvedProviderId);
-        }
+        await ensurePlanSlotsLinked(admin, resolvedProviderId);
       }
-
-      if (basePlanPricePaise <= 0) {
-        basePlanPricePaise = 8000;
-        effectivePlanName = `Daily ${slot} Pass`;
-      }
+      if (!effectivePlanId) effectivePlanId = `single-${slot.toLowerCase()}`;
     } else {
       const plan = await resolveAuthoritativePlan({
         admin,
@@ -203,14 +199,13 @@ export async function POST(req: NextRequest) {
     }
 
     const packagingFeePaise =
-      purpose === 'subscription_purchase' &&
+      (purpose === 'subscription_purchase' || purpose === 'single_meal_purchase') &&
       effectiveFulfillmentMode === 'delivery' &&
       packagingPreference === 'disposable'
-        ? disposableFeePaise * durDays
+        ? disposableFeePaise * (purpose === 'single_meal_purchase' ? (initialCredits || 1) : durDays)
         : 0;
 
-    const addOnsPaise = Math.max(0, Math.min(200_000, Math.round(Number(body.add_ons_paise || 0))));
-    const grossPaise = basePlanPricePaise + packagingFeePaise + addOnsPaise;
+    const grossPaise = basePlanPricePaise + packagingFeePaise + extraAddOnsPaise;
 
     const promoResult = await resolveAuthoritativeDiscountPaise({
       admin,
@@ -252,7 +247,7 @@ export async function POST(req: NextRequest) {
         const resExt = await admin.from('subscriptions').insert({
           ...baseSubRow,
           duration_days: durDays,
-          selected_slots: selectedSlots,
+          selected_slots: normalizedSlotsPayload,
           repeat_days: repeatDays.length > 0 ? repeatDays : [1, 2, 3, 4, 5, 6, 7],
           packaging_preference: packagingPreference || 'reusable_tiffin',
           fulfillment_mode: effectiveFulfillmentMode,

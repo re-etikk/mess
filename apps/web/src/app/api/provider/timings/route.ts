@@ -4,6 +4,7 @@ import { getAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 import { ensurePlanSlotsLinked } from '@/lib/auth-session';
+import { isUndefinedColumnError } from '@/lib/kitchen-status';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
@@ -40,10 +41,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const client = db || (await createClient());
-    const [slotsResult, hoursResult] = await Promise.all([
+    const [slotsPrimary, hoursResult] = await Promise.all([
       client
         .from('meal_slots')
-        .select('id,name,starts_at_local,ends_at_local,active,daily_capacity')
+        .select('id,name,starts_at_local,ends_at_local,active,daily_capacity,single_meal_price_paise')
         .eq('provider_id', providerId)
         .order('starts_at_local'),
       client
@@ -53,13 +54,30 @@ export async function GET(req: NextRequest) {
         .order('weekday'),
     ]);
 
-    if (slotsResult.error) throw slotsResult.error;
+    let slotsData: any[] | null = slotsPrimary.data as any[] | null;
+    let slotsErr = slotsPrimary.error;
+    if (isUndefinedColumnError(slotsErr, 'single_meal_price_paise')) {
+      const slotsFb = await client
+        .from('meal_slots')
+        .select('id,name,starts_at_local,ends_at_local,active,daily_capacity')
+        .eq('provider_id', providerId)
+        .order('starts_at_local');
+      slotsData = slotsFb.data as any[] | null;
+      slotsErr = slotsFb.error;
+    }
 
-    const cleanSlots = (slotsResult.data ?? []).filter((s) => String(s.name || '').trim().toLowerCase() !== 'all');
+    if (slotsErr) throw slotsErr;
+
+    const cleanSlots = (slotsData ?? []).filter((s) => String(s.name || '').trim().toLowerCase() !== 'all');
     const timings = Object.fromEntries(cleanSlots.map((slot) => [slot.name.toLowerCase(), {
       enabled: slot.active,
       start: displayClock(slot.starts_at_local),
       end: displayClock(slot.ends_at_local),
+      single_meal_price_paise: slot.single_meal_price_paise ?? null,
+      single_meal_price_inr:
+        slot.single_meal_price_paise != null && Number(slot.single_meal_price_paise) > 0
+          ? Math.round(Number(slot.single_meal_price_paise) / 100)
+          : null,
     }]));
 
     return NextResponse.json(
@@ -93,6 +111,8 @@ const UpdateTimingsSchema = z.object({
         ends_at_local: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/),
         active: z.boolean().default(true),
         daily_capacity: z.number().int().positive().optional(),
+        single_meal_price_inr: z.number().nonnegative().max(10000).nullable().optional(),
+        single_meal_price_paise: z.number().int().nonnegative().max(1_000_000).nullable().optional(),
       })
     )
     .optional(),
@@ -125,7 +145,7 @@ export async function POST(req: NextRequest) {
       const slots = meals.flatMap((meal) => {
         const value = legacy[meal];
         if (!value || typeof value !== 'object') return [];
-        const timing = value as { enabled?: unknown; start?: unknown; end?: unknown };
+        const timing = value as { enabled?: unknown; start?: unknown; end?: unknown; single_meal_price_inr?: unknown; single_meal_price_paise?: unknown };
         const isEnabled = timing.enabled !== false;
         const start = typeof timing.start === 'string' ? normalizeClock(timing.start) : null;
         const end = typeof timing.end === 'string' ? normalizeClock(timing.end) : null;
@@ -133,11 +153,15 @@ export async function POST(req: NextRequest) {
           meal === 'breakfast' ? '07:30:00' : meal === 'snacks' ? '16:30:00' : meal === 'dinner' ? '19:30:00' : '12:00:00';
         const fallbackEnd =
           meal === 'breakfast' ? '10:00:00' : meal === 'snacks' ? '18:30:00' : meal === 'dinner' ? '22:30:00' : '15:30:00';
+        const priceInr = typeof timing.single_meal_price_inr === 'number' ? timing.single_meal_price_inr : undefined;
+        const pricePaise = typeof timing.single_meal_price_paise === 'number' ? timing.single_meal_price_paise : undefined;
         return [{
           name: meal,
           starts_at_local: start || fallbackStart,
           ends_at_local: end || fallbackEnd,
           active: isEnabled,
+          ...(priceInr !== undefined ? { single_meal_price_inr: priceInr } : {}),
+          ...(pricePaise !== undefined ? { single_meal_price_paise: pricePaise } : {}),
         }];
       });
       normalizedBody = {
@@ -189,35 +213,44 @@ export async function POST(req: NextRequest) {
     if (input.slots && input.slots.length > 0) {
       for (const slot of input.slots) {
         if (slot.name.trim().toLowerCase() === 'all') continue;
+        const hasExplicitRate = slot.single_meal_price_paise !== undefined || slot.single_meal_price_inr !== undefined;
+        const computedRatePaise =
+          slot.single_meal_price_paise !== undefined
+            ? slot.single_meal_price_paise && slot.single_meal_price_paise > 0 ? slot.single_meal_price_paise : null
+            : slot.single_meal_price_inr !== undefined
+              ? slot.single_meal_price_inr && slot.single_meal_price_inr > 0 ? Math.round(slot.single_meal_price_inr * 100) : null
+              : undefined;
+
+        const baseValues = {
+          name: slot.name,
+          starts_at_local: slot.starts_at_local,
+          ends_at_local: slot.ends_at_local,
+          active: slot.active,
+          daily_capacity: slot.daily_capacity || null,
+          updated_at: new Date().toISOString(),
+        };
+        const valuesWithRate = hasExplicitRate ? { ...baseValues, single_meal_price_paise: computedRatePaise ?? null } : baseValues;
+
         if (slot.id) {
-          const { error } = await db
-            .from('meal_slots')
-            .update({
-              name: slot.name,
-              starts_at_local: slot.starts_at_local,
-              ends_at_local: slot.ends_at_local,
-              active: slot.active,
-              daily_capacity: slot.daily_capacity || null,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', slot.id)
-            .eq('provider_id', input.provider_id);
+          let { error } = await db.from('meal_slots').update(valuesWithRate).eq('id', slot.id).eq('provider_id', input.provider_id);
+          if (hasExplicitRate && isUndefinedColumnError(error, 'single_meal_price_paise')) {
+            const fb = await db.from('meal_slots').update(baseValues).eq('id', slot.id).eq('provider_id', input.provider_id);
+            error = fb.error;
+          }
           if (error) throw error;
         } else {
           const { data: existing, error: lookupError } = await db.from('meal_slots')
             .select('id').eq('provider_id', input.provider_id).ilike('name', slot.name).limit(1).maybeSingle();
           if (lookupError) throw lookupError;
-          const values = {
-            name: slot.name,
-            starts_at_local: slot.starts_at_local,
-            ends_at_local: slot.ends_at_local,
-            active: slot.active,
-            daily_capacity: slot.daily_capacity || null,
-            updated_at: new Date().toISOString(),
-          };
-          const { error } = existing
-            ? await db.from('meal_slots').update(values).eq('id', existing.id).eq('provider_id', input.provider_id)
-            : await db.from('meal_slots').insert({ ...values, provider_id: input.provider_id });
+          let { error } = existing
+            ? await db.from('meal_slots').update(valuesWithRate).eq('id', existing.id).eq('provider_id', input.provider_id)
+            : await db.from('meal_slots').insert({ ...valuesWithRate, provider_id: input.provider_id });
+          if (hasExplicitRate && isUndefinedColumnError(error, 'single_meal_price_paise')) {
+            const fb = existing
+              ? await db.from('meal_slots').update(baseValues).eq('id', existing.id).eq('provider_id', input.provider_id)
+              : await db.from('meal_slots').insert({ ...baseValues, provider_id: input.provider_id });
+            error = fb.error;
+          }
           if (error) throw error;
         }
       }

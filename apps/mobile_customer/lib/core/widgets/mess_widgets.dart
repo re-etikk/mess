@@ -418,12 +418,21 @@ class MessCoverVisual extends StatelessWidget {
     this.height = 140,
     this.radius = 12,
     this.caption,
+    this.closed = false,
   });
 
   final String? imageUrl;
   final double height;
   final double radius;
   final String? caption;
+  final bool closed;
+
+  static const List<double> _grayscaleMatrix = <double>[
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0,      0,      0,      1, 0,
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -453,6 +462,13 @@ class MessCoverVisual extends StatelessWidget {
       mediaWidget = _fallbackArt();
     }
 
+    if (closed) {
+      mediaWidget = ColorFiltered(
+        colorFilter: const ColorFilter.matrix(_grayscaleMatrix),
+        child: mediaWidget,
+      );
+    }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(
@@ -462,6 +478,44 @@ class MessCoverVisual extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             mediaWidget,
+            if (closed)
+              Container(
+                color: Colors.black.withValues(alpha: 0.52),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: LayoutBuilder(
+                  builder: (_, constraints) {
+                    final compact = constraints.maxWidth < 145;
+                    return FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xF009090B),
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.lock_outline_rounded, size: compact ? 11 : 12, color: Colors.white),
+                            const SizedBox(width: 4),
+                            Text(
+                              compact ? 'CLOSED' : 'CLOSED TODAY',
+                              style: TextStyle(
+                                fontSize: compact ? 9.5 : 10,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             if (caption != null && caption!.isNotEmpty)
               Positioned(
                 left: 0,
@@ -489,23 +543,28 @@ class MessCoverVisual extends StatelessWidget {
   }
 
   Widget _fallbackArt() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF7C2D12), Color(0xFF27140A)],
-        ),
-      ),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.14),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+    return Image.asset(
+      'assets/images/ui/cover_default_kitchen.jpg',
+      fit: BoxFit.cover,
+      cacheWidth: 720,
+      errorBuilder: (_, __, ___) => Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF7C2D12), Color(0xFF27140A)],
           ),
-          child: const Icon(Icons.restaurant_menu_rounded, color: Colors.white, size: 28),
+        ),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+            ),
+            child: const Icon(Icons.restaurant_menu_rounded, color: Colors.white, size: 28),
+          ),
         ),
       ),
     );

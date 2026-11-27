@@ -46,6 +46,14 @@ abstract interface class MessRepository {
     required MealPlan plan,
     required String slotId,
     required String customerId,
+    Map<String, dynamic>? selectedSlots,
+    String fulfillmentMode = 'pickup',
+    String packagingPreference = 'reusable_tiffin',
+    String? deliveryAddress,
+    String? deliveryInstructions,
+    String? promoCode,
+    String? customerName,
+    String? customerPhone,
   });
 
   Future<Map<String, dynamic>> createCashfreeOrder({
@@ -165,6 +173,8 @@ abstract interface class MessRepository {
   });
 
   Future<Map<String, dynamic>> smartSearchParse(String query);
+  Future<List<Map<String, dynamic>>> fetchNotifications({required String customerId});
+  Future<void> markNotificationsRead({String? notificationId, String? customerId});
 }
 
 class RepositoryException implements Exception {

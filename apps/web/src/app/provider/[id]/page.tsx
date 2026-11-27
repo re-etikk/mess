@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Calendar, CheckCircle2, Clock, MapPin, Store, Utensils, UtensilsCrossed } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
+import { getIstWeekday, isKitchenOpenFromRecord, isUndefinedColumnError } from '@/lib/kitchen-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,17 +45,30 @@ export default async function ProviderPage({ params }: { params: { id: string } 
   try {
     const supabase = await createClient();
     const column = /^[0-9a-f-]{36}$/i.test(params.id) ? 'id' : 'slug';
-    const { data: provider } = await supabase
+    const primaryRes = await supabase
       .from('providers')
-      .select('id,display_name,description,locality,city,state,pincode,supports_pickup,public_phone,is_open')
+      .select('id,display_name,description,locality,city,state,pincode,supports_pickup,public_phone,status,is_accepting_orders')
       .eq(column, params.id)
       .eq('status', 'active')
       .maybeSingle();
 
+    let provider: any = primaryRes.data;
+    if (isUndefinedColumnError(primaryRes.error, 'is_accepting_orders')) {
+      const fallbackRes = await supabase
+        .from('providers')
+        .select('id,display_name,description,locality,city,state,pincode,supports_pickup,public_phone,status')
+        .eq(column, params.id)
+        .eq('status', 'active')
+        .maybeSingle();
+      provider = fallbackRes.data;
+    }
+
     if (!provider) notFound();
 
-    // Fetch meal slots, menu items, and subscription plans in parallel
-    const [slotsResult, menuResult, plansResult] = await Promise.all([
+    const todayWeekday = getIstWeekday();
+
+    // Fetch meal slots, menu items, subscription plans, and operating hours in parallel
+    const [slotsResult, menuResult, plansResult, todayHoursResult] = await Promise.all([
       supabase
         .from('meal_slots')
         .select('id,name,starts_at_local,ends_at_local')
@@ -72,7 +86,19 @@ export default async function ProviderPage({ params }: { params: { id: string } 
         .eq('provider_id', provider.id)
         .eq('active', true)
         .order('price_paise'),
+      supabase
+        .from('provider_operating_hours')
+        .select('closed')
+        .eq('provider_id', provider.id)
+        .eq('weekday', todayWeekday)
+        .maybeSingle(),
     ]);
+
+    const isOpenToday = isKitchenOpenFromRecord({
+      status: provider.status,
+      is_accepting_orders: provider.is_accepting_orders,
+      todayHours: todayHoursResult.data,
+    });
 
     const slots = slotsResult.data ?? [];
     const menuItems = menuResult.data ?? [];
@@ -110,17 +136,15 @@ export default async function ProviderPage({ params }: { params: { id: string } 
                 </div>
               </div>
 
-              {typeof provider.is_open === 'boolean' && (
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-extrabold ${
-                    provider.is_open
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  {provider.is_open ? 'Open Today' : 'Closed Today'}
-                </span>
-              )}
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-extrabold ${
+                  isOpenToday
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-slate-950 text-white'
+                }`}
+              >
+                {isOpenToday ? 'Open Today' : 'Closed Today'}
+              </span>
             </div>
 
             {provider.description && (

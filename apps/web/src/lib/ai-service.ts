@@ -1,7 +1,31 @@
 import { z } from 'zod';
 
-const GEMINI_ENDPOINT =
+const AI_STUDIO_ENDPOINT =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const VERTEX_EXPRESS_ENDPOINT =
+  'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent';
+
+export function resolveGeminiConfig(): { url: string; headers: Record<string, string>; mode: 'vertex_express' | 'ai_studio' } | null {
+  const apiKey = (process.env.VERTEX_AI_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) return null;
+
+  if (apiKey.startsWith('AQ.')) {
+    return {
+      url: VERTEX_EXPRESS_ENDPOINT,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      mode: 'vertex_express',
+    };
+  }
+
+  return {
+    url: `${AI_STUDIO_ENDPOINT}?key=${encodeURIComponent(apiKey)}`,
+    headers: { 'Content-Type': 'application/json' },
+    mode: 'ai_studio',
+  };
+}
 
 export async function callGeminiJson<T>({
   prompt,
@@ -14,8 +38,8 @@ export async function callGeminiJson<T>({
   schema: z.ZodType<T>;
   fallback: () => T;
 }): Promise<{ data: T; source: 'gemini' | 'heuristic' }> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) {
+  const cfg = resolveGeminiConfig();
+  if (!cfg) {
     return { data: fallback(), source: 'heuristic' };
   }
 
@@ -29,9 +53,9 @@ export async function callGeminiJson<T>({
       parts.push({ inlineData: { mimeType, data: b64 } });
     }
 
-    const res = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+    const res = await fetch(cfg.url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: cfg.headers,
       body: JSON.stringify({
         contents: [{ role: 'user', parts }],
         generationConfig: {
@@ -42,6 +66,8 @@ export async function callGeminiJson<T>({
     });
 
     if (!res.ok) {
+      const errSnippet = await res.text().catch(() => '');
+      console.warn(`Gemini (${cfg.mode}) HTTP ${res.status}:`, errSnippet.slice(0, 220));
       return { data: fallback(), source: 'heuristic' };
     }
 
@@ -63,8 +89,10 @@ export async function callGeminiJson<T>({
   return { data: fallback(), source: 'heuristic' };
 }
 
+export type ForecastSlot = 'BREAKFAST' | 'LUNCH' | 'SNACKS' | 'DINNER';
+
 export interface SlotForecast {
-  slot: 'BREAKFAST' | 'LUNCH' | 'DINNER';
+  slot: ForecastSlot;
   scheduled_subscribers: number;
   skipped_today: number;
   pickup_count: number;
@@ -91,7 +119,7 @@ export function computeKitchenForecast({
   redemptionsLast28Days,
   targetDateStr,
   supportsDelivery,
-  avgMealPriceInr = 80,
+  avgMealPriceInr = 70,
 }: {
   subscriptions: any[];
   eventsToday: any[];
@@ -113,6 +141,8 @@ export function computeKitchenForecast({
 
   const eligibleSubs = subscriptions.filter((s) => {
     if (s.status !== 'active') return false;
+    if (s.starts_at && String(s.starts_at).slice(0, 10) > targetDateStr) return false;
+    if (s.expires_at && String(s.expires_at).slice(0, 10) < targetDateStr) return false;
     const rDays =
       Array.isArray(s.repeat_days) && s.repeat_days.length > 0
         ? s.repeat_days.map((d: any) => Number(d))
@@ -120,13 +150,15 @@ export function computeKitchenForecast({
     return rDays.includes(dow1To7);
   });
 
-  const slotsList: Array<'BREAKFAST' | 'LUNCH' | 'DINNER'> = ['BREAKFAST', 'LUNCH', 'DINNER'];
+  const slotsList: ForecastSlot[] = ['BREAKFAST', 'LUNCH', 'SNACKS', 'DINNER'];
 
   const slots: SlotForecast[] = slotsList.map((slot) => {
     const slotLower = slot.toLowerCase();
     const slotSubs = eligibleSubs.filter((s) => {
       const cfg = s.selected_slots;
-      if (!cfg || typeof cfg !== 'object' || Object.keys(cfg).length === 0) return true;
+      if (!cfg || typeof cfg !== 'object' || Object.keys(cfg).length === 0) {
+        return slot !== 'SNACKS'; // Default plans exclude snacks unless configured
+      }
       return Boolean(cfg[slotLower]);
     });
 
@@ -135,35 +167,54 @@ export function computeKitchenForecast({
     const skippedCount = slotSubs.filter((s) => skippedSet.has(s.id)).length;
     const nonSkipped = slotSubs.filter((s) => !skippedSet.has(s.id));
 
-    const deliveryCount = nonSkipped.filter((s) => {
+    let deliveryCount = 0;
+    let totalPlatesRequested = 0;
+    for (const s of nonSkipped) {
+      const cfgQty = Number(s.selected_slots?.[slotLower]?.quantity ?? 1);
+      const qty = Number.isFinite(cfgQty) && cfgQty > 0 ? Math.min(10, Math.round(cfgQty)) : 1;
+      totalPlatesRequested += qty;
       const ev = slotEvents.find((e) => e.subscription_id === s.id);
       const mode = ev?.fulfillment_mode || s.fulfillment_mode || (supportsDelivery ? 'delivery' : 'pickup');
-      return mode === 'delivery';
-    }).length;
-    const pickupCount = nonSkipped.length - deliveryCount;
+      if (mode === 'delivery') deliveryCount += qty;
+    }
+    const pickupCount = Math.max(0, totalPlatesRequested - deliveryCount);
 
-    // Trailing 4-week same-weekday historical attendance ratio when >= 3 redemptions exist
+    // Bayesian-smoothed + recency-weighted 28-day attendance estimator
     const slotRedemptions = redemptionsLast28Days.filter((r) => {
       const rSlot = String(r.slot || r.meal_bookings?.meal_slots?.name || '').toUpperCase();
       return rSlot === slot;
     });
 
     let attendanceRate = 0.92;
-    if (slotRedemptions.length >= 3 && slotSubs.length > 0) {
-      const activeDays = new Set(
-        slotRedemptions.map((r) => String(r.redeemed_at || r.date || '').slice(0, 10)).filter(Boolean)
-      );
-      const avgPerDay = slotRedemptions.length / Math.max(1, activeDays.size);
-      const ratio = avgPerDay / Math.max(1, slotSubs.length);
-      attendanceRate = Math.min(1.0, Math.max(0.65, Number(ratio.toFixed(2))));
+    if (slotRedemptions.length >= 3 && totalPlatesRequested > 0) {
+      const dayBuckets = new Map<string, number>();
+      for (const r of slotRedemptions) {
+        const dKey = String(r.redeemed_at || r.date || '').slice(0, 10);
+        if (!dKey) continue;
+        dayBuckets.set(dKey, (dayBuckets.get(dKey) || 0) + 1);
+      }
+      if (dayBuckets.size > 0) {
+        const sortedDays = Array.from(dayBuckets.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+        let weightedSum = 0;
+        let weightTotal = 0;
+        sortedDays.forEach(([, count], idx) => {
+          const recencyWeight = 1 + idx * 0.25; // EMA-style linear recency boost
+          weightedSum += count * recencyWeight;
+          weightTotal += recencyWeight;
+        });
+        const expectedDailyCount = weightedSum / Math.max(1, weightTotal);
+        const empiricalRatio = expectedDailyCount / Math.max(1, totalPlatesRequested);
+        // Bayesian shrinkage towards prior 0.92 so noisy days don't whip-saw
+        const shrunk = (empiricalRatio * sortedDays.length + 0.92 * 3) / (sortedDays.length + 3);
+        attendanceRate = Math.min(1.0, Math.max(0.65, Number(shrunk.toFixed(2))));
+      }
     }
 
-    const netExpected = nonSkipped.length;
-    const recommendedPlates = netExpected === 0 ? 0 : Math.max(1, Math.round(netExpected * attendanceRate));
+    const recommendedPlates = totalPlatesRequested === 0 ? 0 : Math.max(1, Math.round(totalPlatesRequested * attendanceRate));
 
     return {
       slot,
-      scheduled_subscribers: slotSubs.length,
+      scheduled_subscribers: totalPlatesRequested,
       skipped_today: skippedCount,
       pickup_count: pickupCount,
       delivery_count: deliveryCount,
@@ -177,6 +228,10 @@ export function computeKitchenForecast({
   const churnAlerts: ChurnAlert[] = [];
   for (const s of subscriptions) {
     if (s.status !== 'active') continue;
+    // Skip single-day meal orders from subscription churn alerts
+    if (Number(s.duration_days || 0) === 1 || (s.plan_type === 'meal_credits' && Number(s.initial_meal_credits || 0) === 1)) {
+      continue;
+    }
     const expMs = s.expires_at ? new Date(s.expires_at).getTime() : nowMs + 30 * 86400000;
     const daysUntilExpiry = Math.max(0, Math.ceil((expMs - nowMs) / 86400000));
 
@@ -243,20 +298,25 @@ export function recommendBestPlan({
   weeklySkips?: number;
   mealsPerDay?: number;
 }) {
-  if (!plans.length) {
-    return { recommended_plan_id: null, savings_inr: 0, headline: 'No plans available to compare.', breakdown: [] };
+  // Filter out 1-day coupons or negligible test plans (< ₹30) when meaningful plans exist
+  const realisticPlans = plans.filter((p) => Number(p.price_inr) >= 30 && Number(p.duration_days || 1) > 1);
+  const candidatePlans = realisticPlans.length > 0 ? realisticPlans : plans.filter((p) => Number(p.price_inr) > 0);
+
+  if (!candidatePlans.length) {
+    return { recommended_plan_id: null, savings_inr: 0, headline: 'Compare multi-day plans to save on regular meals.', breakdown: [] };
   }
 
   const effectiveMealsPerWeek = Math.max(1, weeklyDays * Math.max(1, mealsPerDay) - weeklySkips);
 
-  const scored = plans.map((p) => {
-    const weeks = Math.max(1, p.duration_days / 7);
+  const scored = candidatePlans.map((p) => {
+    const weeks = Math.max(0.5, Number(p.duration_days || 30) / 7);
     const totalNeededMeals = Math.max(1, Math.round(weeks * effectiveMealsPerWeek));
     const usableMeals =
       p.plan_type === 'meal_credits' && p.meal_credits && p.meal_credits > 0
         ? Math.min(p.meal_credits, totalNeededMeals)
         : totalNeededMeals;
-    const costPerMeal = Math.round(p.price_inr / Math.max(1, usableMeals));
+    const rawPerMeal = p.price_inr / Math.max(1, usableMeals);
+    const costPerMeal = rawPerMeal >= 1 ? Math.round(rawPerMeal) : Number(rawPerMeal.toFixed(1));
     return {
       plan_id: p.id,
       plan_name: p.name,
@@ -273,8 +333,8 @@ export function recommendBestPlan({
   const perMealDiff = Math.max(0, worst.cost_per_meal_inr - best.cost_per_meal_inr);
   const estimatedCycleSavings = Math.round(perMealDiff * best.expected_meals);
 
-  let headline = `${best.plan_name} gives best value at ~₹${best.cost_per_meal_inr}/meal.`;
-  if (estimatedCycleSavings > 0 && scored.length > 1) {
+  let headline = `${best.plan_name} gives strong value at ~₹${best.cost_per_meal_inr}/meal.`;
+  if (estimatedCycleSavings >= 10 && scored.length > 1) {
     headline = `${best.plan_name} (~₹${best.cost_per_meal_inr}/meal) saves ~₹${estimatedCycleSavings} vs ${worst.plan_name} for your schedule.`;
   }
 

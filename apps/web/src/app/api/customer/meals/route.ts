@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
         .from('subscriptions')
         .select('*, providers:provider_id(id,display_name,locality,city,public_phone,latitude,longitude,supports_pickup,supports_delivery)')
         .eq('customer_id', customerId)
-        .in('status', ['active', 'paused'])
+        .in('status', ['active', 'paused', 'pending_payment'])
         .order('created_at', { ascending: false });
 
       subs = dbSubs ?? [];
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
 
   if (subs.length === 0) {
     for (const s of platformStore.subscriptions.values()) {
-      if (s.customer_id === customerId && (s.status === 'active' || (s as any).status === 'paused')) {
+      if (s.customer_id === customerId && (s.status === 'active' || (s as any).status === 'paused' || s.status === 'pending_payment')) {
         const prov = platformStore.providers.get(s.provider_id);
         subs.push({
           ...s,
@@ -113,6 +113,12 @@ export async function GET(req: NextRequest) {
       if (ev.customer_id === customerId) events.push(ev);
     }
   }
+
+  // Prioritize active passes first, then paused, then pending today single-meal orders
+  subs.sort((a, b) => {
+    const rank = (s: any) => (s.status === 'active' ? 0 : s.status === 'paused' ? 1 : 2);
+    return rank(a) - rank(b);
+  });
 
   if (subs.length === 0) {
     return NextResponse.json({
@@ -193,6 +199,7 @@ export async function GET(req: NextRequest) {
       : [
           { id: 'breakfast', name: 'BREAKFAST', starts_at_local: '07:30:00', ends_at_local: '09:30:00', booking_cutoff_minutes: 90 },
           { id: 'lunch', name: 'LUNCH', starts_at_local: '12:00:00', ends_at_local: '14:00:00', booking_cutoff_minutes: 90 },
+          { id: 'snacks', name: 'SNACKS', starts_at_local: '16:30:00', ends_at_local: '18:30:00', booking_cutoff_minutes: 60 },
           { id: 'dinner', name: 'DINNER', starts_at_local: '19:30:00', ends_at_local: '21:30:00', booking_cutoff_minutes: 90 },
         ];
 
@@ -232,7 +239,11 @@ export async function GET(req: NextRequest) {
       selectedSlotsConfig[slotKey]?.time_slot ||
       `${displayClock(slotRow.starts_at_local)} - ${displayClock(slotRow.ends_at_local)}`;
 
-    const status = redeemed ? 'delivered' : ev?.status || 'scheduled';
+    const status = redeemed
+      ? 'delivered'
+      : primarySub.status === 'pending_payment'
+        ? 'pending_payment'
+        : ev?.status || 'scheduled';
 
     const effectiveFulfillment =
       ev?.fulfillment_mode ||

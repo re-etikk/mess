@@ -132,6 +132,7 @@ class CustomerAuthService {
       return CustomerAuthResult(
         userId: user['id']?.toString() ?? '',
         email: user['email']?.toString() ?? email.trim(),
+        phone: user['phone']?.toString() ?? '',
         name: user['name']?.toString() ?? '',
         token: data['token']?.toString() ?? '',
         refreshToken: data['refresh_token']?.toString() ?? '',
@@ -195,8 +196,10 @@ class CustomerAuthService {
       return CustomerAuthResult(
         userId: user['id']?.toString() ?? '',
         email: user['email']?.toString() ?? email.trim(),
+        phone: user['phone']?.toString() ?? (phone?.trim() ?? ''),
         name: user['name']?.toString() ?? name.trim(),
         token: data['token']?.toString() ?? '',
+        refreshToken: data['refresh_token']?.toString() ?? '',
         needsProfileSetup: true,
       );
     }

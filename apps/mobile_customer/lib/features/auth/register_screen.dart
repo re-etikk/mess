@@ -58,6 +58,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         userId: result.userId,
         token: result.token,
         refreshToken: result.refreshToken,
+        phone: result.phone.isNotEmpty ? result.phone : _phone.text.trim(),
       );
       Navigator.of(context).pushAndRemoveUntil(
         messRoute(const ProfileLocationSetupScreen()),
@@ -125,12 +126,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       controller: _phone,
                       keyboardType: TextInputType.phone,
                       decoration: const InputDecoration(
-                        labelText: 'Mobile Number (optional)',
+                        labelText: 'Mobile Number',
                         prefixIcon: Icon(Icons.phone_outlined),
                       ),
-                      validator: (v) => v != null && v.trim().isNotEmpty && v.trim().length < 10
-                          ? 'Enter a valid 10-digit number.'
-                          : null,
+                      validator: (v) {
+                        final digits = (v ?? '').replaceAll(RegExp(r'\D'), '');
+                        if (digits.length < 10) {
+                          return 'Enter a valid 10-digit mobile number.';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -165,8 +170,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: _submit,
                     ),
                     const SizedBox(height: 14),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         const Text('Already have an account?', style: TextStyle(color: ThaliColors.muted, fontSize: 13)),
                         TextButton(

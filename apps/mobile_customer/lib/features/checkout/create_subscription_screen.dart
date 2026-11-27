@@ -2,28 +2,39 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/mess_models.dart';
 import '../../core/repositories/mess_repository.dart';
+import '../../core/state/app_state.dart';
 import '../../core/theme/thali_theme.dart';
 import '../../core/widgets/app_state_scope.dart';
 import '../../core/widgets/mess_widgets.dart';
 import '../setup/profile_location_setup_screen.dart';
 
-/// Stage 1: Create Subscription -> Start Date Sheet -> Stage 2: Review Subscription (Option B) -> Stage 3: Congratulations
+/// Unified checkout supporting both instant Single-Meal Orders and Multi-Day Subscriptions.
 class CreateSubscriptionScreen extends StatefulWidget {
-  const CreateSubscriptionScreen({super.key, required this.provider});
+  const CreateSubscriptionScreen({
+    super.key,
+    required this.provider,
+    this.forceSubscriptionMode,
+  });
+
   final MessProvider provider;
+  final bool? forceSubscriptionMode;
 
   @override
   State<CreateSubscriptionScreen> createState() => _CreateSubscriptionScreenState();
 }
 
 class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
-  int _stage = 0; // 0 = Create Sub, 1 = Review Sub, 2 = Congratulations
+  int _stage = 0; // 0 = Configure, 1 = Review & Pay, 2 = Confirmed
+  bool _modeInitialized = false;
+  bool _isSubscriptionMode = true;
+
   MealPlan? _selectedPlan;
   final Set<int> _deliveryDays = {1, 2, 3, 4, 5, 6}; // Mon..Sat
   DateTime _startDate = DateTime.now().add(const Duration(days: 1));
   final Map<String, String> _preferredTimes = {
     'breakfast': '07:30 AM - 08:30 AM',
     'lunch': '12:00 PM - 01:00 PM',
+    'snacks': '04:30 PM - 06:30 PM',
     'dinner': '07:30 PM - 08:30 PM',
   };
 
@@ -39,10 +50,12 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
   String? _promoMessage;
   bool _applyingPromo = false;
 
-  String _optionBMethod = 'cashfree_online'; // Strict Option B: cashfree_online | counter_cash
+  String _optionBMethod = 'cashfree_online'; // cashfree_online | counter_cash
   bool _submitting = false;
   DateTime? _confirmedValidTill;
   String _confirmedStatus = 'active';
+  int _confirmedAmountInr = 0;
+  bool _confirmedWasSingleMeal = false;
 
   @override
   void initState() {
@@ -52,13 +65,42 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
       _packaging = 'dine_in';
     }
     if (widget.provider.plans.isNotEmpty) {
-      _selectedPlan = widget.provider.plans.first;
+      _selectedPlan = _pickSensibleDefaultPlan(widget.provider.plans);
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshRecommendation());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_modeInitialized) {
+      _modeInitialized = true;
+      final state = AppStateScope.of(context, listen: false);
+      final hasPaidCart = state.mealCart.isNotEmpty && state.mealCart.values.any((e) => e.total > 0);
+      if (widget.forceSubscriptionMode == true) {
+        _isSubscriptionMode = true;
+      } else if (hasPaidCart) {
+        _isSubscriptionMode = false;
+      } else {
+        _isSubscriptionMode = true;
+      }
+      if (_isSubscriptionMode && widget.provider.plans.length > 1) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _refreshRecommendation());
+      }
+    }
+  }
+
+  MealPlan _pickSensibleDefaultPlan(List<MealPlan> plans) {
+    final realistic = plans.where((p) => p.price >= 30 && p.durationDays > 1).toList();
+    return realistic.isNotEmpty ? realistic.first : plans.first;
+  }
+
+  List<MealPlan> _comparablePlans() {
+    return widget.provider.plans.where((p) => p.price >= 30 && p.durationDays > 1).toList();
   }
 
   Future<void> _refreshRecommendation() async {
-    if (!mounted || widget.provider.plans.isEmpty) return;
+    final candidates = _comparablePlans();
+    if (!mounted || candidates.length <= 1) return;
     setState(() => _loadingRecommendation = true);
     try {
       final res = await AppStateScope.of(context).repository.recommendPlans(
@@ -71,7 +113,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
         setState(() => _aiRecommendation = res);
       }
     } catch (_) {
-      // Non-blocking smart savings insight; silently keep checkout smooth.
+      // Non-blocking savings comparison; fallback stays clean.
     } finally {
       if (mounted) setState(() => _loadingRecommendation = false);
     }
@@ -188,12 +230,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
     }
   }
 
-  Future<void> _submitOrder(int netTotalInr, int addOnsPaise) async {
-    final plan = _selectedPlan;
-    if (plan == null) return;
-    final state = AppStateScope.of(context);
-    setState(() => _submitting = true);
-
+  Map<String, dynamic> _buildSlotsMap(AppState state) {
     final slotsMap = <String, dynamic>{};
     for (final entry in state.mealCart.entries) {
       slotsMap[entry.key] = {
@@ -202,6 +239,77 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
         'addons': entry.value.addOns.entries.map((a) => {'name': a.key.name, 'price': a.key.price, 'qty': a.value}).toList(),
       };
     }
+    return slotsMap;
+  }
+
+  Future<void> _submitSingleMealOrder(int netTotalInr) async {
+    final state = AppStateScope.of(context);
+    if (state.mealCart.isEmpty) return;
+    setState(() => _submitting = true);
+    final slotsMap = _buildSlotsMap(state);
+    final primarySlotId = state.mealCart.keys.first.toUpperCase();
+    final totalAddOnsInr = state.mealCart.values.fold<int>(0, (s, e) => s + e.addOnsTotal * e.quantity);
+
+    try {
+      if (_optionBMethod == 'cashfree_online') {
+        await state.payWithCashfree(
+          purpose: 'single_meal_purchase',
+          provider: widget.provider,
+          slotId: primarySlotId,
+          addOnsPaise: totalAddOnsInr * 100,
+          discountPaise: _discountInr * 100,
+          promoCode: _appliedPromo,
+          selectedSlots: slotsMap,
+          packagingPreference: _packaging,
+          deliveryInstructions: _instructionsController.text.trim(),
+          fulfillmentMode: _fulfillmentMode,
+          deliveryAddress: _fulfillmentMode == 'delivery' ? state.location : null,
+          startsAt: DateTime.now(),
+        );
+        setState(() {
+          _confirmedWasSingleMeal = true;
+          _confirmedStatus = 'active';
+          _confirmedAmountInr = netTotalInr;
+          _confirmedValidTill = DateTime.now().add(const Duration(days: 1));
+          _stage = 2;
+        });
+      } else {
+        final ent = await state.purchaseSingleMealOrderCounterCash(
+          provider: widget.provider,
+          primarySlotId: primarySlotId,
+          totalInr: netTotalInr,
+          selectedSlots: slotsMap,
+          packagingPreference: _packaging,
+          fulfillmentMode: _fulfillmentMode,
+          deliveryAddress: _fulfillmentMode == 'delivery' ? state.location : null,
+          deliveryInstructions: _instructionsController.text.trim(),
+          promoCode: _appliedPromo,
+        );
+        setState(() {
+          _confirmedWasSingleMeal = true;
+          _confirmedStatus = ent.isPaid ? 'active' : 'pending_payment';
+          _confirmedAmountInr = ent.paidAmount;
+          _confirmedValidTill = DateTime.now().add(const Duration(days: 1));
+          _stage = 2;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyCustomerError(e, action: 'place meal order'))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _submitSubscription(int netTotalInr, int addOnsPaise) async {
+    final plan = _selectedPlan;
+    if (plan == null) return;
+    final state = AppStateScope.of(context);
+    setState(() => _submitting = true);
+    final slotsMap = _buildSlotsMap(state);
 
     try {
       if (_optionBMethod == 'cashfree_online') {
@@ -222,7 +330,9 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
         );
         final subMap = verified['subscription'] as Map<String, dynamic>?;
         setState(() {
+          _confirmedWasSingleMeal = false;
           _confirmedStatus = 'active';
+          _confirmedAmountInr = netTotalInr;
           _confirmedValidTill = DateTime.tryParse(subMap?['expires_at']?.toString() ?? '') ?? plan.expiryFrom(_startDate);
           _stage = 2;
         });
@@ -240,7 +350,9 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           startsAt: _startDate,
         );
         setState(() {
+          _confirmedWasSingleMeal = false;
           _confirmedStatus = sub.status;
+          _confirmedAmountInr = netTotalInr;
           _confirmedValidTill = sub.endDate;
           _stage = 2;
         });
@@ -260,10 +372,25 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
   Widget build(BuildContext context) {
     final state = AppStateScope.of(context);
     final plan = _selectedPlan;
-    final planPrice = plan?.price ?? 0;
+    final singleMealsCount = state.mealCart.values.fold<int>(0, (s, e) => s + e.quantity);
+    final singleMealsSubtotal = state.mealCart.values.fold<int>(0, (s, e) => s + e.total);
     final addOnsPerDay = state.mealCart.values.fold<int>(0, (s, e) => s + e.addOnsTotal * e.quantity);
-    final packFee = _packaging == 'disposable' ? widget.provider.disposableFeeInr * (plan?.durationDays ?? 1) : 0;
-    final totalBeforeDiscount = planPrice + addOnsPerDay + packFee;
+
+    final int subtotalAmount;
+    final int packFee;
+    if (_isSubscriptionMode) {
+      subtotalAmount = (plan?.price ?? 0) + addOnsPerDay;
+      packFee = (_fulfillmentMode == 'delivery' && _packaging == 'disposable')
+          ? widget.provider.disposableFeeInr * (plan?.durationDays ?? 1)
+          : 0;
+    } else {
+      subtotalAmount = singleMealsSubtotal;
+      packFee = (_fulfillmentMode == 'delivery' && _packaging == 'disposable')
+          ? widget.provider.disposableFeeInr * singleMealsCount
+          : 0;
+    }
+
+    final totalBeforeDiscount = subtotalAmount + packFee;
     final netTotal = (totalBeforeDiscount - _discountInr).clamp(0, totalBeforeDiscount);
 
     if (_stage == 2) {
@@ -287,14 +414,16 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 ),
                 const SizedBox(height: 22),
                 Text(
-                  _confirmedStatus == 'pending_payment' ? 'Order Submitted' : 'Congratulations',
+                  _confirmedStatus == 'pending_payment'
+                      ? 'Order Submitted'
+                      : (_confirmedWasSingleMeal ? 'Meal Order Confirmed' : 'Congratulations'),
                   style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: ThaliColors.ink),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   _confirmedStatus == 'pending_payment'
-                      ? 'Pay ₹$netTotal cash at counter to activate at'
-                      : 'You subscribed successfully to',
+                      ? 'Pay ₹$_confirmedAmountInr cash at counter to confirm at'
+                      : (_confirmedWasSingleMeal ? 'Your meal is scheduled at' : 'You subscribed successfully to'),
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 14, color: ThaliColors.body),
                 ),
@@ -302,15 +431,18 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 Text(widget.provider.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
                 if (_confirmedValidTill != null) ...[
                   const SizedBox(height: 18),
-                  const Text('VALID TILL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.muted, letterSpacing: 0.7)),
+                  Text(
+                    _confirmedWasSingleMeal ? 'SERVES TODAY' : 'VALID TILL',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.muted, letterSpacing: 0.7),
+                  ),
                   const SizedBox(height: 3),
                   Text(formatDate(_confirmedValidTill!), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: ThaliColors.green)),
                 ],
                 const Spacer(),
                 MessActionButton(
-                  label: 'View Subscription',
+                  label: _confirmedWasSingleMeal ? 'View My Meals' : 'View Subscription',
                   onPressed: () {
-                    state.selectTab(2);
+                    state.selectTab(_confirmedWasSingleMeal ? 1 : 2);
                     Navigator.of(context).popUntil((r) => r.isFirst);
                   },
                 ),
@@ -320,6 +452,11 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
         ),
       );
     }
+
+    final canProceed = _isSubscriptionMode ? (plan != null) : (singleMealsCount > 0 && netTotal > 0);
+    final screenTitle = _stage == 0
+        ? (_isSubscriptionMode ? 'Create Subscription' : 'Order Meal')
+        : (_isSubscriptionMode ? 'Review Subscription' : 'Review Order');
 
     return Scaffold(
       backgroundColor: ThaliColors.scaffold,
@@ -334,14 +471,14 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
             }
           },
         ),
-        title: Text(_stage == 0 ? 'Create Subscription' : 'Review Subscription'),
+        title: Text(screenTitle),
       ),
       body: Column(
         children: [
           Expanded(
             child: _stage == 0
-                ? _buildCreateBody(state)
-                : _buildReviewBody(state, planPrice, addOnsPerDay, packFee, netTotal),
+                ? (_isSubscriptionMode ? _buildSubscriptionConfigureBody(state) : _buildSingleMealConfigureBody(state))
+                : _buildReviewBody(state, subtotalAmount, packFee, netTotal),
           ),
           Container(
             padding: EdgeInsets.fromLTRB(16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
@@ -356,7 +493,9 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _stage == 0 ? 'Estimated total' : (_optionBMethod == 'cashfree_online' ? 'Cashfree UPI/Cards' : 'Cash at Counter'),
+                      _stage == 0
+                          ? (_isSubscriptionMode ? 'Plan total' : 'Order total')
+                          : (_optionBMethod == 'cashfree_online' ? 'Cashfree UPI/Cards' : 'Cash at Counter'),
                       style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted, fontWeight: FontWeight.w600),
                     ),
                     Text('₹$netTotal', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
@@ -365,15 +504,19 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: MessActionButton(
-                    label: _stage == 0 ? 'Review & subscribe' : (_optionBMethod == 'cashfree_online' ? 'Pay ₹$netTotal' : 'Confirm Counter Cash'),
+                    label: _stage == 0
+                        ? (_isSubscriptionMode ? 'Review & subscribe' : 'Review Order')
+                        : (_optionBMethod == 'cashfree_online' ? 'Pay ₹$netTotal' : 'Confirm Counter Cash'),
                     loading: _submitting,
-                    onPressed: plan == null
+                    onPressed: !canProceed
                         ? null
                         : () {
                             if (_stage == 0) {
                               setState(() => _stage = 1);
+                            } else if (_isSubscriptionMode) {
+                              _submitSubscription(netTotal, (addOnsPerDay + packFee) * 100);
                             } else {
-                              _submitOrder(netTotal, (addOnsPerDay + packFee) * 100);
+                              _submitSingleMealOrder(netTotal);
                             }
                           },
                   ),
@@ -386,47 +529,178 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
     );
   }
 
-  Widget _buildCreateBody(state) {
-    final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  Widget _buildSingleMealConfigureBody(AppState state) {
+    final multiDayPlans = _comparablePlans();
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        if (state.mealCart.isNotEmpty) ...[
-          const Text('Selected Meals', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
-          const SizedBox(height: 8),
+        const Text('Selected Meals', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+        const SizedBox(height: 8),
+        if (state.mealCart.isEmpty)
+          CardSurface(
+            child: Column(
+              children: [
+                const Text('Your meal cart is empty.', style: TextStyle(color: ThaliColors.muted)),
+                if (widget.provider.plans.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  MessActionButton(
+                    label: 'Browse Monthly & Weekly Plans',
+                    secondary: true,
+                    height: 42,
+                    onPressed: () {
+                      setState(() {
+                        _isSubscriptionMode = true;
+                        _discountInr = 0;
+                        _appliedPromo = '';
+                        _promoMessage = null;
+                      });
+                    },
+                  ),
+                ],
+              ],
+            ),
+          )
+        else
           for (final item in state.mealCart.values)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: 10),
               child: CardSurface(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: Row(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const VegIndicator(isVeg: true),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(item.slotLabel, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ThaliColors.ink)),
-                          if (item.isCustomized) const Text('Customised', style: TextStyle(fontSize: 11, color: ThaliColors.primary, fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-                    Text('₹${item.total}', style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
-                    const SizedBox(width: 8),
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        InkWell(onTap: () => state.adjustMealQuantity(item.slotId, -1), child: const Icon(Icons.remove_circle_outline, size: 20, color: ThaliColors.muted)),
-                        Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Text('${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w800))),
-                        InkWell(onTap: () => state.adjustMealQuantity(item.slotId, 1), child: const Icon(Icons.add_circle_outline, size: 20, color: ThaliColors.primary)),
+                        VegIndicator(isVeg: !widget.provider.dietaryTypes.contains('non_vegetarian')),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(item.slotLabel, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                              if (item.preferredWindow.isNotEmpty)
+                                Text(item.preferredWindow, style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted)),
+                            ],
+                          ),
+                        ),
+                        Text('₹${item.total}', style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                        const SizedBox(width: 10),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InkWell(
+                              onTap: () => state.adjustMealQuantity(item.slotId, -1),
+                              child: const Icon(Icons.remove_circle_outline, size: 22, color: ThaliColors.muted),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Text('${item.quantity}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                            ),
+                            InkWell(
+                              onTap: () => state.adjustMealQuantity(item.slotId, 1),
+                              child: const Icon(Icons.add_circle_outline, size: 22, color: ThaliColors.primary),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
+                    if (item.isCustomized) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Add-ons: ${item.addOns.entries.map((e) => '${e.value}x ${e.key.name} (₹${e.key.price * e.value})').join(', ')}',
+                        style: const TextStyle(fontSize: 11.5, color: ThaliColors.primary, fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ],
                 ),
               ),
             ),
-          const SizedBox(height: 10),
+        if (multiDayPlans.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          CardSurface(
+            color: ThaliColors.primarySoft.withValues(alpha: 0.45),
+            borderColor: ThaliColors.primary.withValues(alpha: 0.28),
+            onTap: () {
+              setState(() {
+                _isSubscriptionMode = true;
+                _discountInr = 0;
+                _appliedPromo = '';
+                _promoMessage = null;
+              });
+              _refreshRecommendation();
+            },
+            padding: const EdgeInsets.all(13),
+            child: Row(
+              children: [
+                const Icon(Icons.calendar_month_outlined, size: 20, color: ThaliColors.primary),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Eat daily at this kitchen?', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                      Text('Optional · Compare weekly or monthly plans to save', style: TextStyle(fontSize: 11.5, color: ThaliColors.body)),
+                    ],
+                  ),
+                ),
+                const Text('View Plans', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
+                const Icon(Icons.chevron_right_rounded, size: 18, color: ThaliColors.primary),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSubscriptionConfigureBody(AppState state) {
+    final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final hasPaidCart = state.mealCart.isNotEmpty && state.mealCart.values.any((e) => e.total > 0);
+    final comparable = _comparablePlans();
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (hasPaidCart) ...[
+          CardSurface(
+            color: ThaliColors.subtle,
+            onTap: () => setState(() {
+              _isSubscriptionMode = false;
+              _discountInr = 0;
+              _appliedPromo = '';
+              _promoMessage = null;
+            }),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: const Row(
+              children: [
+                Icon(Icons.arrow_back_rounded, size: 16, color: ThaliColors.primary),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Just want today\'s meal without a plan? Switch to Single Order',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        if (state.mealCart.isNotEmpty) ...[
+          const Text('Preferred Meal Slots', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final item in state.mealCart.values)
+                Chip(
+                  label: Text('${item.slotLabel} ×${item.quantity}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  backgroundColor: ThaliColors.card,
+                  side: const BorderSide(color: ThaliColors.stroke),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
         ],
         const Text('Choose Your Plan', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
         const SizedBox(height: 8),
@@ -462,7 +736,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 ),
               ),
             ),
-        if (widget.provider.plans.length > 1) ...[
+        if (comparable.length > 1) ...[
           const SizedBox(height: 8),
           _buildSavingsCalculatorCard(),
         ],
@@ -517,7 +791,10 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
     );
   }
 
-  Widget _buildReviewBody(state, int planPrice, int addOns, int packFee, int netTotal) {
+  Widget _buildReviewBody(AppState state, int subtotalAmount, int packFee, int netTotal) {
+    final addOnsTotal = state.mealCart.values.fold<int>(0, (s, e) => s + e.addOnsTotal * e.quantity);
+    final baseMealsOnly = state.mealCart.values.fold<int>(0, (s, e) => s + e.basePrice * e.quantity);
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -529,15 +806,20 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
             border: Border.all(color: ThaliColors.greenBorder),
           ),
           child: Row(
-            children: const [
-              Icon(Icons.check_circle_rounded, color: ThaliColors.green, size: 20),
-              SizedBox(width: 10),
+            children: [
+              const Icon(Icons.check_circle_rounded, color: ThaliColors.green, size: 20),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Almost Done', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: Color(0xFF166534))),
-                    Text('Review everything before starting your subscription', style: TextStyle(fontSize: 11.5, color: ThaliColors.greenDark)),
+                    const Text('Almost Done', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: Color(0xFF166534))),
+                    Text(
+                      _isSubscriptionMode
+                          ? 'Review details before starting your subscription'
+                          : 'Review your meal order before payment',
+                      style: const TextStyle(fontSize: 11.5, color: ThaliColors.greenDark),
+                    ),
                   ],
                 ),
               ),
@@ -581,16 +863,18 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                     ? () => Navigator.push(context, messRoute(const ProfileLocationSetupScreen(locationOnly: true)))
                     : null,
               ),
-              const Divider(),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                leading: const Icon(Icons.calendar_today_outlined, color: ThaliColors.primary),
-                title: Text(widget.provider.supportsDelivery ? 'Your First Delivery' : 'Starts On', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                subtitle: Text(formatDate(_startDate)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: _pickStartDateSheet,
-              ),
+              if (_isSubscriptionMode) ...[
+                const Divider(),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: const Icon(Icons.calendar_today_outlined, color: ThaliColors.primary),
+                  title: Text(widget.provider.supportsDelivery ? 'Your First Delivery' : 'Starts On', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  subtitle: Text(formatDate(_startDate)),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: _pickStartDateSheet,
+                ),
+              ],
             ],
           ),
         ),
@@ -611,8 +895,8 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                       const Text('Dine-in / Counter Pickup Only', style: TextStyle(fontWeight: FontWeight.w700)),
                       Text(
                         widget.provider.allowsTakeaway
-                            ? 'This kitchen serves at counter & takeaway (home delivery not available).'
-                            : 'This kitchen serves dine-in meals at counter only.',
+                            ? 'Pickup at counter or dine in today.'
+                            : 'Dine-in at kitchen counter.',
                         style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted),
                       ),
                     ],
@@ -690,7 +974,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           ),
           if (_fulfillmentMode == 'delivery') ...[
             const SizedBox(height: 12),
-            const Text('Packaging & Dining Preference', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+            const Text('Packaging Preference', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
             const SizedBox(height: 8),
             CardSurface(
               borderColor: _packaging == 'reusable_tiffin' ? ThaliColors.primary : null,
@@ -710,7 +994,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
               child: Row(
                 children: [
                   Radio<String>(value: 'disposable', groupValue: _packaging, activeColor: ThaliColors.primary, onChanged: (v) => setState(() => _packaging = v!)),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Disposable Container', style: TextStyle(fontWeight: FontWeight.w700)), Text('+ ₹${widget.provider.disposableFeeInr} per day charges apply', style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted))])),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Disposable Container', style: TextStyle(fontWeight: FontWeight.w700)), Text('+ ₹${widget.provider.disposableFeeInr} per meal/day', style: const TextStyle(fontSize: 11.5, color: ThaliColors.muted))])),
                 ],
               ),
             ),
@@ -744,7 +1028,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 label: 'Apply',
                 loading: _applyingPromo,
                 height: 48,
-                onPressed: () => _applyPromo(planPrice + addOns + packFee),
+                onPressed: () => _applyPromo(subtotalAmount + packFee),
               ),
             ),
           ],
@@ -759,10 +1043,15 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Subscription Summary', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+              Text(_isSubscriptionMode ? 'Subscription Summary' : 'Order Summary', style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
-              _SumRow('Plan (${_selectedPlan?.name ?? ''})', '₹$planPrice'),
-              if (addOns > 0) _SumRow('Meal Customisations', '₹$addOns'),
+              if (_isSubscriptionMode) ...[
+                _SumRow('Plan (${_selectedPlan?.name ?? ''})', '₹${_selectedPlan?.price ?? 0}'),
+                if (addOnsTotal > 0) _SumRow('Meal Customisations', '₹$addOnsTotal'),
+              ] else ...[
+                if (baseMealsOnly > 0) _SumRow('Selected Meals', '₹$baseMealsOnly'),
+                if (addOnsTotal > 0) _SumRow('Add-ons & Extras', '₹$addOnsTotal'),
+              ],
               if (packFee > 0) _SumRow('Disposable Containers', '₹$packFee'),
               if (_discountInr > 0) _SumRow('Coupon Discount ($_appliedPromo)', '- ₹$_discountInr', green: true),
               const Divider(height: 16),
@@ -777,7 +1066,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           ),
         ),
         const SizedBox(height: 14),
-        const Text('PAYMENT METHOD (OPTION B)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.muted, letterSpacing: 0.6)),
+        const Text('PAYMENT METHOD', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: ThaliColors.muted, letterSpacing: 0.6)),
         const SizedBox(height: 8),
         Row(
           children: [
