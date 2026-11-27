@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 import { platformStore } from '@/lib/platform-service';
 import CustomerPlanUpgradeModal from '@/components/customer/plan-upgrade-modal';
+import CustomerSupportTicketsPanel from '@/components/customer/CustomerSupportTicketsPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -248,6 +249,11 @@ export default async function CustomerDashboardPage() {
             Use mobile app for daily counter QR meal scan & attendance
           </div>
         </div>
+
+        <CustomerSupportTicketsPanel
+          customerName={displayName}
+          customerEmail={user.email || undefined}
+        />
       </div>
     </main>
   );

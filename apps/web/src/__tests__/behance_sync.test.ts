@@ -217,19 +217,41 @@ describe('Thali Behance Zero-Fake-Data Full Sync APIs', () => {
     platformStore.providerStatuses.clear();
     platformStore.providers.set('prov-open-1', {
       id: 'prov-open-1',
+      owner_user_id: 'owner-open-1',
       display_name: 'Open Spice Kitchen',
+      slug: 'open-spice-kitchen',
+      description: 'Fresh home meals',
       phone: '9800000001',
+      email: 'open@kitchen.local',
       address: 'Sector 62',
+      locality: 'Sector 62',
+      city: 'Noida',
+      rating: 4.5,
+      total_reviews: 12,
+      cuisines: ['North Indian'],
+      dietary_types: ['veg'],
       status: 'active',
       is_open_today: true,
+      created_at: new Date().toISOString(),
     });
     platformStore.providers.set('prov-closed-1', {
       id: 'prov-closed-1',
+      owner_user_id: 'owner-closed-1',
       display_name: 'Closed Home Tiffin',
+      slug: 'closed-home-tiffin',
+      description: 'Home kitchen',
       phone: '9800000002',
+      email: 'closed@kitchen.local',
       address: 'Sector 63',
+      locality: 'Sector 63',
+      city: 'Noida',
+      rating: 4.3,
+      total_reviews: 8,
+      cuisines: ['North Indian'],
+      dietary_types: ['veg'],
       status: 'active',
       is_open_today: true,
+      created_at: new Date().toISOString(),
     });
 
     process.env.ADMIN_SECRET_KEY = 'test-admin-secret';

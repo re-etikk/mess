@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getAdminClient } from '@/lib/supabase/admin';
 import { signSessionToken, verifySignedSessionToken } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(req: NextRequest) {
   let body: { refresh_token?: string };
@@ -16,12 +19,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'A refresh token is required.' }, { status: 400 });
   }
 
-  // Verify HMAC signature strictly on Thali session tokens
   if (refreshToken.startsWith('thali_tok_')) {
     const verified = verifySignedSessionToken(refreshToken, 'thali_tok_');
     if (!verified || verified.role === 'rider') {
       return NextResponse.json({ success: false, error: 'Session expired. Please sign in again.' }, { status: 401 });
     }
+
+    const admin = getAdminClient();
+    if (admin && UUID_RE.test(verified.userId)) {
+      try {
+        const { data: profile } = await admin
+          .from('profiles')
+          .select('account_status')
+          .eq('id', verified.userId)
+          .maybeSingle();
+        if (profile?.account_status === 'suspended' || profile?.account_status === 'blocked') {
+          return NextResponse.json({ success: false, error: 'This account has been suspended.' }, { status: 403 });
+        }
+        if (verified.role === 'admin' || verified.role === 'provider') {
+          const { data: activeRole } = await admin
+            .from('user_roles')
+            .select('id')
+            .eq('user_id', verified.userId)
+            .eq('role', verified.role)
+            .is('revoked_at', null)
+            .maybeSingle();
+          if (!activeRole) {
+            return NextResponse.json({ success: false, error: 'Workspace role has been revoked. Sign in again.' }, { status: 403 });
+          }
+        }
+      } catch {}
+    }
+
     const nextToken = signSessionToken({
       userId: verified.userId,
       email: verified.email,

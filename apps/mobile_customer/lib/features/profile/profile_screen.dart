@@ -216,6 +216,12 @@ class ProfileScreen extends StatelessWidget {
                     ),
                     const Divider(height: 1),
                     _row(
+                      icon: Icons.confirmation_number_outlined,
+                      title: 'My Support Tickets',
+                      onTap: () => _showSupportTicketsSheet(context, state),
+                    ),
+                    const Divider(height: 1),
+                    _row(
                       icon: Icons.description_outlined,
                       title: 'Terms of Service',
                       onTap: () => Navigator.push(context, messRoute(const LegalScreen(isPrivacy: false))),
@@ -509,6 +515,169 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
+  void _showSupportTicketsSheet(BuildContext context, AppState state) {
+    List<Map<String, dynamic>> tickets = [];
+    bool loading = true;
+    bool fetched = false;
+    final replyCtrls = <String, TextEditingController>{};
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ThaliColors.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          if (!fetched) {
+            fetched = true;
+            state.repository.fetchSupportTickets().then((rows) {
+              if (!ctx.mounted) return;
+              setSheetState(() {
+                tickets = rows;
+                loading = false;
+              });
+            }).catchError((_) {
+              if (!ctx.mounted) return;
+              setSheetState(() => loading = false);
+            });
+          }
+
+          return SafeArea(
+            child: Container(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+              padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('My Support Tickets', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                  const SizedBox(height: 10),
+                  if (loading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Center(child: ThaliLoadingView(label: 'Loading tickets...')),
+                    )
+                  else if (tickets.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Center(child: Text('No support tickets raised yet.', style: TextStyle(color: ThaliColors.muted))),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: tickets.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final t = tickets[i];
+                          final id = t['id']?.toString() ?? '';
+                          final status = (t['status']?.toString() ?? 'open').replaceAll('_', ' ').toUpperCase();
+                          final promo = t['promo_code_granted']?.toString() ?? '';
+                          final resNote = t['resolution_note']?.toString() ?? '';
+                          final msgs = (t['messages'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+                          final ctrl = replyCtrls.putIfAbsent(id, TextEditingController.new);
+
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: ThaliColors.scaffold,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: ThaliColors.stroke),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        t['subject']?.toString() ?? 'Support Request',
+                                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: ThaliColors.primarySoft, borderRadius: BorderRadius.circular(99)),
+                                      child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(t['description']?.toString() ?? '', style: const TextStyle(fontSize: 12, color: ThaliColors.body)),
+                                if (promo.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: ThaliColors.amberSoft, borderRadius: BorderRadius.circular(8)),
+                                    child: Text('Apology Coupon: $promo', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: ThaliColors.amberDark)),
+                                  ),
+                                ],
+                                if (resNote.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text('Resolution: $resNote', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.greenDark)),
+                                ],
+                                for (final m in msgs) ...[
+                                  const SizedBox(height: 6),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: m['sender_role'] == 'admin' ? ThaliColors.primarySoft : Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      '${m['sender_role'] == 'admin' ? 'Thali Team' : 'You'}: ${m['message'] ?? ''}',
+                                      style: const TextStyle(fontSize: 11.5),
+                                    ),
+                                  ),
+                                ],
+                                if (t['status'] != 'resolved' && t['status'] != 'closed') ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: ctrl,
+                                          decoration: const InputDecoration(hintText: 'Write reply...', isDense: true),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      TextButton(
+                                        onPressed: () async {
+                                          if (ctrl.text.trim().isEmpty || id.isEmpty) return;
+                                          await state.repository.replySupportTicket(ticketId: id, message: ctrl.text.trim());
+                                          ctrl.clear();
+                                          final refreshed = await state.repository.fetchSupportTickets();
+                                          if (ctx.mounted) setSheetState(() => tickets = refreshed);
+                                        },
+                                        child: const Text('Send', style: TextStyle(fontWeight: FontWeight.w800)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _showNotificationsSheet(BuildContext context, AppState state) {
     showModalBottomSheet<void>(
       context: context,
@@ -659,9 +828,9 @@ class _SavedAddressesSheetState extends State<_SavedAddressesSheet> {
     setState(() => _adding = true);
     try {
       await widget.state.repository.saveAddress({
-        'user_id': widget.state.customerId,
+        'customer_id': widget.state.customerId,
         'label': _labelCtrl.text.trim().isNotEmpty ? _labelCtrl.text.trim() : 'Home',
-        'address_line': line,
+        'address_line1': line,
         'locality': loc,
         'city': widget.state.selectedCity,
         'is_default': _addresses.isEmpty,
@@ -712,7 +881,7 @@ class _SavedAddressesSheetState extends State<_SavedAddressesSheet> {
               else
                 ..._addresses.map((a) {
                   final loc = a['locality']?.toString() ?? '';
-                  final line = a['address_line']?.toString() ?? '';
+                  final line = (a['address_line1'] ?? a['address_line'])?.toString() ?? '';
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: CardSurface(

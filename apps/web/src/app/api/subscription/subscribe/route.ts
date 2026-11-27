@@ -9,6 +9,8 @@ import {
   resolveAuthoritativeDiscountPaise,
   resolveAuthoritativePlan,
 } from '@/lib/checkout-pricing';
+import { getPlatformAppConfig } from '@/lib/app-config';
+import { recordPromoRedemption } from '@/lib/promo-engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +68,9 @@ export async function POST(req: NextRequest) {
           .eq('id', providerId)
           .maybeSingle();
         if (provider) {
+          if (provider.status === 'suspended' || provider.status === 'rejected') {
+            return NextResponse.json({ success: false, error: 'This kitchen is currently unavailable for new orders.' }, { status: 403 });
+          }
           providerName = provider.display_name;
           providerSupportsDelivery = provider.supports_delivery === true;
           disposableFeePaise = Math.max(0, Number(provider.disposable_fee_paise ?? 500));
@@ -94,18 +99,29 @@ export async function POST(req: NextRequest) {
     const effectivePlanType = plan.plan_type;
     const effectivePlanName = plan.name;
     const effectivePricePaise = plan.price_paise;
+    const appCfg = await getPlatformAppConfig(admin);
     const packagingFeePaise =
       effectiveFulfillmentMode === 'delivery' && packagingPreference === 'disposable'
         ? disposableFeePaise * durDays
         : 0;
     const addOnsPaise = Math.max(0, Math.min(200_000, Math.round(Number(body.add_ons_paise || 0))));
-    const grossPaise = effectivePricePaise + packagingFeePaise + addOnsPaise;
+    const baseSubGross = effectivePricePaise + packagingFeePaise + addOnsPaise;
+    const deliveryFeePaise =
+      effectiveFulfillmentMode === 'delivery' &&
+      appCfg.default_delivery_fee_paise > 0 &&
+      (appCfg.free_delivery_above_paise <= 0 || baseSubGross < appCfg.free_delivery_above_paise)
+        ? appCfg.default_delivery_fee_paise
+        : 0;
+    const platformFeePaise = appCfg.platform_fee_paise > 0 ? appCfg.platform_fee_paise : 0;
+    const grossPaise = baseSubGross + deliveryFeePaise + platformFeePaise;
 
     const promoResult = await resolveAuthoritativeDiscountPaise({
       admin,
       providerId,
       promoCode,
       orderAmountPaise: grossPaise,
+      customerId: resolvedCustomerId,
+      orderContext: 'plan',
     });
     const verifiedDiscountPaise = promoResult.discountPaise;
     const netPayablePaise = Math.max(0, grossPaise - verifiedDiscountPaise);
@@ -214,6 +230,17 @@ export async function POST(req: NextRequest) {
       amount_inr: netPayablePaise / 100,
       subscription_id: subUuid,
     });
+
+    if (promoResult.code && verifiedDiscountPaise > 0) {
+      await recordPromoRedemption({
+        admin,
+        code: promoResult.code,
+        customerId: resolvedCustomerId,
+        providerId,
+        subscriptionId: subUuid,
+        discountPaise: verifiedDiscountPaise,
+      });
+    }
 
     let resolvedCustomerEmail = String(auth.email || body.customer_email || '').trim();
     if (!resolvedCustomerEmail && admin && isUuid.test(resolvedCustomerId)) {

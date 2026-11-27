@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import ContactFormClient from './ContactFormClient';
 
 export const metadata: Metadata = {
   title: 'Contact Us',
@@ -7,5 +8,13 @@ export const metadata: Metadata = {
 };
 
 export default function ContactPage() {
-  return <main className="mx-auto max-w-4xl px-6 py-20"><h1 className="text-3xl font-bold text-slate-900">Contact Thali</h1><p className="mt-4 text-slate-600">Support channels are not configured yet. Contact details will be published before the marketplace opens.</p></main>;
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-16">
+      <h1 className="text-3xl font-black text-slate-950 tracking-tight">Contact Thali Support</h1>
+      <p className="mt-3 text-slate-600 text-sm leading-6">
+        Need help with a meal subscription, single order, payment verification, or partner kitchen setup? Submit a ticket below and our operations desk will reply cleanly.
+      </p>
+      <ContactFormClient />
+    </main>
+  );
 }

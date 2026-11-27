@@ -263,10 +263,20 @@ class _PartnerMoreScreenState extends State<PartnerMoreScreen> {
           const SizedBox(height: 16),
           CardSurface(
             padding: EdgeInsets.zero,
-            child: _item(
-              icon: Icons.support_agent_rounded,
-              title: 'Partner Support',
-              onTap: () => _openSupportSheet(context),
+            child: Column(
+              children: [
+                _item(
+                  icon: Icons.support_agent_rounded,
+                  title: 'Partner Support',
+                  onTap: () => _openSupportSheet(context),
+                ),
+                const Divider(height: 1),
+                _item(
+                  icon: Icons.confirmation_number_outlined,
+                  title: 'My Support Tickets',
+                  onTap: () => _openSupportTicketsSheet(context),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 20),
@@ -367,8 +377,9 @@ class _PartnerMoreScreenState extends State<PartnerMoreScreen> {
                     await ProviderApiService.submitSupportTicket(
                       name: _session.businessName,
                       email: _session.email,
-                      phone: _session.providerId,
+                      phone: '',
                       role: 'provider',
+                      providerId: _session.providerId,
                       subject: subjectCtrl.text.trim(),
                       message: msgCtrl.text.trim(),
                     );
@@ -383,6 +394,150 @@ class _PartnerMoreScreenState extends State<PartnerMoreScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _openSupportTicketsSheet(BuildContext context) {
+    List<Map<String, dynamic>> tickets = [];
+    bool loading = true;
+    bool fetched = false;
+    final replyCtrls = <String, TextEditingController>{};
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ThaliColors.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          if (!fetched) {
+            fetched = true;
+            ProviderApiService.fetchSupportTickets().then((rows) {
+              if (!ctx.mounted) return;
+              setSheetState(() {
+                tickets = rows;
+                loading = false;
+              });
+            }).catchError((_) {
+              if (!ctx.mounted) return;
+              setSheetState(() => loading = false);
+            });
+          }
+
+          return SafeArea(
+            child: Container(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+              padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('My Support Tickets', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 10),
+                  if (loading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 28),
+                      child: PartnerLoadingView(label: 'Loading tickets...'),
+                    )
+                  else if (tickets.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 28),
+                      child: Center(child: Text('No support tickets raised yet.', style: TextStyle(color: ThaliColors.muted))),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: tickets.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final t = tickets[i];
+                          final id = t['id']?.toString() ?? '';
+                          final status = (t['status']?.toString() ?? 'open').replaceAll('_', ' ').toUpperCase();
+                          final msgs = (t['messages'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+                          final ctrl = replyCtrls.putIfAbsent(id, TextEditingController.new);
+
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: ThaliColors.scaffold,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: ThaliColors.stroke),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(t['subject']?.toString() ?? 'Support Ticket', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: ThaliColors.primarySoft, borderRadius: BorderRadius.circular(99)),
+                                      child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 5),
+                                Text(t['description']?.toString() ?? '', style: const TextStyle(fontSize: 12, color: ThaliColors.body)),
+                                if ((t['resolution_note']?.toString() ?? '').isNotEmpty) ...[
+                                  const SizedBox(height: 5),
+                                  Text('Resolution: ${t['resolution_note']}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.greenDark)),
+                                ],
+                                for (final m in msgs) ...[
+                                  const SizedBox(height: 5),
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: m['sender_role'] == 'admin' ? ThaliColors.primarySoft : Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text('${m['sender_role'] == 'admin' ? 'Thali Team' : 'You'}: ${m['message'] ?? ''}', style: const TextStyle(fontSize: 11.5)),
+                                  ),
+                                ],
+                                if (t['status'] != 'resolved' && t['status'] != 'closed') ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(controller: ctrl, decoration: const InputDecoration(hintText: 'Reply...', isDense: true)),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      TextButton(
+                                        onPressed: () async {
+                                          if (ctrl.text.trim().isEmpty || id.isEmpty) return;
+                                          await ProviderApiService.replySupportTicket(ticketId: id, message: ctrl.text.trim());
+                                          ctrl.clear();
+                                          final refreshed = await ProviderApiService.fetchSupportTickets();
+                                          if (ctx.mounted) setSheetState(() => tickets = refreshed);
+                                        },
+                                        child: const Text('Send', style: TextStyle(fontWeight: FontWeight.w800)),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

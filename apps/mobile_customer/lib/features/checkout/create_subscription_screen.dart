@@ -45,6 +45,7 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
   bool _loadingRecommendation = false;
   final _instructionsController = TextEditingController();
   final _promoController = TextEditingController();
+  List<Map<String, dynamic>> _availablePromos = const [];
   String _appliedPromo = '';
   int _discountInr = 0;
   String? _promoMessage;
@@ -86,7 +87,20 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
       if (_isSubscriptionMode && widget.provider.plans.length > 1) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _refreshRecommendation());
       }
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadAvailablePromos());
     }
+  }
+
+  Future<void> _loadAvailablePromos() async {
+    try {
+      final list = await AppStateScope.of(context, listen: false).repository.fetchAvailablePromos(
+            providerId: widget.provider.id,
+            orderContext: _isSubscriptionMode ? 'plan' : 'daily',
+          );
+      if (mounted) {
+        setState(() => _availablePromos = list);
+      }
+    } catch (_) {}
   }
 
   MealPlan _pickSensibleDefaultPlan(List<MealPlan> plans) {
@@ -390,7 +404,9 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           : 0;
     }
 
-    final totalBeforeDiscount = subtotalAmount + packFee;
+    final platformFee = state.platformFeeInr;
+    final deliveryFee = _fulfillmentMode == 'delivery' ? state.deliveryFeeInr : 0;
+    final totalBeforeDiscount = subtotalAmount + packFee + platformFee + deliveryFee;
     final netTotal = (totalBeforeDiscount - _discountInr).clamp(0, totalBeforeDiscount);
 
     if (_stage == 2) {
@@ -1008,6 +1024,32 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
           decoration: const InputDecoration(hintText: 'Write instruction for the mess (e.g. Less oil / Leave at door)'),
         ),
         const SizedBox(height: 12),
+        if (_availablePromos.isNotEmpty) ...[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _availablePromos.take(4).map((p) {
+                final c = p['code']?.toString() ?? '';
+                if (c.isEmpty) return const SizedBox.shrink();
+                final flat = ((p['flat_discount_paise'] as num?)?.toInt() ?? 0) ~/ 100;
+                final pct = (p['discount_percent'] as num?)?.toInt() ?? 0;
+                final label = flat > 0 ? '$c · Save ₹$flat' : (pct > 0 ? '$c · $pct% OFF' : c);
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8, bottom: 8),
+                  child: ActionChip(
+                    label: Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.primary)),
+                    backgroundColor: ThaliColors.primarySoft,
+                    side: BorderSide(color: ThaliColors.primary.withValues(alpha: 0.35)),
+                    onPressed: () {
+                      _promoController.text = c;
+                      _applyPromo(subtotalAmount + packFee);
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
         Row(
           children: [
             Expanded(
@@ -1053,6 +1095,8 @@ class _CreateSubscriptionScreenState extends State<CreateSubscriptionScreen> {
                 if (addOnsTotal > 0) _SumRow('Add-ons & Extras', '₹$addOnsTotal'),
               ],
               if (packFee > 0) _SumRow('Disposable Containers', '₹$packFee'),
+              if (state.platformFeeInr > 0) _SumRow('Platform Fee', '₹${state.platformFeeInr}'),
+              if (_fulfillmentMode == 'delivery' && state.deliveryFeeInr > 0) _SumRow('Delivery Fee', '₹${state.deliveryFeeInr}'),
               if (_discountInr > 0) _SumRow('Coupon Discount ($_appliedPromo)', '- ₹$_discountInr', green: true),
               const Divider(height: 16),
               Row(

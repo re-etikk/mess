@@ -78,11 +78,14 @@ export interface CounterOrderData {
   provider_id: string;
   customer_name: string;
   customer_phone?: string;
+  slot?: string;
   items_summary: string;
-  items: { name: string; price: number; quantity: number }[];
-  total_amount_inr: number;
-  payment_mode: 'cash' | 'counter_upi' | 'online';
-  status: 'paid' | 'pending';
+  items?: { name: string; price: number; quantity: number }[];
+  total_amount_inr?: number;
+  amount_paise?: number;
+  amount_inr?: number;
+  payment_mode: 'cash' | 'counter_cash' | 'counter_upi' | 'online' | string;
+  status: 'paid' | 'pending' | 'completed' | string;
   created_at: string;
 }
 
@@ -760,6 +763,7 @@ export function processStudentCheckin(params: {
 export function validateAndApplyPromo(params: {
   code: string;
   orderAmountPaise: number;
+  providerId?: string;
 }): {
   isValid: boolean;
   code: string;
@@ -778,6 +782,16 @@ export function validateAndApplyPromo(params: {
     };
   }
 
+  if (promo.provider_id && params.providerId && promo.provider_id !== params.providerId) {
+    return {
+      isValid: false,
+      code: promo.code,
+      discountPaise: 0,
+      finalAmountPaise: params.orderAmountPaise,
+      message: 'Promo code is valid for another mess kitchen only.',
+    };
+  }
+
   if (params.orderAmountPaise < promo.min_order_paise) {
     return {
       isValid: false,
@@ -789,15 +803,16 @@ export function validateAndApplyPromo(params: {
   }
 
   let discount = 0;
-  if (promo.discount_percent) {
+  if (promo.flat_discount_paise) {
+    discount = promo.flat_discount_paise;
+  } else if (promo.discount_percent) {
     discount = Math.round((params.orderAmountPaise * promo.discount_percent) / 100);
     if (promo.max_discount_paise && discount > promo.max_discount_paise) {
       discount = promo.max_discount_paise;
     }
-  } else if (promo.flat_discount_paise) {
-    discount = promo.flat_discount_paise;
   }
 
+  discount = Math.max(0, Math.min(params.orderAmountPaise, discount));
   const finalAmount = Math.max(0, params.orderAmountPaise - discount);
   return {
     isValid: true,

@@ -149,7 +149,26 @@ export async function requireProviderOwnership(
     return { ok: true, userId: admin.userId, providerId: targetProviderId, isAdmin: true };
   }
 
-  // 5. Web SSR Supabase cookie session
+  // 5. Web SSR Supabase cookie session or HttpOnly signed thali_session_token cookie
+  try {
+    const tokenCookie = req.cookies.get('thali_session_token')?.value?.trim();
+    if (tokenCookie) {
+      const signedCookie = verifySignedSessionToken(tokenCookie, 'thali_tok_');
+      if (signedCookie) {
+        if (signedCookie.role === 'admin') {
+          return { ok: true, userId: signedCookie.userId, providerId: targetProviderId, isAdmin: true, email: signedCookie.email };
+        }
+        if (signedCookie.providerId && signedCookie.providerId === targetProviderId) {
+          return { ok: true, userId: signedCookie.userId, providerId: targetProviderId, isAdmin: false, email: signedCookie.email };
+        }
+        const owns = await checkDbProviderOwnership(signedCookie.userId, signedCookie.email, targetProviderId);
+        if (owns) {
+          return { ok: true, userId: signedCookie.userId, providerId: targetProviderId, isAdmin: false, email: signedCookie.email };
+        }
+      }
+    }
+  } catch {}
+
   try {
     const session = await createSessionClient();
     const {

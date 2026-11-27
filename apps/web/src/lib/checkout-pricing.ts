@@ -1,4 +1,5 @@
-import { platformStore, validateAndApplyPromo } from './platform-service';
+import { platformStore } from './platform-service';
+import { evaluatePromoCode } from './promo-engine';
 import type { getAdminClient } from './supabase/admin';
 
 type AdminClient = NonNullable<ReturnType<typeof getAdminClient>>;
@@ -71,60 +72,34 @@ export async function resolveAuthoritativeDiscountPaise({
   providerId,
   promoCode,
   orderAmountPaise,
+  customerId,
+  orderContext,
 }: {
   admin: AdminClient | null;
   providerId: string;
   promoCode?: string | null;
   orderAmountPaise: number;
+  customerId?: string;
+  orderContext?: 'plan' | 'daily';
 }): Promise<{ code: string; discountPaise: number; valid: boolean }> {
   const cleanCode = String(promoCode || '').trim().toUpperCase();
   if (!cleanCode || orderAmountPaise <= 0) {
     return { code: '', discountPaise: 0, valid: true };
   }
 
-  if (admin) {
-    try {
-      const { data: promo } = await admin
-        .from('promo_codes')
-        .select('*')
-        .eq('code', cleanCode)
-        .eq('is_active', true)
-        .maybeSingle();
+  const res = await evaluatePromoCode({
+    admin,
+    code: cleanCode,
+    orderAmountPaise,
+    providerId,
+    customerId,
+    orderContext,
+  });
 
-      if (promo) {
-        if (promo.provider_id && promo.provider_id !== providerId) {
-          return { code: cleanCode, discountPaise: 0, valid: false };
-        }
-        const now = Date.now();
-        if (promo.valid_until && new Date(promo.valid_until).getTime() < now) {
-          return { code: cleanCode, discountPaise: 0, valid: false };
-        }
-        if (promo.min_order_paise && orderAmountPaise < Number(promo.min_order_paise)) {
-          return { code: cleanCode, discountPaise: 0, valid: false };
-        }
-        let disc = 0;
-        if (promo.flat_discount_paise) {
-          disc = Number(promo.flat_discount_paise);
-        } else if (promo.discount_percent) {
-          disc = Math.round((orderAmountPaise * Number(promo.discount_percent)) / 100);
-          if (promo.max_discount_paise) {
-            disc = Math.min(disc, Number(promo.max_discount_paise));
-          }
-        }
-        return {
-          code: cleanCode,
-          discountPaise: Math.min(orderAmountPaise, Math.max(0, disc)),
-          valid: disc > 0,
-        };
-      }
-    } catch {}
-  }
-
-  const fallback = validateAndApplyPromo({ code: cleanCode, orderAmountPaise });
   return {
     code: cleanCode,
-    discountPaise: fallback.isValid ? Math.min(orderAmountPaise, fallback.discountPaise) : 0,
-    valid: fallback.isValid,
+    discountPaise: res.isValid ? Math.min(orderAmountPaise, res.discountPaise) : 0,
+    valid: res.isValid,
   };
 }
 

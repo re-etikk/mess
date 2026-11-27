@@ -139,7 +139,7 @@ export async function GET(req: NextRequest) {
       supabase
         .from('providers')
         .select(
-          'id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,address_line1,address_line2,locality,city,state,pincode,latitude,longitude,supports_pickup,supports_delivery,status,is_accepting_orders,created_at'
+          'id,display_name,slug,description,logo_path,cover_path,public_phone,public_email,address_line1,address_line2,locality,city,state,pincode,latitude,longitude,supports_pickup,supports_delivery,status,is_accepting_orders,is_featured,featured_rank,is_verified_badge,created_at'
         )
         .eq('status', 'active')
         .order('display_name')
@@ -148,7 +148,10 @@ export async function GET(req: NextRequest) {
     let dbProviders: any[] | null = primaryRes.data as any[] | null;
     let providersError = primaryRes.error;
 
-    if (isUndefinedColumnError(providersError, 'is_accepting_orders')) {
+    if (
+      isUndefinedColumnError(providersError, 'is_accepting_orders') ||
+      isUndefinedColumnError(providersError, 'is_featured')
+    ) {
       const fallbackRes = await applySearchFilters(
         supabase
           .from('providers')
@@ -377,9 +380,10 @@ export async function GET(req: NextRequest) {
     } else if (sortBy === 'distance') {
       results.sort((a: any, b: any) => (a.distance_km ?? 999999) - (b.distance_km ?? 999999));
     } else {
-      // Honest multi-signal ML relevance ranking: open kitchens first, Bayesian rating + distance + completeness
+      // Honest multi-signal ML relevance ranking: open kitchens first, featured spotlight, Bayesian rating + distance + completeness
       const mlScore = (p: any): number => {
         const openBoost = p.is_open_today ? 1000 : 0;
+        const featuredBoost = p.is_featured === true ? 250 + Math.max(0, 100 - Number(p.featured_rank || 100)) : 0;
         const revCount = Number(p.total_reviews || 0);
         const bayesianRating = revCount > 0 && p.rating != null
           ? (Number(p.rating) * revCount + 3.8 * 2) / (revCount + 2)
@@ -387,7 +391,7 @@ export async function GET(req: NextRequest) {
         const distPenalty = p.distance_km != null ? Math.min(20, Number(p.distance_km) * 1.5) : 5;
         const menuRichness = Math.min(5, (p.menus || []).filter((m: any) => (m.items_included || []).length > 0).length);
         const coverBoost = p.cover_path ? 3 : 0;
-        return openBoost + bayesianRating * 10 + menuRichness * 2 + coverBoost - distPenalty;
+        return openBoost + featuredBoost + bayesianRating * 10 + menuRichness * 2 + coverBoost - distPenalty;
       };
       results.sort((a: any, b: any) => mlScore(b) - mlScore(a));
     }

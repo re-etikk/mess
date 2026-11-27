@@ -129,6 +129,9 @@ class MessProvider {
     this.dietaryTypes = const [],
     this.disposableFeeInr = 5,
     this.maxSkipsPerWeek = 2,
+    this.isFeatured = false,
+    this.featuredRank = 999,
+    this.isVerifiedBadge = true,
   });
 
   final String id;
@@ -156,6 +159,9 @@ class MessProvider {
   final List<String> dietaryTypes;
   final int disposableFeeInr;
   final int maxSkipsPerWeek;
+  final bool isFeatured;
+  final int featuredRank;
+  final bool isVerifiedBadge;
 
   String get distanceLabel {
     if (distanceKm == null) return area;

@@ -75,6 +75,7 @@ class _PlansManagementTabState extends State<PlansManagementTab> {
     final priceCtrl = TextEditingController(text: ((existing?['price_inr'] ?? existing?['price'] ?? 3000) as num).round().toString());
     final creditsCtrl = TextEditingController(text: (existing?['meal_credits'] ?? 60).toString());
     String planType = existing?['plan_type']?.toString() ?? 'fixed_period';
+    bool published = existing?['published'] != false;
     bool saving = false;
 
     await showModalBottomSheet<void>(
@@ -159,7 +160,16 @@ class _PlansManagementTabState extends State<PlansManagementTab> {
                     decoration: const InputDecoration(labelText: 'Included Meal Credits'),
                   ),
                 ],
-                const SizedBox(height: 18),
+                const SizedBox(height: 10),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: ThaliColors.primary,
+                  title: const Text('Published & visible to diners', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  subtitle: const Text('Turn off to keep as unlisted/draft plan', style: TextStyle(fontSize: 11.5, color: ThaliColors.muted)),
+                  value: published,
+                  onChanged: (v) => setSheetState(() => published = v),
+                ),
+                const SizedBox(height: 12),
                 PartnerActionButton(
                   label: existing == null ? 'Publish Plan' : 'Save Changes',
                   loading: saving,
@@ -179,6 +189,7 @@ class _PlansManagementTabState extends State<PlansManagementTab> {
                         durationDays: days,
                         priceInr: price,
                         mealCredits: planType == 'meal_credits' ? (int.tryParse(creditsCtrl.text.trim()) ?? 30) : null,
+                        published: published,
                       );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (mounted) {
@@ -281,7 +292,29 @@ class _PlansManagementTabState extends State<PlansManagementTab> {
                                     Row(
                                       children: [
                                         Expanded(
-                                          child: Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                                          child: Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: p['published'] == false ? ThaliColors.subtle : ThaliColors.primarySoft,
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: Text(
+                                                  p['published'] == false ? 'UNLISTED' : 'LIVE',
+                                                  style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: p['published'] == false ? ThaliColors.muted : ThaliColors.primary,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                         Text(rupee(price), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
                                       ],

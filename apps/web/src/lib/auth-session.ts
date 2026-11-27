@@ -4,12 +4,21 @@ import { createClient as createSessionClient } from '@/lib/supabase/server';
 import { getAdminClient } from '@/lib/supabase/admin';
 
 function getSessionSecret(): string {
-  const secret =
+  const dedicated =
     process.env.SESSION_SIGNING_SECRET ||
     process.env.QR_SIGNING_SECRET ||
-    process.env.QR_HMAC_SECRET ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (secret && secret.trim().length >= 16) return secret.trim();
+    process.env.QR_HMAC_SECRET;
+  if (dedicated && dedicated.trim().length >= 16) return dedicated.trim();
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (serviceKey && serviceKey.trim().length >= 16) {
+    // Never reuse the raw service role key directly as an HMAC token secret.
+    return crypto
+      .createHmac('sha256', serviceKey.trim())
+      .update('thali-session-signing-v1')
+      .digest('hex');
+  }
+
   if (process.env.NODE_ENV === 'test') {
     return 'test-only-thali-session-secret-0001';
   }
@@ -129,6 +138,27 @@ export type CustomerIdentityResult =
   | { ok: true; userId: string; email: string; isAdmin: boolean }
   | { ok: false; status: 401 | 403; error: string };
 
+const CUST_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function checkCustomerAccountAllowed(
+  userId: string
+): Promise<{ ok: true } | { ok: false; status: 403; error: string }> {
+  if (!CUST_UUID_RE.test(userId)) return { ok: true };
+  const admin = getAdminClient();
+  if (!admin) return { ok: true };
+  try {
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('account_status')
+      .eq('id', userId)
+      .maybeSingle();
+    if (profile?.account_status === 'suspended' || profile?.account_status === 'blocked') {
+      return { ok: false, status: 403, error: 'This account has been suspended. Please contact support.' };
+    }
+  } catch {}
+  return { ok: true };
+}
+
 export async function requireCustomerIdentity(
   req: NextRequest,
   claimedCustomerId?: string | null
@@ -153,8 +183,30 @@ export async function requireCustomerIdentity(
 
     const signed = verifySignedSessionToken(token, 'thali_tok_');
     if (signed) {
+      const acct = await checkCustomerAccountAllowed(signed.userId);
+      if (!acct.ok) return acct;
+
       if (signed.role === 'admin') {
-        return { ok: true, userId: claimed || signed.userId, email: signed.email, isAdmin: true };
+        const admin = getAdminClient();
+        let adminVerified = !admin || !CUST_UUID_RE.test(signed.userId);
+        if (admin && CUST_UUID_RE.test(signed.userId)) {
+          try {
+            const { data: roleRow } = await admin
+              .from('user_roles')
+              .select('id')
+              .eq('user_id', signed.userId)
+              .eq('role', 'admin')
+              .is('revoked_at', null)
+              .maybeSingle();
+            adminVerified = Boolean(roleRow);
+          } catch {
+            adminVerified = false;
+          }
+        }
+        if (adminVerified) {
+          return { ok: true, userId: claimed || signed.userId, email: signed.email, isAdmin: true };
+        }
+        return { ok: false, status: 403, error: 'Administrator privileges have been revoked.' };
       }
       if (claimed && signed.userId !== claimed) {
         return { ok: false, status: 403, error: 'You cannot access another customer account.' };
@@ -170,6 +222,9 @@ export async function requireCustomerIdentity(
           error,
         } = await admin.auth.getUser(token);
         if (!error && user) {
+          const acct = await checkCustomerAccountAllowed(user.id);
+          if (!acct.ok) return acct;
+
           if (claimed && user.id !== claimed) {
             const { data: adminRole } = await admin
               .from('user_roles')
@@ -199,7 +254,23 @@ export async function requireCustomerIdentity(
       error,
     } = await supabase.auth.getUser();
     if (!error && user) {
+      const acct = await checkCustomerAccountAllowed(user.id);
+      if (!acct.ok) return acct;
+
       if (claimed && user.id !== claimed) {
+        const admin = getAdminClient();
+        if (admin) {
+          const { data: adminRole } = await admin
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', user.id)
+            .eq('role', 'admin')
+            .is('revoked_at', null)
+            .maybeSingle();
+          if (adminRole) {
+            return { ok: true, userId: claimed, email: user.email || '', isAdmin: true };
+          }
+        }
         return { ok: false, status: 403, error: 'You cannot access another customer account.' };
       }
       return { ok: true, userId: user.id, email: user.email || '', isAdmin: false };

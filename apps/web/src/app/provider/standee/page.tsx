@@ -103,10 +103,10 @@ function CounterStandeeContent() {
 
         <div className="mt-5 rounded-2xl bg-amber-500/10 border border-amber-300 p-3 text-center">
           <p className="text-xs font-black uppercase tracking-wider text-amber-950">
-            Provider information
+            Scan to Join or Order Today
           </p>
           <p className="mt-0.5 text-[11px] text-amber-900">
-            Online plan purchase is not currently available.
+            View daily menu, single-meal rates & monthly tiffin plans instantly.
           </p>
         </div>
 
@@ -114,15 +114,15 @@ function CounterStandeeContent() {
         <div className="mt-5 grid grid-cols-3 gap-2 text-left border-t border-slate-100 pt-4 text-[10px] text-slate-600">
           <div>
             <span className="font-bold text-slate-900 block text-xs">1. Scan</span>
-            Scan to view provider details
+            Open camera to view today&apos;s menu
           </div>
           <div>
-            <span className="font-bold text-slate-900 block text-xs">2. Select</span>
-            Plan checkout is being connected
+            <span className="font-bold text-slate-900 block text-xs">2. Choose</span>
+            Single meal or monthly plan
           </div>
           <div>
-            <span className="font-bold text-slate-900 block text-xs">3. Eat</span>
-            No meal pass is issued yet
+            <span className="font-bold text-slate-900 block text-xs">3. Enjoy</span>
+            Instant QR pass at counter
           </div>
         </div>
 

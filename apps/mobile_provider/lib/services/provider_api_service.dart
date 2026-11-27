@@ -920,8 +920,9 @@ class ProviderApiService {
     required int priceInr,
     int? mealCredits,
     int? discountPercent,
+    bool published = true,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/provider/plan');
+    final uri = Uri.parse('$baseUrl/api/provider/plans');
     final response = await http.post(
       uri,
       headers: {
@@ -938,6 +939,7 @@ class ProviderApiService {
         'price_inr': priceInr,
         if (mealCredits != null) 'meal_credits': mealCredits,
         if (discountPercent != null) 'discount_percent': discountPercent,
+        'published': published,
       }),
     ).timeout(const Duration(seconds: 10));
 
@@ -1057,6 +1059,7 @@ class ProviderApiService {
     required String subject,
     required String message,
     String category = 'general',
+    String? providerId,
   }) async {
     final uri = Uri.parse('$baseUrl/api/support/ticket');
     final response = await http.post(
@@ -1067,6 +1070,8 @@ class ProviderApiService {
         'email': email,
         'phone': phone,
         'role': role,
+        if ((providerId ?? currentSession?.providerId ?? '').isNotEmpty)
+          'provider_id': providerId ?? currentSession!.providerId,
         'subject': subject,
         'message': message,
         'category': category,
@@ -1075,6 +1080,34 @@ class ProviderApiService {
     final data = jsonDecode(response.body);
     if (response.statusCode >= 400 || data['success'] == false) {
       throw Exception(data['error'] ?? 'Failed to submit support ticket');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchSupportTickets() async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/support/ticket');
+      final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 12));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return (data['tickets'] as List<dynamic>? ?? [])
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<void> replySupportTicket({required String ticketId, required String message}) async {
+    final uri = Uri.parse('$baseUrl/api/support/ticket');
+    final response = await http.patch(
+      uri,
+      headers: _authHeaders(json: true),
+      body: jsonEncode({'ticket_id': ticketId, 'message': message.trim()}),
+    ).timeout(const Duration(seconds: 10));
+    final data = jsonDecode(response.body);
+    if (response.statusCode >= 400 || data['success'] == false) {
+      throw Exception(data['error'] ?? 'Failed to send reply');
     }
   }
 

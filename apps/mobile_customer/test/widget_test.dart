@@ -16,6 +16,7 @@ class _StubRepository extends HttpMessRepository {
   _StubRepository({this.providers = const []});
 
   final List<MessProvider> providers;
+  String? lastCityRequested;
 
   @override
   Future<List<MessProvider>> getProviders({
@@ -27,9 +28,36 @@ class _StubRepository extends HttpMessRepository {
     bool deliveryOnly = false,
     String? sort,
     String? dietary,
+    String? city,
   }) async {
+    lastCityRequested = city;
     return openNow ? providers.where((p) => p.isOpen).toList() : providers;
   }
+
+  @override
+  Future<Map<String, dynamic>> fetchAppConfig() async => {
+        'hero_headline': 'Fresh home thalis curated daily',
+        'hero_subheadline': 'Zero platform fees on every subscription.',
+        'maintenance_mode': false,
+        'platform_fee_paise': 0,
+        'default_delivery_fee_paise': 0,
+      };
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchAnnouncements({String audience = 'customer'}) async => [
+        {
+          'id': 'ann-1',
+          'title': 'Welcome Offer',
+          'body': 'Use code FIRSTTHALI for 15% off.',
+          'promo_code': 'FIRSTTHALI',
+        }
+      ];
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchAvailablePromos({String? providerId, String orderContext = 'plan'}) async => const [];
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchSupportTickets() async => const [];
 
   @override
   Future<List<MessProvider>> searchProviders({
@@ -327,5 +355,41 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Enter a valid 10-digit mobile number.'), findsOneWidget);
+  });
+
+  testWidgets('HomeScreen displays remote hero copy, announcement strip & Featured badge', (tester) async {
+    final repo = _StubRepository(providers: const [
+      MessProvider(
+        id: 'prov-feat-1',
+        name: 'Featured Home Kitchen',
+        area: 'Sector 62',
+        city: 'Noida',
+        distanceMeters: 500,
+        description: 'Pure veg thalis',
+        mealSlots: [],
+        plans: [],
+        isOpen: true,
+        isFeatured: true,
+      ),
+    ]);
+    final appState = AppState(repository: repo);
+    appState.signIn(
+      emailOrPhone: 'riya@example.com',
+      name: 'Riya',
+      userId: 'user-feat',
+      locality: 'Sector 62',
+      city: 'Noida',
+    );
+
+    await tester.pumpWidget(MessApp(appState: appState));
+    await tester.pump(const Duration(milliseconds: 1250));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Fresh home thalis curated daily'), findsOneWidget);
+    expect(find.text('Welcome Offer'), findsOneWidget);
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('Featured'), findsOneWidget);
+    expect(repo.lastCityRequested, equals('Noida'));
   });
 }

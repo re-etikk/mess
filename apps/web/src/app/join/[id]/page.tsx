@@ -14,6 +14,8 @@ import {
   QrCode,
   ShieldCheck,
   Store,
+  Tag,
+  Truck,
 } from 'lucide-react';
 import { launchCashfreeWebCheckout } from '@/lib/cashfree-client';
 
@@ -39,6 +41,15 @@ interface ProviderInfo {
   state?: string;
   description?: string;
   is_open_today?: boolean;
+  supports_delivery?: boolean;
+  supports_pickup?: boolean;
+}
+
+interface PromoSuggestion {
+  code: string;
+  title?: string;
+  discount_percent?: number;
+  flat_discount_paise?: number;
 }
 
 export default function JoinMessPage() {
@@ -55,6 +66,14 @@ export default function JoinMessPage() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [paymentMode, setPaymentMode] = useState<'cashfree' | 'counter_cash'>('cashfree');
+  const [fulfillmentMode, setFulfillmentMode] = useState<'pickup' | 'delivery'>('pickup');
+
+  const [platformFeePaise, setPlatformFeePaise] = useState(0);
+  const [availablePromos, setAvailablePromos] = useState<PromoSuggestion[]>([]);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoApplying, setPromoApplying] = useState(false);
+  const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount_paise: number; message: string } | null>(null);
+  const [promoError, setPromoError] = useState('');
 
   const [error, setError] = useState('');
   const [successData, setSuccessData] = useState<any>(null);
@@ -68,9 +87,11 @@ export default function JoinMessPage() {
       setLoading(true);
       setError('');
       try {
-        const [provRes, plansRes] = await Promise.all([
+        const [provRes, plansRes, promoRes, cfgRes] = await Promise.all([
           fetch(`/api/providers`).then((r) => r.json()).catch(() => ({})),
           fetch(`/api/provider/plans?provider_id=${providerId}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/promos/validate?provider_id=${providerId}&order_context=plan`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/app-config`).then((r) => r.json()).catch(() => ({})),
         ]);
 
         if (cancelled) return;
@@ -90,6 +111,8 @@ export default function JoinMessPage() {
         } else {
           setPlans([]);
         }
+        setAvailablePromos(promoRes?.promos || []);
+        setPlatformFeePaise(Number(cfgRes?.config?.platform_fee_paise || 0));
       } catch {
         if (!cancelled) setError('Unable to load kitchen details. Please retry in a moment.');
       } finally {
@@ -105,6 +128,44 @@ export default function JoinMessPage() {
   }, [providerId]);
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId);
+  const basePlanPaise = selectedPlan?.price_paise || 0;
+  const discountPaise = Math.min(basePlanPaise, appliedPromo?.discount_paise || 0);
+  const finalPayablePaise = Math.max(0, basePlanPaise - discountPaise) + platformFeePaise;
+
+  async function applyPromo(codeOverride?: string) {
+    const clean = (codeOverride ?? promoCode).trim().toUpperCase();
+    if (!clean || !selectedPlan) return;
+    setPromoApplying(true);
+    setPromoError('');
+    try {
+      const res = await fetch('/api/promos/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: clean,
+          provider_id: provider?.id || providerId,
+          order_context: 'plan',
+          order_amount_paise: selectedPlan.price_paise,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.isValid) {
+        setAppliedPromo(null);
+        setPromoError(data.message || data.error || 'Promo code is not valid for this plan.');
+      } else {
+        setPromoCode(data.code || clean);
+        setAppliedPromo({
+          code: data.code || clean,
+          discount_paise: Number(data.discount_paise || 0),
+          message: data.message || 'Promo applied.',
+        });
+      }
+    } catch {
+      setPromoError('Could not validate promo code.');
+    } finally {
+      setPromoApplying(false);
+    }
+  }
 
   async function handleCheckoutAttempt(e: React.FormEvent) {
     e.preventDefault();
@@ -128,6 +189,8 @@ export default function JoinMessPage() {
             customer_phone: phone.trim(),
             customer_name: name.trim(),
             customer_email: email.trim(),
+            promo_code: appliedPromo?.code || undefined,
+            fulfillment_mode: fulfillmentMode,
             plan_type: selectedPlan?.plan_type,
             plan_name: selectedPlan?.name,
             duration_days: selectedPlan?.duration_days || (selectedPlan?.duration_months ? selectedPlan.duration_months * 30 : 30),
@@ -156,6 +219,8 @@ export default function JoinMessPage() {
           customer_phone: phone.trim(),
           customer_name: name.trim(),
           customer_email: email.trim(),
+          promo_code: appliedPromo?.code || undefined,
+          fulfillment_mode: fulfillmentMode,
           payment_mode: paymentMode,
         }),
       });
@@ -214,7 +279,7 @@ export default function JoinMessPage() {
             <div className="flex justify-between items-center text-slate-700">
               <span className="font-semibold">Total to Pay at Counter:</span>
               <span className="text-base font-black text-amber-900">
-                ₹{selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'}
+                ₹{((successData?.subscription?.price_paid_paise ?? finalPayablePaise) / 100).toLocaleString('en-IN')}
               </span>
             </div>
             <div className="flex justify-between items-center text-slate-700">
@@ -331,7 +396,10 @@ export default function JoinMessPage() {
                   return (
                     <label
                       key={plan.id}
-                      onClick={() => setSelectedPlanId(plan.id)}
+                      onClick={() => {
+                        if (selectedPlanId !== plan.id) setAppliedPromo(null);
+                        setSelectedPlanId(plan.id);
+                      }}
                       className={`block cursor-pointer rounded-2xl border p-4 transition ${
                         isSelected
                           ? 'border-amber-600 bg-amber-50/50 ring-2 ring-amber-600/20'
@@ -344,7 +412,10 @@ export default function JoinMessPage() {
                             type="radio"
                             name="plan"
                             checked={isSelected}
-                            onChange={() => setSelectedPlanId(plan.id)}
+                            onChange={() => {
+                              if (selectedPlanId !== plan.id) setAppliedPromo(null);
+                              setSelectedPlanId(plan.id);
+                            }}
                             className="h-4 w-4 accent-amber-600"
                           />
                           <div>
@@ -432,16 +503,110 @@ export default function JoinMessPage() {
               </div>
             </div>
 
-            {/* STEP 3: PAYMENT METHOD */}
-            <div className="rounded-3xl border border-amber-950/10 bg-white p-6 shadow-sm">
+            {/* STEP 3: OFFERS, FULFILLMENT & PAYMENT METHOD */}
+            <div className="rounded-3xl border border-amber-950/10 bg-white p-6 shadow-sm space-y-5">
               <div className="flex items-center gap-2">
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600 text-white text-xs font-bold">
                   3
                 </span>
-                <h3 className="text-base font-bold text-slate-900">Payment Option</h3>
+                <h3 className="text-base font-bold text-slate-900">Offers &amp; Payment</h3>
               </div>
 
-              <div className="mt-4 space-y-3">
+              {provider?.supports_delivery && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Truck size={14} className="text-amber-700" /> Fulfillment Preference
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentMode('pickup')}
+                      className={`rounded-xl px-3 py-2 text-xs font-bold border transition ${
+                        fulfillmentMode === 'pickup'
+                          ? 'border-amber-600 bg-white text-amber-900'
+                          : 'border-slate-200 bg-transparent text-slate-600'
+                      }`}
+                    >
+                      Dine-in / Counter Pickup
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentMode('delivery')}
+                      className={`rounded-xl px-3 py-2 text-xs font-bold border transition ${
+                        fulfillmentMode === 'delivery'
+                          ? 'border-amber-600 bg-white text-amber-900'
+                          : 'border-slate-200 bg-transparent text-slate-600'
+                      }`}
+                    >
+                      Tiffin Delivery
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-slate-200 p-4 space-y-2.5">
+                <label htmlFor="join-promo" className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                  <Tag size={14} className="text-orange-600" /> Apply Promo Code
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="join-promo"
+                    type="text"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                    placeholder="Enter coupon code"
+                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs font-mono uppercase text-slate-900 outline-none focus:border-amber-600"
+                  />
+                  {appliedPromo ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppliedPromo(null);
+                        setPromoCode('');
+                        setPromoError('');
+                      }}
+                      className="rounded-xl border border-slate-300 px-3.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={promoApplying || !promoCode.trim()}
+                      onClick={() => applyPromo()}
+                      className="rounded-xl bg-slate-900 px-4 text-xs font-bold text-white hover:bg-slate-800 disabled:bg-slate-300"
+                    >
+                      {promoApplying ? 'Checking...' : 'Apply'}
+                    </button>
+                  )}
+                </div>
+
+                {availablePromos.length > 0 && !appliedPromo && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {availablePromos.slice(0, 4).map((p) => (
+                      <button
+                        key={p.code}
+                        type="button"
+                        onClick={() => applyPromo(p.code)}
+                        className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-900 hover:bg-amber-100"
+                      >
+                        {p.code}
+                        {p.flat_discount_paise
+                          ? ` · Save ₹${Math.round(p.flat_discount_paise / 100)}`
+                          : p.discount_percent
+                          ? ` · ${p.discount_percent}% OFF`
+                          : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {appliedPromo && (
+                  <p className="text-[11px] font-semibold text-emerald-700">{appliedPromo.message}</p>
+                )}
+                {promoError && <p className="text-[11px] font-semibold text-red-600">{promoError}</p>}
+              </div>
+
+              <div className="space-y-3">
                 <label
                   onClick={() => setPaymentMode('cashfree')}
                   className={`flex items-center gap-3 p-3.5 rounded-2xl border cursor-pointer transition ${
@@ -498,8 +663,33 @@ export default function JoinMessPage() {
               </div>
             )}
 
-            {/* SUBMIT BUTTON */}
+            {/* SUMMARY & SUBMIT BUTTON */}
             <div className="space-y-3 pt-2">
+              {selectedPlan && (
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs space-y-1">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Plan Subtotal</span>
+                    <span>₹{(basePlanPaise / 100).toLocaleString('en-IN')}</span>
+                  </div>
+                  {discountPaise > 0 && (
+                    <div className="flex justify-between font-semibold text-emerald-700">
+                      <span>Promo Discount ({appliedPromo?.code})</span>
+                      <span>-₹{(discountPaise / 100).toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                  {platformFeePaise > 0 && (
+                    <div className="flex justify-between text-slate-600">
+                      <span>Platform Fee</span>
+                      <span>₹{(platformFeePaise / 100).toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between border-t border-slate-100 pt-1.5 text-sm font-black text-slate-950">
+                    <span>Total Payable</span>
+                    <span>₹{(finalPayablePaise / 100).toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={submitting}
@@ -510,8 +700,8 @@ export default function JoinMessPage() {
                   {submitting
                     ? (paymentMode === 'cashfree' ? 'Opening Cashfree Checkout...' : 'Registering Pass...')
                     : paymentMode === 'cashfree'
-                    ? `Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} Online (Cashfree)`
-                    : `Confirm Pass · Pay ₹${selectedPlan ? (selectedPlan.price_paise / 100).toLocaleString('en-IN') : '0'} on Counter`}
+                    ? `Pay ₹${(finalPayablePaise / 100).toLocaleString('en-IN')} Online (Cashfree)`
+                    : `Confirm Pass · Pay ₹${(finalPayablePaise / 100).toLocaleString('en-IN')} on Counter`}
                 </span>
               </button>
 

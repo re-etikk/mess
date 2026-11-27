@@ -315,7 +315,7 @@ export async function POST(req: NextRequest) {
 
     const needsProfileSetup = !profile?.display_name || String(profile.display_name).trim().length === 0;
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       success: true,
       verified: true,
       verification_token: verificationToken,
@@ -334,6 +334,14 @@ export async function POST(req: NextRequest) {
       provider: providerInfo,
       message: 'OTP verified successfully.',
     });
+    res.cookies.set('thali_session_token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 30 * 86400,
+      secure: process.env.NODE_ENV === 'production',
+    });
+    return res;
   } catch (e: any) {
     console.error('OTP verify error:', e?.message);
     return NextResponse.json({ success: false, error: 'Unable to verify OTP. Please try again.' }, { status: 500 });

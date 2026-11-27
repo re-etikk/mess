@@ -127,12 +127,18 @@ export async function POST(req: NextRequest) {
         admin.from('provider_memberships').select('provider_id,role').eq('user_id', authUser.id).eq('active', true),
         admin
           .from('profiles')
-          .select('display_name,phone_e164,food_preference,default_locality,default_city')
+          .select('display_name,phone_e164,food_preference,default_locality,default_city,account_status')
           .eq('id', authUser.id)
           .maybeSingle(),
       ]);
 
       profileInfo = profile || null;
+      if ((profile as any)?.account_status === 'suspended' || (profile as any)?.account_status === 'blocked') {
+        return NextResponse.json(
+          { success: false, error: 'Your account has been suspended. Please contact Thali support.' },
+          { status: 403 }
+        );
+      }
       const roleNames = new Set((roles ?? []).map((row) => row.role));
       const managementMemberships = (memberships ?? []).filter((m) => ['owner', 'manager'].includes(m.role));
 
@@ -159,6 +165,13 @@ export async function POST(req: NextRequest) {
           .eq('id', managementMemberships[0].provider_id)
           .maybeSingle();
         if (prov) providerInfo = prov;
+      }
+
+      if (requestedRole && !calculatedRole && resolvedRole !== requestedRole) {
+        return NextResponse.json(
+          { success: false, error: `Your account does not have ${requestedRole} portal access.` },
+          { status: 403 }
+        );
       }
     } catch {}
   }
