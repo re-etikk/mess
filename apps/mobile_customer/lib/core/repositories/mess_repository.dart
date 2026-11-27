@@ -10,6 +10,7 @@ abstract interface class MessRepository {
     bool deliveryOnly = false,
     String? sort,
     String? dietary,
+    String? city,
   });
 
   Future<List<MessProvider>> searchProviders({
@@ -175,6 +176,11 @@ abstract interface class MessRepository {
   Future<Map<String, dynamic>> smartSearchParse(String query);
   Future<List<Map<String, dynamic>>> fetchNotifications({required String customerId});
   Future<void> markNotificationsRead({String? notificationId, String? customerId});
+  Future<Map<String, dynamic>> fetchAppConfig();
+  Future<List<Map<String, dynamic>>> fetchAnnouncements({String audience = 'customer'});
+  Future<List<Map<String, dynamic>>> fetchAvailablePromos({String? providerId, String orderContext = 'plan'});
+  Future<List<Map<String, dynamic>>> fetchSupportTickets();
+  Future<void> replySupportTicket({required String ticketId, required String message});
 }
 
 class RepositoryException implements Exception {

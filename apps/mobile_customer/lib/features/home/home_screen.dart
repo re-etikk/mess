@@ -43,7 +43,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
     });
     try {
-      var list = await AppStateScope.of(context).getProviders(
+      final appState = AppStateScope.of(context, listen: false);
+      appState.refreshRemoteConfig();
+      var list = await appState.getProviders(
         slot: _selectedSlot,
         minRating: _minRating,
         openNow: _openNowOnly,
@@ -311,13 +313,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Discover homemade meals near you',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, height: 1.15),
+                            Text(
+                              appState.heroHeadline,
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, height: 1.15),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Order a single plate today or save with monthly plans.',
+                              appState.heroSubheadline,
                               style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.92)),
                             ),
                           ],
@@ -459,6 +461,90 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 18),
+                if (appState.maintenanceMode)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFFECACA)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFFB91C1C)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              appState.maintenanceMessage.isNotEmpty
+                                  ? appState.maintenanceMessage
+                                  : 'Scheduled maintenance is underway. New checkouts may be paused briefly.',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF991B1B)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (appState.announcements.isNotEmpty) ...[
+                  SizedBox(
+                    height: 90,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: appState.announcements.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (_, idx) {
+                        final b = appState.announcements[idx];
+                        final promo = b['promo_code']?.toString() ?? '';
+                        return Container(
+                          width: 268,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: ThaliColors.primarySoft,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: ThaliColors.primary.withValues(alpha: 0.3)),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      b['title']?.toString() ?? 'Offer',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                                    ),
+                                  ),
+                                  if (promo.isNotEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(color: ThaliColors.primary, borderRadius: BorderRadius.circular(6)),
+                                      child: Text(promo, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white)),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Flexible(
+                                child: Text(
+                                  b['body']?.toString() ?? '',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11, color: ThaliColors.body),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 if (_loading)
                   const ThaliListSkeleton(itemCount: 3, cardHeight: 168)
                 else if (_error != null)
@@ -654,13 +740,35 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(
-                                            p.name,
-                                            style: TextStyle(
-                                              fontSize: 15.5,
-                                              fontWeight: FontWeight.w800,
-                                              color: isClosed ? Colors.white : ThaliColors.ink,
-                                            ),
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  p.name,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize: 15.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: isClosed ? Colors.white : ThaliColors.ink,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (p.isFeatured && !isClosed) ...[
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: ThaliColors.amberSoft,
+                                                    borderRadius: BorderRadius.circular(6),
+                                                  ),
+                                                  child: const Text(
+                                                    'Featured',
+                                                    style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: ThaliColors.amberDark),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                           const SizedBox(height: 2),
                                           Text(

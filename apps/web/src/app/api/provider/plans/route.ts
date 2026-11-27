@@ -197,24 +197,40 @@ export async function POST(req: NextRequest) {
   try {
     // If updating existing plan
     if (input.id) {
-      const { data: updated, error: updateError } = await db
+      const updatePayload = {
+        name: input.name,
+        description: input.description,
+        plan_type: planType,
+        duration_months: planType === 'fixed_period' ? durationMonths : null,
+        duration_days: durationDays,
+        meal_credits: planType === 'meal_credits' ? (input.meal_credits || 60) : null,
+        price_paise: pricePaise,
+        promo_price_paise: promoPricePaise,
+        daily_meal_limit: input.daily_meal_limit,
+        published: input.published !== false,
+        active: true,
+        updated_at: new Date().toISOString(),
+      };
+      let { data: updated, error: updateError } = await db
         .from('subscription_plans')
-        .update({
-          name: input.name,
-          description: input.description,
-          plan_type: planType,
-          duration_months: planType === 'fixed_period' ? durationMonths : null,
-          meal_credits: planType === 'meal_credits' ? (input.meal_credits || 60) : null,
-          price_paise: pricePaise,
-          promo_price_paise: promoPricePaise,
-          published: true,
-          active: true,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', input.id)
         .eq('provider_id', input.provider_id)
         .select('*')
         .single();
+
+      if (updateError?.code === '42703') {
+        const { duration_days: _omitted, ...legacyUpdate } = updatePayload;
+        const retry = await db
+          .from('subscription_plans')
+          .update(legacyUpdate)
+          .eq('id', input.id)
+          .eq('provider_id', input.provider_id)
+          .select('*')
+          .single();
+        updated = retry.data;
+        updateError = retry.error;
+      }
 
       if (!updateError && updated) {
         const adminClient = getAdminClient();
@@ -229,27 +245,40 @@ export async function POST(req: NextRequest) {
     const { data: provRow } = await db.from('providers').select('supports_delivery').eq('id', input.provider_id).maybeSingle();
 
     // Insert new plan
-    const { data: newPlan, error: insertError } = await db
+    const insertPayload = {
+      provider_id: input.provider_id,
+      name: input.name,
+      description: input.description || `${durationDays}-day mess subscription`,
+      plan_type: planType,
+      duration_months: planType === 'fixed_period' ? durationMonths : null,
+      duration_days: durationDays,
+      meal_credits: planType === 'meal_credits' ? (input.meal_credits || 60) : null,
+      price_paise: pricePaise,
+      promo_price_paise: promoPricePaise,
+      daily_meal_limit: input.daily_meal_limit,
+      allow_pickup: true,
+      allow_delivery: provRow?.supports_delivery === true,
+      published: input.published !== false,
+      active: true,
+      cancellation_policy: 'Standard refund terms apply.',
+      missed_meal_policy: 'A meal credit is consumed only after a verified on-premise redemption; unused entitlements expire under the plan validity terms.',
+    };
+    let { data: newPlan, error: insertError } = await db
       .from('subscription_plans')
-      .insert({
-        provider_id: input.provider_id,
-        name: input.name,
-        description: input.description || `${durationDays}-day mess subscription`,
-        plan_type: planType,
-        duration_months: planType === 'fixed_period' ? durationMonths : null,
-        meal_credits: planType === 'meal_credits' ? (input.meal_credits || 60) : null,
-        price_paise: pricePaise,
-        promo_price_paise: promoPricePaise,
-        daily_meal_limit: input.daily_meal_limit,
-        allow_pickup: true,
-        allow_delivery: provRow?.supports_delivery === true,
-        published: input.published !== false,
-        active: true,
-        cancellation_policy: 'Standard refund terms apply.',
-        missed_meal_policy: 'A meal credit is consumed only after a verified on-premise redemption; unused entitlements expire under the plan validity terms.',
-      })
+      .insert(insertPayload)
       .select('*')
       .single();
+
+    if (insertError?.code === '42703') {
+      const { duration_days: _omitted, ...legacyInsert } = insertPayload;
+      const retry = await db
+        .from('subscription_plans')
+        .insert(legacyInsert)
+        .select('*')
+        .single();
+      newPlan = retry.data;
+      insertError = retry.error;
+    }
 
     if (insertError) {
       console.warn('DB insert plan error (using memory store fallback):', insertError.message);

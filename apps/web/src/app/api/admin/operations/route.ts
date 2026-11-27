@@ -15,7 +15,7 @@ const sources = {
 type SourceKey = keyof typeof sources;
 
 export async function GET(req: NextRequest) {
-  const access = await requireAdmin(req);
+  const access = await requireAdmin(req, 'operations.read');
   if (!access.ok) return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   const params = new URL(req.url).searchParams;
   const source = params.get('source') as SourceKey | null;

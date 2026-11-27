@@ -290,13 +290,22 @@ export interface MessReview {
 export interface PromoCode {
   id: string;
   code: string;
-  provider_id?: string;
+  provider_id?: string | null;
   title: string;
   description?: string;
   discount_percent?: number;
   flat_discount_paise?: number;
   min_order_paise: number;
   max_discount_paise?: number;
+  usage_limit?: number | null;
+  times_used?: number;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  applicable_to_plans?: boolean;
+  applicable_to_daily?: boolean;
+  first_order_only?: boolean;
+  max_uses_per_user?: number | null;
+  show_in_app?: boolean;
   is_active: boolean;
 }
 
@@ -317,7 +326,7 @@ export interface CustomerNotification {
   customer_id: string;
   title: string;
   message: string;
-  notification_type: 'meal_redemption' | 'plan_expiry' | 'menu_update' | 'billing' | 'offer' | 'system';
+  notification_type: 'meal_redemption' | 'plan_expiry' | 'menu_update' | 'billing' | 'offer' | 'system' | 'subscription';
   is_read: boolean;
   created_at: string;
 }

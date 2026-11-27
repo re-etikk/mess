@@ -275,7 +275,7 @@ export default async function ProviderPage({ params }: { params: { id: string } 
             )}
 
             <div className="mt-6 rounded-2xl bg-amber-50/80 border border-amber-200 p-4 text-xs text-amber-950 leading-5">
-              <strong>Notice:</strong> Online checkout and payment gateway reconciliation are being connected. Entitlements are created only upon verified payment confirmation. No payment is deducted without verification.
+              <strong>Verified Pass Checkout:</strong> Subscribe securely online via Cashfree or request Pay-at-Counter verification directly with the kitchen.
             </div>
           </section>
         </div>

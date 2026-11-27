@@ -49,6 +49,7 @@ class HttpMessRepository implements MessRepository {
     bool deliveryOnly = false,
     String? sort,
     String? dietary,
+    String? city,
   }) async {
     final qp = <String, String>{};
     if (lat != null && lng != null) {
@@ -61,6 +62,7 @@ class HttpMessRepository implements MessRepository {
     if (deliveryOnly) qp['delivery_only'] = 'true';
     if (sort != null && sort.isNotEmpty) qp['sort'] = sort;
     if (dietary != null && dietary.isNotEmpty && dietary != 'all') qp['dietary'] = dietary;
+    if (city != null && city.trim().isNotEmpty) qp['city'] = city.trim();
 
     final uri = Uri.parse('$baseUrl/api/mess/search').replace(queryParameters: qp.isEmpty ? null : qp);
     http.Response response;
@@ -1183,6 +1185,9 @@ class HttpMessRepository implements MessRepository {
       dietaryTypes: (json['dietary_types'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
       disposableFeeInr: ((json['disposable_fee_paise'] as num?)?.toInt() ?? 500) ~/ 100,
       maxSkipsPerWeek: (json['max_skips_per_week'] as num?)?.toInt() ?? 2,
+      isFeatured: json['is_featured'] == true,
+      featuredRank: (json['featured_rank'] as num?)?.toInt() ?? 999,
+      isVerifiedBadge: json['is_verified_badge'] != false,
     );
   }
 
@@ -1273,5 +1278,83 @@ class HttpMessRepository implements MessRepository {
           )
           .timeout(const Duration(seconds: 8));
     } catch (_) {}
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchAppConfig() async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/app-config');
+      final resp = await http.get(uri, headers: {'Cache-Control': 'no-cache'}).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final map = jsonDecode(resp.body);
+        if (map is Map<String, dynamic> && map['config'] is Map<String, dynamic>) {
+          return map['config'] as Map<String, dynamic>;
+        }
+      }
+    } catch (_) {}
+    return const {};
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchAnnouncements({String audience = 'customer'}) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/announcements?audience=${Uri.encodeComponent(audience)}');
+      final resp = await http.get(uri, headers: {'Cache-Control': 'no-cache'}).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final map = jsonDecode(resp.body);
+        if (map is Map<String, dynamic> && map['announcements'] is List) {
+          return (map['announcements'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchAvailablePromos({String? providerId, String orderContext = 'plan'}) async {
+    try {
+      final qp = <String, String>{'order_context': orderContext};
+      if (providerId != null && providerId.isNotEmpty) qp['provider_id'] = providerId;
+      final uri = Uri.parse('$baseUrl/api/promos/validate').replace(queryParameters: qp);
+      final resp = await http.get(uri, headers: {'Cache-Control': 'no-cache'}).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final map = jsonDecode(resp.body);
+        if (map is Map<String, dynamic> && map['promos'] is List) {
+          return (map['promos'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchSupportTickets() async {
+    if (authToken.isEmpty) return const [];
+    try {
+      final uri = Uri.parse('$baseUrl/api/support/ticket');
+      final resp = await http.get(uri, headers: _authHeaders(noCache: true)).timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final map = jsonDecode(resp.body);
+        if (map is Map<String, dynamic> && map['tickets'] is List) {
+          return (map['tickets'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  @override
+  Future<void> replySupportTicket({required String ticketId, required String message}) async {
+    final uri = Uri.parse('$baseUrl/api/support/ticket');
+    final resp = await http
+        .patch(
+          uri,
+          headers: _authHeaders(json: true),
+          body: jsonEncode({'ticket_id': ticketId, 'message': message.trim()}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw const RepositoryException('Could not send support reply.', code: 'ticket_reply_failed');
+    }
   }
 }

@@ -10,6 +10,7 @@ import {
   resolveAuthoritativeSingleMealOrder,
   resolveVerifiedUpgradeQuote,
 } from '@/lib/checkout-pricing';
+import { getPlatformAppConfig } from '@/lib/app-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,10 +78,13 @@ export async function POST(req: NextRequest) {
       try {
         const { data: prov } = await admin
           .from('providers')
-          .select('id, display_name, supports_delivery, disposable_fee_paise')
+          .select('id, display_name, status, supports_delivery, disposable_fee_paise')
           .eq('id', resolvedProviderId)
           .maybeSingle();
         if (prov) {
+          if (prov.status === 'suspended' || prov.status === 'rejected') {
+            return NextResponse.json({ success: false, error: 'This kitchen is currently unavailable for new orders.' }, { status: 403 });
+          }
           providerName = prov.display_name;
           providerSupportsDelivery = prov.supports_delivery === true;
           disposableFeePaise = Math.max(0, Number(prov.disposable_fee_paise ?? 500));
@@ -198,6 +202,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const appCfg = await getPlatformAppConfig(admin);
     const packagingFeePaise =
       (purpose === 'subscription_purchase' || purpose === 'single_meal_purchase') &&
       effectiveFulfillmentMode === 'delivery' &&
@@ -205,13 +210,23 @@ export async function POST(req: NextRequest) {
         ? disposableFeePaise * (purpose === 'single_meal_purchase' ? (initialCredits || 1) : durDays)
         : 0;
 
-    const grossPaise = basePlanPricePaise + packagingFeePaise + extraAddOnsPaise;
+    const baseGross = basePlanPricePaise + packagingFeePaise + extraAddOnsPaise;
+    const deliveryFeePaise =
+      effectiveFulfillmentMode === 'delivery' &&
+      appCfg.default_delivery_fee_paise > 0 &&
+      (appCfg.free_delivery_above_paise <= 0 || baseGross < appCfg.free_delivery_above_paise)
+        ? appCfg.default_delivery_fee_paise
+        : 0;
+    const platformFeePaise = appCfg.platform_fee_paise > 0 ? appCfg.platform_fee_paise : 0;
+    const grossPaise = baseGross + deliveryFeePaise + platformFeePaise;
 
     const promoResult = await resolveAuthoritativeDiscountPaise({
       admin,
       providerId: resolvedProviderId,
       promoCode,
       orderAmountPaise: grossPaise,
+      customerId: resolvedCustomerId,
+      orderContext: purpose === 'single_meal_purchase' ? 'daily' : 'plan',
     });
     const verifiedDiscountPaise = promoResult.discountPaise;
     const payablePaise = Math.max(100, grossPaise - verifiedDiscountPaise);
@@ -256,6 +271,7 @@ export async function POST(req: NextRequest) {
           promo_code: promoResult.code || null,
           discount_paise: verifiedDiscountPaise,
           payment_mode: 'cashfree_online',
+          ...(upgradeFromSubId ? { upgrade_from_subscription_id: upgradeFromSubId } : {}),
         });
         if (resExt.error) {
           await admin.from('subscriptions').insert(baseSubRow);

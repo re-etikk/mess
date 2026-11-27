@@ -3,7 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:smart_tiffin_provider/core/theme/thali_partner_theme.dart';
 import 'package:smart_tiffin_provider/core/widgets/partner_widgets.dart';
+import 'package:smart_tiffin_provider/features/daily_qr_tab.dart';
 import 'package:smart_tiffin_provider/features/partner_auth_screens.dart';
+import 'package:smart_tiffin_provider/models/models.dart';
 import 'package:smart_tiffin_provider/main.dart';
 
 void main() {
@@ -41,5 +43,26 @@ void main() {
     for (final s in states) {
       expect(find.text(s.$2), findsOneWidget);
     }
+  });
+
+  testWidgets('DailyQrTab renders Breakfast, Lunch, Snacks & Dinner selector chips', (tester) async {
+    const sess = ProviderSession(
+      userId: 'user-qr-test',
+      providerId: 'prov-qr-test',
+      businessName: 'Test Mess',
+      email: 'partner@test.local',
+      token: 'tok-qr',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThaliPartnerTheme.light,
+        home: const DailyQrTab(session: sess),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('Breakfast'), findsOneWidget);
+    expect(find.text('Lunch'), findsOneWidget);
+    expect(find.text('Snacks'), findsOneWidget);
+    expect(find.text('Dinner'), findsOneWidget);
   });
 }

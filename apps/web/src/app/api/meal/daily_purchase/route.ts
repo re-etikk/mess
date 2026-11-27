@@ -8,6 +8,8 @@ import {
   resolveAuthoritativeDiscountPaise,
   resolveAuthoritativeSingleMealOrder,
 } from '@/lib/checkout-pricing';
+import { getPlatformAppConfig } from '@/lib/app-config';
+import { recordPromoRedemption } from '@/lib/promo-engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +57,9 @@ export async function POST(req: NextRequest) {
       if (!provider) {
         return NextResponse.json({ success: false, error: 'Kitchen not found.' }, { status: 404 });
       }
+      if (provider.status === 'suspended' || provider.status === 'rejected') {
+        return NextResponse.json({ success: false, error: 'This kitchen is currently unavailable for new orders.' }, { status: 403 });
+      }
       providerDisplayName = provider.display_name || 'Mess Partner';
       providerSupportsDelivery = provider.supports_delivery === true;
       disposableFeePaise = Math.max(0, Number(provider.disposable_fee_paise ?? 500));
@@ -79,16 +84,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: resolved.error }, { status: resolved.status });
     }
 
+    const appCfg = await getPlatformAppConfig(admin);
     const packagingFeePaise =
       effectiveFulfillmentMode === 'delivery' && packagingPreference === 'disposable'
         ? disposableFeePaise * resolved.totalMealsCount
         : 0;
-    const grossPaise = resolved.baseMealsPaise + resolved.verifiedAddOnsPaise + packagingFeePaise;
+    const baseMealGross = resolved.baseMealsPaise + resolved.verifiedAddOnsPaise + packagingFeePaise;
+    const deliveryFeePaise =
+      effectiveFulfillmentMode === 'delivery' &&
+      appCfg.default_delivery_fee_paise > 0 &&
+      (appCfg.free_delivery_above_paise <= 0 || baseMealGross < appCfg.free_delivery_above_paise)
+        ? appCfg.default_delivery_fee_paise
+        : 0;
+    const platformFeePaise = appCfg.platform_fee_paise > 0 ? appCfg.platform_fee_paise : 0;
+    const grossPaise = baseMealGross + deliveryFeePaise + platformFeePaise;
     const promoRes = await resolveAuthoritativeDiscountPaise({
       admin,
       providerId,
       promoCode,
       orderAmountPaise: grossPaise,
+      customerId,
+      orderContext: 'daily',
     });
     const finalPricePaise = Math.max(0, grossPaise - promoRes.discountPaise);
     const planDisplayName = `Single Order (${resolved.itemsSummary})`;
@@ -219,6 +235,17 @@ export async function POST(req: NextRequest) {
       amount_inr: amountInr,
       subscription_id: subId,
     });
+
+    if (promoRes.code && promoRes.discountPaise > 0) {
+      await recordPromoRedemption({
+        admin,
+        code: promoRes.code,
+        customerId,
+        providerId,
+        subscriptionId: subId,
+        discountPaise: promoRes.discountPaise,
+      });
+    }
 
     return NextResponse.json({
       success: true,

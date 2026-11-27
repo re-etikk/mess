@@ -198,7 +198,8 @@ class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
                           final name = item['customer_name']?.toString() ?? 'Subscriber';
                           final phone = item['customer_phone']?.toString() ?? '';
                           final plan = item['plan_name']?.toString() ?? 'Plan';
-                          final priceInr = ((item['price_paid_paise'] as num?)?.toInt() ?? 0) ~/ 100;
+                          final priceInr = ((item['price_paise'] ?? item['price_paid_paise']) as num?)?.toInt() ?? 0;
+                          final displayPriceInr = priceInr > 0 ? priceInr ~/ 100 : ((item['price_inr'] as num?)?.toInt() ?? 0);
                           final subId = item['id']?.toString() ?? '';
 
                           return CardSurface(
@@ -218,7 +219,7 @@ class _PendingApprovalsScreenState extends State<PendingApprovalsScreen> {
                                         ],
                                       ),
                                     ),
-                                    Text(rupee(priceInr), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
+                                    Text(rupee(displayPriceInr), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: ThaliColors.primary)),
                                   ],
                                 ),
                                 const SizedBox(height: 10),

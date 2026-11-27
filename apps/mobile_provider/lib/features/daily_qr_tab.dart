@@ -21,13 +21,13 @@ class _DailyQrTabState extends State<DailyQrTab> {
   bool _loading = true;
   List<Map<String, dynamic>> _todayRedemptions = [];
 
-  static const _slots = ['BREAKFAST', 'LUNCH', 'DINNER'];
+  static const _slots = ['BREAKFAST', 'LUNCH', 'SNACKS', 'DINNER'];
 
   @override
   void initState() {
     super.initState();
     final hour = DateTime.now().hour;
-    _slot = hour < 11 ? 'BREAKFAST' : (hour < 16 ? 'LUNCH' : 'DINNER');
+    _slot = hour < 11 ? 'BREAKFAST' : (hour < 16 ? 'LUNCH' : (hour < 19 ? 'SNACKS' : 'DINNER'));
     _loadQr();
   }
 

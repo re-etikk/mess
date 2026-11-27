@@ -60,6 +60,14 @@ class AppState extends ChangeNotifier {
   List<AppNotification> get notifications => List.unmodifiable(_notifications);
   int get unreadNotificationsCount => _notifications.where((n) => !n.isRead).length;
 
+  String heroHeadline = 'Discover homemade meals near you';
+  String heroSubheadline = 'Order a single plate today or save with monthly plans.';
+  bool maintenanceMode = false;
+  String maintenanceMessage = '';
+  int platformFeeInr = 0;
+  int deliveryFeeInr = 0;
+  List<Map<String, dynamic>> announcements = const [];
+
   Map<String, CartMealSelection> get mealCart => Map.unmodifiable(_mealCart);
   int get mealCartCount => _mealCart.values.fold(0, (s, item) => s + item.quantity);
   int get mealCartPerDayTotal => _mealCart.values.fold(0, (s, item) => s + item.total);
@@ -132,6 +140,7 @@ class AppState extends ChangeNotifier {
           await _loadNotifications();
           refreshSubscriptionsFromServer();
           refreshNotificationsFromServer();
+          refreshRemoteConfig();
         }
       }
     } catch (_) {}
@@ -269,6 +278,29 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> refreshRemoteConfig() async {
+    try {
+      final results = await Future.wait([
+        repository.fetchAppConfig(),
+        repository.fetchAnnouncements(audience: 'customer'),
+      ]);
+      final cfg = results[0] as Map<String, dynamic>;
+      final banners = results[1] as List<Map<String, dynamic>>;
+      if (cfg.isNotEmpty) {
+        final h = cfg['hero_headline']?.toString().trim() ?? '';
+        final sh = cfg['hero_subheadline']?.toString().trim() ?? '';
+        if (h.isNotEmpty) heroHeadline = h;
+        if (sh.isNotEmpty) heroSubheadline = sh;
+        maintenanceMode = cfg['maintenance_mode'] == true;
+        maintenanceMessage = cfg['maintenance_message']?.toString() ?? '';
+        platformFeeInr = ((cfg['platform_fee_paise'] as num?)?.toInt() ?? 0) ~/ 100;
+        deliveryFeeInr = ((cfg['default_delivery_fee_paise'] as num?)?.toInt() ?? 0) ~/ 100;
+      }
+      announcements = banners;
+      notifyListeners();
+    } catch (_) {}
+  }
+
   Future<List<MessProvider>> getProviders({
     String? slot,
     double? minRating,
@@ -286,6 +318,7 @@ class AppState extends ChangeNotifier {
       deliveryOnly: deliveryOnly,
       sort: sort,
       dietary: dietary,
+      city: selectedCity.isNotEmpty ? selectedCity : null,
     );
     _cachedProviders = providers;
     if (_cachedProviders.isNotEmpty && (selectedProviderId.isEmpty || !_cachedProviders.any((p) => p.id == selectedProviderId))) {

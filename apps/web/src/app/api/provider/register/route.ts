@@ -4,6 +4,7 @@ import { getClientIp, signSessionToken } from '@/lib/auth-session';
 import { checkRateLimit } from '@/lib/rate-limiter';
 import { sendProviderApprovalNotice } from '@/lib/notifications';
 import { platformStore } from '@/lib/platform-service';
+import { getPlatformAppConfig } from '@/lib/app-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,6 +98,10 @@ export async function POST(req: NextRequest) {
       .replace(/^-|-$/g, '');
     const slug = `${slugBase || 'kitchen'}-${Date.now().toString(36).slice(-4)}`;
 
+    const appCfg = await getPlatformAppConfig(admin);
+    const requiresApproval = appCfg.require_provider_approval !== false;
+    const initialStatus: 'pending_review' | 'active' = requiresApproval ? 'pending_review' : 'active';
+
     const { data: prov, error: provErr } = await admin
       .from('providers')
       .insert({
@@ -112,8 +117,8 @@ export async function POST(req: NextRequest) {
         pincode,
         supports_pickup: supportsPickup,
         supports_delivery: supportsDelivery,
-        status: 'active',
-        approved_at: new Date().toISOString(),
+        status: initialStatus,
+        approved_at: initialStatus === 'active' ? new Date().toISOString() : null,
       })
       .select('*')
       .single();
@@ -151,7 +156,7 @@ export async function POST(req: NextRequest) {
       total_reviews: 0,
       cuisines: ['Home-style Indian'],
       dietary_types: ['veg'],
-      status: 'active',
+      status: initialStatus,
       created_at: new Date().toISOString(),
     });
 
@@ -170,16 +175,27 @@ export async function POST(req: NextRequest) {
       name: ownerName,
     });
 
-    return NextResponse.json(
+    const regRes = NextResponse.json(
       {
         success: true,
+        requires_approval: requiresApproval,
         token,
-        user: { id: userId, email, name: ownerName, role: 'provider', provider_id: prov.id, provider_name: businessName },
+        user: { id: userId, email, name: ownerName, role: 'provider', provider_id: prov.id, provider_name: businessName, provider_status: initialStatus },
         provider: prov,
-        message: 'Kitchen registered and ready.',
+        message: requiresApproval
+          ? 'Kitchen application submitted for admin verification.'
+          : 'Kitchen registered and ready.',
       },
       { status: 201 }
     );
+    regRes.cookies.set('thali_session_token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 30 * 86400,
+      secure: process.env.NODE_ENV === 'production',
+    });
+    return regRes;
   } catch (e: any) {
     return NextResponse.json(
       { success: false, error: e?.message || 'Kitchen registration failed. Please try again.' },

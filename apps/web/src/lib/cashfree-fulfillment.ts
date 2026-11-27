@@ -3,6 +3,7 @@ import { platformStore } from './platform-service';
 import { addPartnerNotification } from './partner-notifications';
 import { sendCustomerInvoiceEmail } from './notifications';
 import { cashfreeOrderStore, type PendingCashfreeOrderMeta } from './cashfree';
+import { recordPromoRedemption } from './promo-engine';
 
 export interface FulfillCashfreeOrderInput {
   orderId: string;
@@ -173,6 +174,19 @@ export async function fulfillCashfreePaidOrder(
           await admin.from('subscriptions').update({ status: 'cancelled' }).eq('id', upgradeFromId);
         } catch {}
       }
+    }
+
+    const usedPromo = String(activatedSub?.promo_code || '').trim();
+    const promoDisc = Number(activatedSub?.discount_paise || 0);
+    if (usedPromo && promoDisc > 0 && customerId) {
+      await recordPromoRedemption({
+        admin,
+        code: usedPromo,
+        customerId,
+        providerId,
+        subscriptionId,
+        discountPaise: promoDisc,
+      });
     }
   }
 

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPartnerNotifications, markPartnerNotificationRead, addPartnerNotification } from '@/lib/partner-notifications';
+import {
+  getPersistedPartnerNotifications,
+  markPartnerNotificationRead,
+  addPartnerNotification,
+} from '@/lib/partner-notifications';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 import { getAdminClient } from '@/lib/supabase/admin';
 
@@ -18,9 +22,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status });
   }
 
-  let notifications = getPartnerNotifications(providerId);
+  let notifications = await getPersistedPartnerNotifications(providerId);
 
-  // If in-memory notifications list is empty (e.g. server restart), reconstruct from DB / platformStore
+  // If still empty (e.g. brand-new kitchen), hydrate from recent subscriptions
   if (notifications.length === 0) {
     const admin = getAdminClient();
     if (admin) {
@@ -47,10 +51,10 @@ export async function GET(req: NextRequest) {
               subscription_id: s.id,
             });
           }
+          notifications = await getPersistedPartnerNotifications(providerId);
         }
       } catch (_) {}
     }
-    notifications = getPartnerNotifications(providerId);
   }
 
   const unreadCount = notifications.filter((n) => !n.read).length;
