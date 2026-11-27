@@ -36,9 +36,9 @@ class _StubRepository extends HttpMessRepository {
 
   @override
   Future<Map<String, dynamic>> fetchAppConfig() async => {
-        'hero_headline': 'Fresh home thalis curated daily',
-        'hero_subheadline': 'Zero platform fees on every subscription.',
-        'maintenance_mode': false,
+        'hero_title': 'Fresh home thalis curated daily',
+        'hero_subtitle': 'Zero platform fees on every subscription.',
+        'customer_maintenance': false,
         'platform_fee_paise': 0,
         'default_delivery_fee_paise': 0,
       };
