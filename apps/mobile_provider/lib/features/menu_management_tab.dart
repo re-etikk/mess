@@ -84,9 +84,158 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
     }
   }
 
+  Future<void> _editSlotRateSheet() async {
+    final slotMap = _currentSlotMap();
+    final currentRate = (slotMap?['single_meal_price_inr'] as num?)?.toInt();
+    final rateCtrl = TextEditingController(text: currentRate != null && currentRate > 0 ? '$currentRate' : '');
+    final slotTitle = _selectedSlot[0].toUpperCase() + _selectedSlot.substring(1);
+    bool saving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ThaliColors.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 14,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: ThaliColors.stroke, borderRadius: BorderRadius.circular(99)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('$slotTitle Single-Meal Rate', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+              const SizedBox(height: 6),
+              const Text(
+                'Set the per-plate price for walk-in / single orders. Enter 0 to allow subscription plans only.',
+                style: TextStyle(fontSize: 12.5, color: ThaliColors.muted),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: rateCtrl,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Price per meal (INR)',
+                  hintText: 'e.g. 50',
+                  prefixText: '₹ ',
+                ),
+              ),
+              const SizedBox(height: 16),
+              PartnerActionButton(
+                label: 'Save Meal Rate',
+                loading: saving,
+                onPressed: () async {
+                  final parsed = int.tryParse(rateCtrl.text.trim()) ?? 0;
+                  setSheetState(() => saving = true);
+                  try {
+                    await ProviderApiService.setSlotPrice(
+                      providerId: widget.session.providerId,
+                      slot: _selectedSlot,
+                      priceInr: parsed > 0 ? parsed : 0,
+                    );
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) {
+                      showPartnerNotice(
+                        context,
+                        parsed > 0 ? '$slotTitle single-meal rate set to ₹$parsed' : '$slotTitle single-meal rate cleared',
+                      );
+                      await _loadMenu();
+                    }
+                  } catch (e) {
+                    setSheetState(() => saving = false);
+                    if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update meal rate'), isError: true);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editExtraItemSheet(Map<String, dynamic> extra) async {
+    final nameCtrl = TextEditingController(text: extra['name']?.toString() ?? '');
+    final priceCtrl = TextEditingController(text: ((extra['price'] as num?)?.toInt() ?? 0).toString());
+    bool saving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: ThaliColors.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 14,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 6),
+              const Text('Edit Item Price', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+              const SizedBox(height: 14),
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Item Name')),
+              const SizedBox(height: 12),
+              TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Price (INR)', prefixText: '₹ '),
+              ),
+              const SizedBox(height: 16),
+              PartnerActionButton(
+                label: 'Save Item',
+                loading: saving,
+                onPressed: () async {
+                  final nextName = nameCtrl.text.trim();
+                  final nextPrice = int.tryParse(priceCtrl.text.trim()) ?? 0;
+                  if (nextName.isEmpty) return;
+                  setSheetState(() => saving = true);
+                  try {
+                    await ProviderApiService.updateMenuItem(
+                      providerId: widget.session.providerId,
+                      itemId: extra['id']?.toString(),
+                      name: nextName,
+                      price: nextPrice,
+                    );
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) {
+                      showPartnerNotice(context, 'Updated $nextName');
+                      await _loadMenu();
+                    }
+                  } catch (e) {
+                    setSheetState(() => saving = false);
+                    if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'update item'), isError: true);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _addItemSheet() async {
     final nameCtrl = TextEditingController();
-    final priceCtrl = TextEditingController(text: '30');
+    final priceCtrl = TextEditingController(text: '20');
     String kind = 'included'; // included | addon | special
     String slot = _selectedSlot;
     String day = _selectedDay;
@@ -380,6 +529,57 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                         physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 118),
                         children: [
+                          Builder(
+                            builder: (_) {
+                              final rate = (slotMap?['single_meal_price_inr'] as num?)?.toInt();
+                              final hasRate = rate != null && rate > 0;
+                              final slotTitle = _selectedSlot[0].toUpperCase() + _selectedSlot.substring(1);
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: CardSurface(
+                                  color: hasRate ? ThaliColors.primarySoft : ThaliColors.card,
+                                  borderColor: hasRate ? ThaliColors.primary.withValues(alpha: 0.4) : null,
+                                  onTap: _editSlotRateSheet,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 36,
+                                        height: 36,
+                                        decoration: BoxDecoration(
+                                          color: ThaliColors.card,
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Icon(Icons.sell_outlined, size: 18, color: ThaliColors.primary),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '$slotTitle Single-Meal Rate',
+                                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: ThaliColors.ink),
+                                            ),
+                                            Text(
+                                              hasRate ? '₹$rate / plate · Pay-per-meal active' : 'Subscription plans only (tap to set rate)',
+                                              style: const TextStyle(fontSize: 11.5, color: ThaliColors.body),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Text(
+                                        hasRate ? '₹$rate' : 'Set ₹',
+                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: ThaliColors.primaryDark),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Icon(Icons.edit_outlined, size: 16, color: ThaliColors.primaryDark),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                           SectionHeader(title: 'Main Thali Dishes (${included.length})', actionLabel: '+ Add', onAction: _addItemSheet),
                           const SizedBox(height: 8),
                           if (included.isEmpty)
@@ -452,6 +652,10 @@ class _MenuManagementTabState extends State<MenuManagementTab> {
                                             Text('${rupee(price)} add-on', style: const TextStyle(fontSize: 12, color: ThaliColors.primaryDark, fontWeight: FontWeight.w600)),
                                           ],
                                         ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.edit_outlined, size: 18, color: ThaliColors.primary),
+                                        onPressed: () => _editExtraItemSheet(ex),
                                       ),
                                       Switch.adaptive(
                                         activeColor: ThaliColors.primary,

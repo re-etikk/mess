@@ -63,11 +63,25 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
       if (provider) {
         const todayWeekday = getIstWeekday();
-        const [{ data: rawSlots }, { data: dbItems }, { data: todayHour }] = await Promise.all([
-          db.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', provider.id).order('starts_at_local'),
+        const [slotsPrimary, { data: dbItems }, { data: todayHour }] = await Promise.all([
+          db
+            .from('meal_slots')
+            .select('id,name,starts_at_local,ends_at_local,active,single_meal_price_paise')
+            .eq('provider_id', provider.id)
+            .order('starts_at_local'),
           db.from('menu_items').select('id,name,description,category,dietary_type,price_paise,meal_slot_id,is_add_on,max_quantity,active,day_of_week,item_kind').eq('provider_id', provider.id).eq('active', true).order('name'),
           db.from('provider_operating_hours').select('closed').eq('provider_id', provider.id).eq('weekday', todayWeekday).maybeSingle(),
         ]);
+
+        let rawSlots: any[] | null = slotsPrimary.data as any[] | null;
+        if (isUndefinedColumnError(slotsPrimary.error, 'single_meal_price_paise')) {
+          const slotsFb = await db
+            .from('meal_slots')
+            .select('id,name,starts_at_local,ends_at_local,active')
+            .eq('provider_id', provider.id)
+            .order('starts_at_local');
+          rawSlots = slotsFb.data as any[] | null;
+        }
 
         const isOpenToday = isKitchenOpenFromRecord({
           status: provider.status,
@@ -126,25 +140,33 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         // Return grouped menus across active slots cleanly from DB
         const activeSlots = slots.filter((s) => s.active !== false);
         const timings = Object.fromEntries(
-          slots.map((s) => [
-            String(s.name).toLowerCase(),
-            {
-              enabled: s.active !== false,
-              start: displayClock(s.starts_at_local),
-              end: displayClock(s.ends_at_local),
-            },
-          ])
+          slots.map((s) => {
+            const slotPaise = s.single_meal_price_paise != null ? Number(s.single_meal_price_paise) : null;
+            return [
+              String(s.name).toLowerCase(),
+              {
+                enabled: s.active !== false,
+                start: displayClock(s.starts_at_local),
+                end: displayClock(s.ends_at_local),
+                single_meal_price_paise: slotPaise,
+                single_meal_price_inr: slotPaise != null && slotPaise > 0 ? Math.round(slotPaise / 100) : null,
+              },
+            ];
+          })
         );
         const groupedMenus = activeSlots.map((s) => {
           const sItems = filteredItems.filter(
             (i: any) => i.meal_slot_id === s.id || (!i.meal_slot_id && (i.description || '').toLowerCase().includes(s.name.toLowerCase()))
           );
+          const slotPaise = s.single_meal_price_paise != null ? Number(s.single_meal_price_paise) : null;
           return {
             slot: s.name.toUpperCase(),
             slot_id: s.id,
             starts_at_local: s.starts_at_local,
             ends_at_local: s.ends_at_local,
             enabled: s.active !== false,
+            single_meal_price_paise: slotPaise,
+            single_meal_price_inr: slotPaise != null && slotPaise > 0 ? Math.round(slotPaise / 100) : null,
             items_included: sItems.filter((i: any) => !i.is_add_on).map((i: any) => i.name),
             items_extra: sItems
               .filter((i: any) => i.is_add_on)

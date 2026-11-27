@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { requireProviderOwnership } from '@/lib/provider-auth';
 import { ensurePlanSlotsLinked, publicErrorMessage } from '@/lib/auth-session';
 import { platformStore } from '@/lib/platform-service';
+import { isUndefinedColumnError } from '@/lib/kitchen-status';
 
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
@@ -44,10 +45,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, items: [], menus: [], menu: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    const [{ data: provider }, { data: dbSlots }] = await Promise.all([
+    const [{ data: provider }, slotsPrimary] = await Promise.all([
       client.from('providers').select('id,display_name,status').eq('id', providerId).maybeSingle(),
-      client.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active').eq('provider_id', providerId).eq('active', true),
+      client.from('meal_slots').select('id,name,starts_at_local,ends_at_local,active,single_meal_price_paise').eq('provider_id', providerId).eq('active', true),
     ]);
+
+    let dbSlots: any[] | null = slotsPrimary.data as any[] | null;
+    if (isUndefinedColumnError(slotsPrimary.error, 'single_meal_price_paise')) {
+      const slotsFallback = await client
+        .from('meal_slots')
+        .select('id,name,starts_at_local,ends_at_local,active')
+        .eq('provider_id', providerId)
+        .eq('active', true);
+      dbSlots = slotsFallback.data as any[] | null;
+    }
 
     let slots = (dbSlots ?? []).filter((s) => String(s.name || '').trim().toLowerCase() !== 'all');
     // If no slots exist yet in DB, use default slots (breakfast, lunch, dinner)
@@ -121,6 +132,7 @@ export async function GET(req: NextRequest) {
       const storeUnavailable = storeMenu?.items_unavailable || [];
       const combinedUnavailable = (storeUnavailable.length > 0 ? storeUnavailable : dbUnavailable).filter((name: string) => !name.toLowerCase().includes('test'));
 
+      const slotPricePaise = (slot as any).single_meal_price_paise != null ? Number((slot as any).single_meal_price_paise) : null;
       return {
         id: slot.id,
         provider_id: providerId,
@@ -128,6 +140,8 @@ export async function GET(req: NextRequest) {
         slot: slot.name.toUpperCase(),
         starts_at_local: slot.starts_at_local,
         ends_at_local: slot.ends_at_local,
+        single_meal_price_paise: slotPricePaise,
+        single_meal_price_inr: slotPricePaise != null && slotPricePaise > 0 ? Math.round(slotPricePaise / 100) : null,
         items_included: combinedIncluded,
         items_extra: combinedExtra,
         items_unavailable: combinedUnavailable,
@@ -150,7 +164,7 @@ export async function GET(req: NextRequest) {
 
 const MenuItemInput = z.object({
   provider_id: z.string().min(1),
-  action: z.enum(['add_item', 'remove_item', 'toggle_availability']),
+  action: z.enum(['add_item', 'remove_item', 'toggle_availability', 'update_item', 'set_slot_price']),
   item_id: z.string().optional(),
   item_name: z.string().trim().optional(),
   name: z.string().trim().optional(),
@@ -160,6 +174,8 @@ const MenuItemInput = z.object({
   dietary_type: z.string().default('vegetarian'),
   price_paise: z.number().int().nonnegative().optional(),
   price: z.number().nonnegative().optional(),
+  single_meal_price_inr: z.number().nonnegative().max(10000).nullable().optional(),
+  single_meal_price_paise: z.number().int().nonnegative().max(1_000_000).nullable().optional(),
   is_extra: z.boolean().default(false),
   is_available: z.boolean().optional(),
   max_quantity: z.number().int().min(1).max(100).default(5),
@@ -202,7 +218,13 @@ export async function POST(req: NextRequest) {
     }
     const dayOfWeek = input.day_of_week || 'Daily';
     const itemKind = input.item_kind || (input.is_extra ? 'addon' : 'included');
-    const priceVal = input.price || (input.price_paise ? input.price_paise / 100 : 30);
+    const rawPriceVal =
+      input.price !== undefined
+        ? input.price
+        : input.price_paise !== undefined
+          ? input.price_paise / 100
+          : 0;
+    const priceVal = itemKind === 'included' && input.price == null && input.price_paise == null ? 0 : rawPriceVal;
 
     if (db) {
       try {
@@ -422,6 +444,141 @@ export async function POST(req: NextRequest) {
       }
     }
     return NextResponse.json({ success: true, message: 'Availability updated successfully.' });
+  }
+
+  // ACTION: UPDATE ITEM (name or price)
+  if (input.action === 'update_item') {
+    const newPricePaise =
+      input.price_paise !== undefined
+        ? input.price_paise
+        : input.price !== undefined
+          ? Math.round(input.price * 100)
+          : undefined;
+    const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (itemName) updates.name = itemName;
+    if (newPricePaise !== undefined) updates.price_paise = Math.max(0, newPricePaise);
+    if (input.item_kind) {
+      updates.item_kind = input.item_kind;
+      updates.is_add_on = input.item_kind !== 'included';
+    }
+
+    if (db) {
+      try {
+        const res = input.item_id
+          ? await db.from('menu_items').update(updates).eq('id', input.item_id).eq('provider_id', input.provider_id).select('*').maybeSingle()
+          : itemName
+            ? await db.from('menu_items').update(updates).eq('provider_id', input.provider_id).ilike('name', itemName).select('*').maybeSingle()
+            : { data: null, error: null };
+        if (res.error) {
+          return NextResponse.json(
+            { success: false, error: publicErrorMessage(res.error, 'Could not update item. Please try again.') },
+            { status: 503 }
+          );
+        }
+        return NextResponse.json({ success: true, item: res.data || updates });
+      } catch (err: any) {
+        return NextResponse.json(
+          { success: false, error: publicErrorMessage(err, 'Could not update item. Please try again.') },
+          { status: 503 }
+        );
+      }
+    }
+    return NextResponse.json({ success: true, item: updates });
+  }
+
+  // ACTION: SET PER-MEAL SLOT SINGLE RATE
+  if (input.action === 'set_slot_price') {
+    const slotName = (input.slot || 'lunch').trim().toLowerCase();
+    if (!['breakfast', 'lunch', 'snacks', 'dinner'].includes(slotName)) {
+      return NextResponse.json({ success: false, error: 'Choose Breakfast, Lunch, Snacks, or Dinner.' }, { status: 400 });
+    }
+    const rawInr = input.single_meal_price_inr;
+    const rawPaise = input.single_meal_price_paise;
+    const pricePaise =
+      rawPaise !== undefined
+        ? rawPaise && rawPaise > 0 ? rawPaise : null
+        : rawInr !== undefined
+          ? rawInr && rawInr > 0 ? Math.round(rawInr * 100) : null
+          : null;
+
+    if (db) {
+      try {
+        let { data: existingSlot, error: lookupErr } = await db
+          .from('meal_slots')
+          .select('id')
+          .eq('provider_id', input.provider_id)
+          .ilike('name', slotName)
+          .limit(1)
+          .maybeSingle();
+
+        if (lookupErr) {
+          return NextResponse.json(
+            { success: false, error: publicErrorMessage(lookupErr, 'Could not load meal slot.') },
+            { status: 503 }
+          );
+        }
+
+        if (!existingSlot) {
+          const defaultSlot = DEFAULT_SLOTS.find((s) => s.name === slotName) || DEFAULT_SLOTS[1];
+          const createRes = await db
+            .from('meal_slots')
+            .insert({
+              provider_id: input.provider_id,
+              name: slotName,
+              starts_at_local: defaultSlot.starts_at_local,
+              ends_at_local: defaultSlot.ends_at_local,
+              active: true,
+              single_meal_price_paise: pricePaise,
+            })
+            .select('id')
+            .single();
+
+          if (createRes.error) {
+            return NextResponse.json(
+              { success: false, error: publicErrorMessage(createRes.error, 'Could not save meal rate. Run latest DB migration.') },
+              { status: 503 }
+            );
+          }
+          existingSlot = createRes.data;
+        } else {
+          const updRes = await db
+            .from('meal_slots')
+            .update({
+              single_meal_price_paise: pricePaise,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingSlot.id)
+            .eq('provider_id', input.provider_id);
+          if (updRes.error) {
+            return NextResponse.json(
+              { success: false, error: publicErrorMessage(updRes.error, 'Could not update meal rate. Run latest DB migration.') },
+              { status: 503 }
+            );
+          }
+        }
+      } catch (err: any) {
+        return NextResponse.json(
+          { success: false, error: publicErrorMessage(err, 'Could not update meal rate.') },
+          { status: 503 }
+        );
+      }
+    }
+
+    const slotKey = `${input.provider_id}_Daily_${slotName.toUpperCase()}`;
+    const existingStore = platformStore.menus.get(slotKey);
+    if (existingStore) {
+      (existingStore as any).single_meal_price_paise = pricePaise ?? 0;
+    }
+
+    return NextResponse.json({
+      success: true,
+      slot: slotName.toUpperCase(),
+      single_meal_price_paise: pricePaise,
+      single_meal_price_inr: pricePaise != null ? Math.round(pricePaise / 100) : null,
+      message: pricePaise != null
+        ? `Updated single-meal rate to ₹${Math.round(pricePaise / 100)}`
+        : `Cleared single-meal rate for ${slotName}`,
+    });
   }
 
   return NextResponse.json({ success: false, error: 'Unknown menu action.' }, { status: 400 });

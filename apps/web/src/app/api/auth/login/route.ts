@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
   let providerInfo: { id: string; display_name: string; status: string } | null = null;
   let profileInfo: {
     display_name?: string;
+    phone_e164?: string;
     food_preference?: string;
     default_locality?: string;
     default_city?: string;
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
         admin.from('provider_memberships').select('provider_id,role').eq('user_id', authUser.id).eq('active', true),
         admin
           .from('profiles')
-          .select('display_name,food_preference,default_locality,default_city')
+          .select('display_name,phone_e164,food_preference,default_locality,default_city')
           .eq('id', authUser.id)
           .maybeSingle(),
       ]);
@@ -196,6 +197,7 @@ export async function POST(req: NextRequest) {
     user: {
       id: authUser.id,
       email: resolvedEmail,
+      phone: profileInfo?.phone_e164 || '',
       name: profileInfo?.display_name || resolvedEmail.split('@')[0],
       role: resolvedRole,
       provider_id: providerInfo?.id || null,

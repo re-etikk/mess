@@ -305,10 +305,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 14),
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(Icons.delivery_dining_outlined, size: 32, color: Colors.white.withValues(alpha: 0.45)),
-                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -319,14 +317,30 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              'Compare nearby messes and subscribe in minutes.',
+                              'Order a single plate today or save with monthly plans.',
                               style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.92)),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Icon(Icons.groups_outlined, size: 30, color: Colors.white.withValues(alpha: 0.45)),
+                      const SizedBox(width: 12),
+                      Container(
+                        width: 58,
+                        height: 58,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 2),
+                          boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 10, offset: Offset(0, 4))],
+                        ),
+                        child: ClipOval(
+                          child: Image.asset(
+                            'assets/images/ui/cover_default_kitchen.jpg',
+                            fit: BoxFit.cover,
+                            cacheWidth: 200,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.restaurant_rounded, color: Colors.white, size: 28),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -342,6 +356,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     _SlotCategoryTile(
                       label: 'Breakfast',
+                      imagePath: 'assets/images/ui/slot_breakfast.jpg',
                       svgPath: 'assets/images/ui/icon_breakfast.svg',
                       bg: ThaliColors.breakfastTile,
                       selected: _selectedSlot == 'breakfast',
@@ -353,6 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 7),
                     _SlotCategoryTile(
                       label: 'Lunch',
+                      imagePath: 'assets/images/ui/slot_lunch.jpg',
                       svgPath: 'assets/images/ui/icon_lunch.svg',
                       bg: ThaliColors.lunchTile,
                       selected: _selectedSlot == 'lunch',
@@ -364,6 +380,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 7),
                     _SlotCategoryTile(
                       label: 'Snacks',
+                      imagePath: 'assets/images/ui/slot_snacks.jpg',
                       svgPath: 'assets/images/ui/icon_snacks.svg',
                       bg: ThaliColors.snacksTile,
                       selected: _selectedSlot == 'snacks',
@@ -375,6 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 7),
                     _SlotCategoryTile(
                       label: 'Dinner',
+                      imagePath: 'assets/images/ui/slot_dinner.jpg',
                       svgPath: 'assets/images/ui/icon_dinner.svg',
                       bg: ThaliColors.dinnerTile,
                       selected: _selectedSlot == 'dinner',
@@ -741,6 +759,7 @@ class _HomeScreenState extends State<HomeScreen> {
 class _SlotCategoryTile extends StatelessWidget {
   const _SlotCategoryTile({
     required this.label,
+    required this.imagePath,
     required this.svgPath,
     required this.bg,
     required this.selected,
@@ -748,6 +767,7 @@ class _SlotCategoryTile extends StatelessWidget {
   });
 
   final String label;
+  final String imagePath;
   final String svgPath;
   final Color bg;
   final bool selected;
@@ -760,24 +780,47 @@ class _SlotCategoryTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
           decoration: BoxDecoration(
-            color: bg,
+            color: selected ? ThaliColors.primarySoft : bg,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: selected ? ThaliColors.primary : ThaliColors.stroke,
-              width: selected ? 1.6 : 1,
+              width: selected ? 1.8 : 1,
             ),
           ),
           child: Column(
             children: [
-              SvgPicture.asset(svgPath, width: 38, height: 38),
-              const SizedBox(height: 5),
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 6, offset: Offset(0, 2))],
+                ),
+                child: ClipOval(
+                  child: Image.asset(
+                    imagePath,
+                    fit: BoxFit.cover,
+                    cacheWidth: 180,
+                    errorBuilder: (_, __, ___) => Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: SvgPicture.asset(svgPath, width: 32, height: 32),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
               Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: ThaliColors.ink),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                  color: selected ? ThaliColors.primaryDark : ThaliColors.ink,
+                ),
               ),
             ],
           ),

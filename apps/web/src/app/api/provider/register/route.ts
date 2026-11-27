@@ -33,9 +33,19 @@ export async function POST(req: NextRequest) {
   const supportsDelivery = body.supports_delivery === true;
   const supportsPickup = body.supports_pickup !== false;
 
+  const phoneDigits = phone.replace(/\D/g, '');
+  const normalizedPhoneDigits =
+    phoneDigits.length === 11 && phoneDigits.startsWith('0') ? phoneDigits.slice(1) : phoneDigits;
+
   if (!businessName || !ownerName || !email.includes('@') || password.length < 8) {
     return NextResponse.json(
       { success: false, error: 'Kitchen name, owner name, valid email, and password (min 8 chars) are required.' },
+      { status: 400 }
+    );
+  }
+  if (normalizedPhoneDigits.length < 10 || normalizedPhoneDigits.length > 15) {
+    return NextResponse.json(
+      { success: false, error: 'Enter a valid 10-digit mobile number.' },
       { status: 400 }
     );
   }

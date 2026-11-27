@@ -20,10 +20,17 @@ export async function POST(req: NextRequest) {
   const email = body.email?.trim().toLowerCase();
   const password = body.password;
   const name = (body.name || body.display_name || '').trim();
-  const phone = body.phone?.trim() || null;
+  const rawPhone = String(body.phone || '').trim();
+  const phoneDigits = rawPhone.replace(/\D/g, '');
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !password || password.length < 8 || name.length < 2) {
     return NextResponse.json({ success: false, error: 'Enter a valid email, name, and password of at least 8 characters.' }, { status: 400 });
   }
+  const normalizedPhoneDigits =
+    phoneDigits.length === 11 && phoneDigits.startsWith('0') ? phoneDigits.slice(1) : phoneDigits;
+  if (normalizedPhoneDigits.length < 10 || normalizedPhoneDigits.length > 15) {
+    return NextResponse.json({ success: false, error: 'Enter a valid 10-digit mobile number.' }, { status: 400 });
+  }
+  const phone = normalizedPhoneDigits.length === 10 ? `+91${normalizedPhoneDigits}` : `+${normalizedPhoneDigits}`;
   if (body.role && body.role !== 'customer') {
     return NextResponse.json({ success: false, error: 'Provider applications must use the partner onboarding flow. Admin accounts cannot self-register.' }, { status: 403 });
   }

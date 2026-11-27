@@ -457,8 +457,13 @@ class _ProviderOnboardingScreenState extends State<ProviderOnboardingScreen> {
   }
 
   Future<void> _submit() async {
+    final phoneDigits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
     final email = _emailCtrl.text.trim();
     final pass = _passwordCtrl.text.trim();
+    if (phoneDigits.length < 10) {
+      showPartnerNotice(context, 'Enter a valid 10-digit mobile number.', isError: true);
+      return;
+    }
     if (!email.contains('@') || pass.length < 8) {
       showPartnerNotice(context, 'Enter a valid email and at least 8 characters password.', isError: true);
       return;

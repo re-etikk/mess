@@ -69,7 +69,7 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
     final specials = slot.items.where((i) => i.kind == FoodItemKind.special).toList();
     final chosen = <MenuItem, int>{if (existing != null) ...existing.addOns};
     int qty = existing?.quantity ?? 1;
-    final basePrice = slot.startingPrice ?? _provider.startingMealPrice ?? 0;
+    final basePrice = (slot.startingPrice != null && slot.startingPrice! > 0) ? slot.startingPrice! : 0;
 
     showModalBottomSheet(
       context: context,
@@ -427,33 +427,49 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
               bottom: 14,
               child: SafeArea(
                 top: false,
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      messRoute(CreateSubscriptionScreen(provider: _provider)),
+                child: Builder(
+                  builder: (_) {
+                    final cartTotal = appState.mealCart.values.fold<int>(0, (s, e) => s + e.total);
+                    final hasPaidSingleOrder = cartCount > 0 && cartTotal > 0;
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          messRoute(
+                            CreateSubscriptionScreen(
+                              provider: _provider,
+                              forceSubscriptionMode: !hasPaidSingleOrder,
+                            ),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: ThaliColors.primary,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: const [BoxShadow(color: Color(0x33E95F35), blurRadius: 16, offset: Offset(0, 6))],
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              hasPaidSingleOrder
+                                  ? '$cartCount Meal${cartCount == 1 ? '' : 's'} · ₹$cartTotal'
+                                  : (cartCount > 0 ? '$cartCount Slot${cartCount == 1 ? '' : 's'} Selected' : 'Monthly & Weekly Plans'),
+                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: Colors.white),
+                            ),
+                            const Spacer(),
+                            Text(
+                              hasPaidSingleOrder ? 'Order Now' : 'Subscribe',
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right_rounded, size: 20, color: Colors.white),
+                          ],
+                        ),
+                      ),
                     );
                   },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: ThaliColors.primary,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: const [BoxShadow(color: Color(0x33E95F35), blurRadius: 16, offset: Offset(0, 6))],
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          cartCount > 0 ? '$cartCount Meals Selected' : 'Configure Subscription',
-                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: Colors.white),
-                        ),
-                        const Spacer(),
-                        const Text('View order', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.chevron_right_rounded, size: 20, color: Colors.white),
-                      ],
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -496,7 +512,7 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
           final expanded = _expandedSlots.contains(slot.id);
           final cartItem = appState.mealCart[slot.id];
           final hasExtras = slot.items.any((x) => x.kind != FoodItemKind.included);
-          final priceDisplay = slot.startingPrice ?? _provider.startingMealPrice;
+          final priceDisplay = (slot.startingPrice != null && slot.startingPrice! > 0) ? slot.startingPrice : null;
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -563,10 +579,15 @@ class _MessDetailScreenState extends State<MessDetailScreen> with SingleTickerPr
                             ),
                             const SizedBox(height: 4),
                             Text(slot.menuSummary, style: const TextStyle(fontSize: 12.5, color: ThaliColors.body)),
-                            if (priceDisplay != null) ...[
-                              const SizedBox(height: 6),
-                              Text('₹$priceDisplay/meal', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
-                            ],
+                            const SizedBox(height: 6),
+                            Text(
+                              priceDisplay != null ? '₹$priceDisplay/meal' : 'Included in Plans',
+                              style: TextStyle(
+                                fontSize: priceDisplay != null ? 14 : 12,
+                                fontWeight: FontWeight.w800,
+                                color: priceDisplay != null ? ThaliColors.ink : ThaliColors.primary,
+                              ),
+                            ),
                           ],
                         ),
                       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mess_customer_app/core/models/mess_models.dart';
 import 'package:mess_customer_app/core/repositories/http_mess_repository.dart';
@@ -7,6 +8,8 @@ import 'package:mess_customer_app/core/state/app_state.dart';
 import 'package:mess_customer_app/core/theme/thali_theme.dart';
 import 'package:mess_customer_app/core/widgets/app_state_scope.dart';
 import 'package:mess_customer_app/core/widgets/mess_widgets.dart';
+import 'package:mess_customer_app/features/auth/register_screen.dart';
+import 'package:mess_customer_app/features/checkout/create_subscription_screen.dart';
 import 'package:mess_customer_app/mess_app.dart';
 
 class _StubRepository extends HttpMessRepository {
@@ -50,6 +53,12 @@ class _StubRepository extends HttpMessRepository {
         'week_days': const [],
         'meals': const [],
       };
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchNotifications({required String customerId}) async => const [];
+
+  @override
+  Future<void> markNotificationsRead({String? notificationId, String? customerId}) async {}
 }
 
 void main() {
@@ -175,5 +184,148 @@ void main() {
     expect(find.text('Night Off Kitchen'), findsNothing);
     expect(find.text('CLOSED TODAY'), findsNothing);
     expect(find.text('Closed today'), findsNothing);
+  });
+
+  testWidgets('CreateSubscriptionScreen defaults to Single Meal Order (exact ₹30) and hides Monthly plans/days unless requested', (tester) async {
+    final provider = MessProvider(
+      id: 'p-1',
+      name: 'Ritik Mess',
+      area: 'Sector 62',
+      distanceMeters: 400,
+      description: 'Home meals',
+      mealSlots: const [
+        MealSlot(
+          id: 'breakfast',
+          name: 'Breakfast',
+          startHour: 7,
+          startMinute: 30,
+          endHour: 10,
+          endMinute: 0,
+          menuSummary: 'Aloo Paratha',
+          items: [],
+          startingPrice: 30,
+        ),
+      ],
+      plans: const [
+        MealPlan(id: 'plan-1', providerId: 'p-1', name: 'Monthly', type: SubscriptionType.fixedPeriod, durationDays: 30, price: 1800, slotIds: ['breakfast', 'lunch', 'dinner']),
+      ],
+      isOpen: true,
+    );
+
+    final appState = AppState(repository: _StubRepository(providers: [provider]));
+    appState.setMealSelection(const CartMealSelection(
+      slotId: 'breakfast',
+      slotLabel: 'Breakfast',
+      basePrice: 30,
+      quantity: 1,
+      addOns: {},
+      preferredWindow: '07:30 AM - 10:00 AM',
+    ));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThaliTheme.light,
+        home: AppStateScope(
+          notifier: appState,
+          child: CreateSubscriptionScreen(provider: provider),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Order Meal'), findsOneWidget);
+    expect(find.text('₹30'), findsAtLeastNWidgets(2));
+    expect(find.text('Review Order'), findsOneWidget);
+    expect(find.text('Choose Your Plan'), findsNothing);
+    expect(find.text('Delivery / Dining Days'), findsNothing);
+
+    await tester.tap(find.text('View Plans'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create Subscription'), findsOneWidget);
+    expect(find.text('Choose Your Plan'), findsOneWidget);
+    expect(find.text('Delivery / Dining Days'), findsOneWidget);
+  });
+
+  test('AppState isolates notifications per customer across signOut and new signIn', () async {
+    SharedPreferences.setMockInitialValues({
+      'thali_customer_saved_notifications_v2':
+          '[{"id":"legacy-1","title":"Legacy Payment","message":"Paid ₹2","timestamp":"2026-11-26T00:00:00.000Z"}]',
+    });
+
+    final appState = AppState(repository: _StubRepository());
+    await appState.initSession();
+    expect(appState.notifications, isEmpty);
+
+    appState.signIn(
+      emailOrPhone: 'user1@example.com',
+      name: 'User One',
+      phone: '9876543210',
+      userId: 'cust-111',
+      token: 'tok-111',
+      locality: 'Sector 62',
+      city: 'Noida',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    appState.addNotification(title: 'Online Payment Successful', message: 'Paid ₹2');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(appState.notifications.length, 1);
+
+    await appState.signOut();
+    expect(appState.notifications, isEmpty);
+
+    appState.signIn(
+      emailOrPhone: 'user2@example.com',
+      name: 'User Two',
+      phone: '9123456780',
+      userId: 'cust-222',
+      token: 'tok-222',
+      locality: 'Indiranagar',
+      city: 'Bengaluru',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(appState.notifications, isEmpty);
+
+    await appState.signOut();
+    appState.signIn(
+      emailOrPhone: 'user1@example.com',
+      name: 'User One',
+      phone: '9876543210',
+      userId: 'cust-111',
+      token: 'tok-111',
+      locality: 'Sector 62',
+      city: 'Noida',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(appState.notifications.map((n) => n.title), contains('Online Payment Successful'));
+  });
+
+  testWidgets('RegisterScreen requires a mandatory 10-digit mobile number', (tester) async {
+    final appState = AppState(repository: _StubRepository());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThaliTheme.light,
+        home: AppStateScope(
+          notifier: appState,
+          child: const RegisterScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mobile Number (optional)'), findsNothing);
+    expect(find.text('Mobile Number'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Full Name'), 'Riya Sharma');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Email Address'), 'riya@example.com');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Mobile Number'), '12345');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'Password123');
+
+    final createBtn = find.byType(MessActionButton);
+    await tester.ensureVisible(createBtn);
+    await tester.tap(createBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Enter a valid 10-digit mobile number.'), findsOneWidget);
   });
 }

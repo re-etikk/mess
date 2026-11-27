@@ -15,8 +15,14 @@ class AppState extends ChangeNotifier {
 
   final MessRepository repository;
   static const String _sessionKey = 'thali_customer_saved_session';
-  static const String _notificationsKey = 'thali_customer_saved_notifications_v2';
-  static const String _recentSearchKey = 'thali_customer_recent_searches';
+  static const String _legacyNotificationsKey = 'thali_customer_saved_notifications_v2';
+  static const String _legacyRecentSearchKey = 'thali_customer_recent_searches';
+
+  String? get _notificationsKey =>
+      customerId.trim().isEmpty ? null : 'thali_customer_notifications_v3_${customerId.trim()}';
+
+  String get _recentSearchKey =>
+      'thali_customer_recent_searches_v2_${customerId.trim().isNotEmpty ? customerId.trim() : 'guest'}';
 
   bool isSignedIn = false;
   bool needsProfileSetup = false;
@@ -74,10 +80,12 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> initSession() async {
-    await _loadNotifications();
+    _notifications.clear();
+    recentSearches = [];
     try {
       final prefs = await SharedPreferences.getInstance();
-      recentSearches = prefs.getStringList(_recentSearchKey) ?? [];
+      await prefs.remove(_legacyNotificationsKey);
+      await prefs.remove(_legacyRecentSearchKey);
       final str = prefs.getString(_sessionKey);
       if (str != null && str.isNotEmpty) {
         final data = jsonDecode(str) as Map<String, dynamic>;
@@ -120,7 +128,10 @@ class AppState extends ChangeNotifier {
         notifyListeners();
         if (isSignedIn) {
           await _persistSession();
+          await _loadRecentSearches();
+          await _loadNotifications();
           refreshSubscriptionsFromServer();
+          refreshNotificationsFromServer();
         }
       }
     } catch (_) {}
@@ -152,25 +163,41 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _loadNotifications() async {
+  Future<void> _loadRecentSearches() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_notificationsKey);
+      recentSearches = prefs.getStringList(_recentSearchKey) ?? [];
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _loadNotifications() async {
+    final storageKey = _notificationsKey;
+    if (storageKey == null) {
+      _notifications.clear();
+      return;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(storageKey);
+      _notifications.clear();
       if (raw != null && raw.isNotEmpty) {
         final list = jsonDecode(raw) as List<dynamic>;
-        _notifications.clear();
         for (final item in list) {
           if (item is Map<String, dynamic>) _notifications.add(AppNotification.fromJson(item));
         }
       }
+      notifyListeners();
     } catch (_) {}
   }
 
   Future<void> _saveNotifications() async {
+    final storageKey = _notificationsKey;
+    if (storageKey == null) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       final list = _notifications.take(50).map((n) => n.toJson()).toList();
-      await prefs.setString(_notificationsKey, jsonEncode(list));
+      await prefs.setString(storageKey, jsonEncode(list));
     } catch (_) {}
   }
 
@@ -203,6 +230,9 @@ class AppState extends ChangeNotifier {
       _notifications[idx] = _notifications[idx].copyWith(isRead: true);
       _saveNotifications();
       notifyListeners();
+      if (isSignedIn && customerId.trim().isNotEmpty && authToken.isNotEmpty) {
+        repository.markNotificationsRead(notificationId: id, customerId: customerId.trim());
+      }
     }
   }
 
@@ -212,6 +242,9 @@ class AppState extends ChangeNotifier {
     }
     _saveNotifications();
     notifyListeners();
+    if (isSignedIn && customerId.trim().isNotEmpty && authToken.isNotEmpty) {
+      repository.markNotificationsRead(customerId: customerId.trim());
+    }
   }
 
   Future<void> recordRecentSearch(String q) async {
@@ -277,6 +310,7 @@ class AppState extends ChangeNotifier {
   void signIn({
     required String emailOrPhone,
     required String name,
+    String? phone,
     String? userId,
     String? token,
     String? refreshToken,
@@ -285,16 +319,39 @@ class AppState extends ChangeNotifier {
     String? locality,
     String? city,
   }) {
+    final prevUserId = customerId.trim();
+    final nextUserId = (userId ?? '').trim();
+    if (nextUserId.isEmpty || prevUserId != nextUserId) {
+      _notifications.clear();
+      _history.clear();
+      recentSearches = [];
+      _activeSubscription = null;
+      activeSubscriptions = [];
+      pastSubscriptions = [];
+      _dailyMeal = null;
+      _redeemedSlots.clear();
+      _mealCart.clear();
+      _pendingAddOns.clear();
+      customerEmail = '';
+      customerPhone = '';
+      customerName = '';
+      location = '';
+      selectedCity = '';
+      foodPreference = 'veg';
+    }
     if (emailOrPhone.contains('@')) {
       customerEmail = emailOrPhone.trim();
     } else if (emailOrPhone.trim().isNotEmpty) {
       customerPhone = emailOrPhone.trim();
     }
+    if (phone != null && phone.trim().isNotEmpty) {
+      customerPhone = phone.trim();
+    }
     if (name.trim().isNotEmpty) customerName = name.trim();
     if (token != null && token.isNotEmpty) authToken = token;
     _syncRepoToken();
     if (refreshToken != null) this.refreshToken = refreshToken;
-    if (userId != null && userId.isNotEmpty) customerId = userId;
+    if (nextUserId.isNotEmpty) customerId = nextUserId;
     if (foodPref != null && foodPref.isNotEmpty) foodPreference = foodPref;
     if (locality != null && locality.isNotEmpty) location = locality;
     if (city != null && city.isNotEmpty) selectedCity = city;
@@ -302,6 +359,8 @@ class AppState extends ChangeNotifier {
     isSignedIn = true;
     notifyListeners();
     _persistSession();
+    _loadRecentSearches();
+    _loadNotifications().then((_) => refreshNotificationsFromServer());
     refreshSubscriptionsFromServer();
   }
 
@@ -392,11 +451,41 @@ class AppState extends ChangeNotifier {
     _redeemedSlots.clear();
     _mealCart.clear();
     _pendingAddOns.clear();
+    _notifications.clear();
+    _history.clear();
+    recentSearches = [];
     currentTab = 0;
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_sessionKey);
+      await prefs.remove(_legacyNotificationsKey);
+      await prefs.remove(_legacyRecentSearchKey);
+    } catch (_) {}
+  }
+
+  Future<void> refreshNotificationsFromServer() async {
+    final activeId = customerId.trim();
+    if (!isSignedIn || activeId.isEmpty || authToken.isEmpty) return;
+    try {
+      final rawList = await repository.fetchNotifications(customerId: activeId);
+      if (!isSignedIn || customerId.trim() != activeId) return;
+      if (rawList.isEmpty) return;
+      final byId = <String, AppNotification>{for (final n in _notifications) n.id: n};
+      for (final raw in rawList) {
+        final serverNotif = AppNotification.fromJson(raw);
+        final existing = byId[serverNotif.id];
+        byId[serverNotif.id] = existing != null
+            ? serverNotif.copyWith(isRead: existing.isRead || serverNotif.isRead)
+            : serverNotif;
+      }
+      final merged = byId.values.toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      _notifications
+        ..clear()
+        ..addAll(merged.take(50));
+      notifyListeners();
+      await _saveNotifications();
     } catch (_) {}
   }
 
@@ -553,6 +642,54 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     await _persistSession();
     return subscription;
+  }
+
+  Future<DailyMealEntitlement> purchaseSingleMealOrderCounterCash({
+    required MessProvider provider,
+    required String primarySlotId,
+    required int totalInr,
+    required Map<String, dynamic> selectedSlots,
+    String packagingPreference = 'reusable_tiffin',
+    String fulfillmentMode = 'pickup',
+    String? deliveryAddress,
+    String? deliveryInstructions,
+    String? promoCode,
+  }) async {
+    final helperPlan = MealPlan(
+      id: 'single-${primarySlotId.toLowerCase()}',
+      providerId: provider.id,
+      name: 'Single Meal Order',
+      type: SubscriptionType.dailyMeal,
+      durationDays: 1,
+      price: totalInr,
+      slotIds: [primarySlotId.toLowerCase()],
+      includedMeals: 1,
+    );
+    final ent = await repository.purchaseDailyMeal(
+      plan: helperPlan,
+      slotId: primarySlotId,
+      customerId: customerId,
+      selectedSlots: selectedSlots,
+      fulfillmentMode: fulfillmentMode,
+      packagingPreference: packagingPreference,
+      deliveryAddress: deliveryAddress,
+      deliveryInstructions: deliveryInstructions,
+      promoCode: promoCode,
+      customerName: customerName,
+      customerPhone: customerPhone,
+    );
+    _dailyMeal = ent;
+    selectedProviderId = provider.id;
+    clearMealCart();
+    addNotification(
+      title: 'Single Meal Order Submitted',
+      message: 'Pay ₹${ent.paidAmount} at ${provider.name} to confirm your meal.',
+      type: NotificationType.subscription,
+    );
+    await refreshSubscriptionsFromServer();
+    notifyListeners();
+    await _persistSession();
+    return ent;
   }
 
   Future<Map<String, dynamic>> payWithCashfree({

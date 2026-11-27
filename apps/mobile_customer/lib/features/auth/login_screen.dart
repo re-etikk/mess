@@ -132,6 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
       appState.signIn(
         emailOrPhone: result.email.isNotEmpty ? result.email : result.phone,
         name: result.name,
+        phone: result.phone,
         userId: result.userId,
         token: result.token,
         refreshToken: result.refreshToken,
@@ -165,6 +166,7 @@ class _LoginScreenState extends State<LoginScreen> {
       AppStateScope.of(context).signIn(
         emailOrPhone: res.email,
         name: res.name,
+        phone: res.phone,
         userId: res.userId,
         token: res.token,
         refreshToken: res.refreshToken,

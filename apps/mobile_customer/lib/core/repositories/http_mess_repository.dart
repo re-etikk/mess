@@ -237,6 +237,15 @@ class HttpMessRepository implements MessRepository {
         }
       }
 
+      var updatedStartingPrice = base.startingMealPrice;
+      final explicitRates = updatedSlots
+          .map((s) => s.startingPrice ?? 0)
+          .where((p) => p > 0)
+          .toList();
+      if (explicitRates.isNotEmpty) {
+        updatedStartingPrice = explicitRates.reduce((a, b) => a < b ? a : b);
+      }
+
       final freshProvider = MessProvider(
         id: base.id,
         name: base.name,
@@ -255,7 +264,7 @@ class HttpMessRepository implements MessRepository {
         rating: base.rating,
         totalReviews: base.totalReviews,
         subscriberCount: base.subscriberCount,
-        startingMealPrice: base.startingMealPrice,
+        startingMealPrice: updatedStartingPrice,
         supportsPickup: updatedPickup,
         supportsDelivery: updatedDelivery,
         allowsTakeaway: updatedTakeaway,
@@ -410,6 +419,14 @@ class HttpMessRepository implements MessRepository {
     required MealPlan plan,
     required String slotId,
     required String customerId,
+    Map<String, dynamic>? selectedSlots,
+    String fulfillmentMode = 'pickup',
+    String packagingPreference = 'reusable_tiffin',
+    String? deliveryAddress,
+    String? deliveryInstructions,
+    String? promoCode,
+    String? customerName,
+    String? customerPhone,
   }) async {
     final uri = Uri.parse('$baseUrl/api/meal/daily_purchase');
     http.Response response;
@@ -423,6 +440,14 @@ class HttpMessRepository implements MessRepository {
               'slot': slotId.toUpperCase(),
               'customer_id': customerId,
               'price_paise': plan.price * 100,
+              if (selectedSlots != null) 'selected_slots': selectedSlots,
+              'fulfillment_mode': fulfillmentMode,
+              'packaging_preference': packagingPreference,
+              if (deliveryAddress != null && deliveryAddress.isNotEmpty) 'delivery_address': deliveryAddress,
+              if (deliveryInstructions != null && deliveryInstructions.isNotEmpty) 'delivery_instructions': deliveryInstructions,
+              if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
+              if (customerName != null && customerName.isNotEmpty) 'customer_name': customerName,
+              if (customerPhone != null && customerPhone.isNotEmpty) 'customer_phone': customerPhone,
             }),
           )
           .timeout(const Duration(seconds: 12));
@@ -432,17 +457,22 @@ class HttpMessRepository implements MessRepository {
 
     final data = _safeJsonMap(response, action: 'purchase meal');
     if (response.statusCode >= 200 && response.statusCode < 300 && data['success'] == true) {
+      final ent = data['entitlement'] as Map<String, dynamic>? ?? {};
       return DailyMealEntitlement(
-        id: data['entitlement_id']?.toString() ?? 'daily-${DateTime.now().microsecondsSinceEpoch}',
+        id: ent['id']?.toString() ?? data['entitlement_id']?.toString() ?? 'daily-${DateTime.now().microsecondsSinceEpoch}',
         providerId: plan.providerId,
-        providerName: (await getProvider(plan.providerId))?.name ?? plan.name,
+        providerName: ent['provider_name']?.toString() ?? (await getProvider(plan.providerId))?.name ?? plan.name,
         slotId: slotId,
         date: DateTime.now(),
-        paidAmount: plan.price,
-        isPaid: true,
+        paidAmount: (ent['amount_inr'] as num?)?.toInt() ?? plan.price,
+        isPaid: ent['is_paid'] == true,
       );
     }
-    throw RepositoryException(data['error']?.toString() ?? 'Unable to purchase daily meal.', code: 'daily_purchase_failed');
+    throw RepositoryException(
+      data['error']?.toString() ??
+          friendlyCustomerError('HTTP ${response.statusCode}', statusCode: response.statusCode, action: 'place single meal order'),
+      code: 'daily_purchase_failed',
+    );
   }
 
   @override
@@ -1003,10 +1033,20 @@ class HttpMessRepository implements MessRepository {
 
       final List<MenuItem> items = [];
       int? slotStartingPrice;
-      for (final it in fullItems) {
-        if (it is Map && it['is_add_on'] != true) {
-          final p = ((it['price_paise'] as num?)?.toInt() ?? 0) ~/ 100;
-          if (p > 0 && (slotStartingPrice == null || p < slotStartingPrice)) slotStartingPrice = p;
+      final explicitInr = (mMap['single_meal_price_inr'] as num?)?.toInt();
+      final explicitPaise = (mMap['single_meal_price_paise'] as num?)?.toInt();
+      if (explicitInr != null && explicitInr > 0) {
+        slotStartingPrice = explicitInr;
+      } else if (explicitPaise != null && explicitPaise >= 100) {
+        slotStartingPrice = explicitPaise ~/ 100;
+      }
+
+      if (slotStartingPrice == null) {
+        for (final it in fullItems) {
+          if (it is Map && it['is_add_on'] != true) {
+            final p = ((it['price_paise'] as num?)?.toInt() ?? 0) ~/ 100;
+            if (p > 0 && (slotStartingPrice == null || p < slotStartingPrice)) slotStartingPrice = p;
+          }
         }
       }
 
@@ -1192,5 +1232,46 @@ class HttpMessRepository implements MessRepository {
       );
     }
     return map;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchNotifications({required String customerId}) async {
+    if (authToken.isEmpty || customerId.trim().isEmpty) return const [];
+    try {
+      final uri = Uri.parse('$baseUrl/api/notifications?customer_id=${Uri.encodeComponent(customerId.trim())}');
+      final resp = await http
+          .get(uri, headers: _authHeaders(noCache: true))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) return const [];
+      final decoded = jsonDecode(resp.body);
+      if (decoded is Map<String, dynamic> && decoded['success'] == true) {
+        final raw = decoded['notifications'];
+        if (raw is List) {
+          return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  @override
+  Future<void> markNotificationsRead({String? notificationId, String? customerId}) async {
+    if (authToken.isEmpty) return;
+    try {
+      final uri = Uri.parse('$baseUrl/api/notifications');
+      await http
+          .patch(
+            uri,
+            headers: _authHeaders(json: true),
+            body: jsonEncode({
+              if (notificationId != null && notificationId.isNotEmpty)
+                'notification_id': notificationId
+              else
+                'mark_all': true,
+              if (customerId != null && customerId.isNotEmpty) 'customer_id': customerId,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {}
   }
 }

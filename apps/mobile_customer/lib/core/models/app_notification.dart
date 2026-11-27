@@ -66,15 +66,26 @@ class AppNotification {
   factory AppNotification.fromJson(Map<String, dynamic> json) {
     NotificationType nType = NotificationType.general;
     try {
-      final t = json['type']?.toString();
-      if (t != null) {
-        nType = NotificationType.values.firstWhere((e) => e.name == t, orElse: () => NotificationType.general);
+      final rawType = (json['type'] ?? json['notification_type'])?.toString().toLowerCase();
+      if (rawType != null && rawType.isNotEmpty) {
+        if (rawType.contains('redemp') || rawType == 'checkin') {
+          nType = NotificationType.redemption;
+        } else if (rawType.contains('sub') || rawType.contains('payment') || rawType.contains('order')) {
+          nType = NotificationType.subscription;
+        } else if (rawType.contains('menu')) {
+          nType = NotificationType.menu;
+        } else if (rawType.contains('upgrade')) {
+          nType = NotificationType.upgrade;
+        } else {
+          nType = NotificationType.values.firstWhere((e) => e.name == rawType, orElse: () => NotificationType.general);
+        }
       }
     } catch (_) {}
 
     DateTime time;
     try {
-      time = DateTime.parse(json['timestamp']?.toString() ?? '');
+      final rawTime = (json['timestamp'] ?? json['created_at'])?.toString() ?? '';
+      time = DateTime.parse(rawTime);
     } catch (_) {
       time = DateTime.now();
     }

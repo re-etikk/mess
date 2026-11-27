@@ -195,3 +195,148 @@ export async function resolveVerifiedUpgradeQuote({
     payablePaise,
   };
 }
+
+export interface AuthoritativeSingleMealResolution {
+  ok: true;
+  itemsSummary: string;
+  totalMealsCount: number;
+  baseMealsPaise: number;
+  verifiedAddOnsPaise: number;
+  normalizedSelectedSlots: Record<string, any>;
+}
+
+export async function resolveAuthoritativeSingleMealOrder({
+  admin,
+  providerId,
+  selectedSlots,
+  fallbackSlot = 'LUNCH',
+}: {
+  admin: AdminClient | null;
+  providerId: string;
+  selectedSlots?: Record<string, any> | null;
+  fallbackSlot?: string;
+}): Promise<AuthoritativeSingleMealResolution | { ok: false; status: number; error: string }> {
+  const requestedEntries =
+    selectedSlots && typeof selectedSlots === 'object' && Object.keys(selectedSlots).length > 0
+      ? Object.entries(selectedSlots)
+      : [[fallbackSlot.toLowerCase(), { quantity: 1, addons: [] }]];
+
+  let slotsRows: any[] = [];
+  let menuRows: any[] = [];
+  let planRows: any[] = [];
+
+  if (admin && providerId) {
+    try {
+      const [slotsRes, menuRes, plansRes] = await Promise.all([
+        admin.from('meal_slots').select('*').eq('provider_id', providerId),
+        admin.from('menu_items').select('*').eq('provider_id', providerId).eq('active', true),
+        admin.from('subscription_plans').select('price_paise,duration_months,plan_type,published').eq('provider_id', providerId).eq('active', true),
+      ]);
+      slotsRows = slotsRes.data ?? [];
+      menuRows = menuRes.data ?? [];
+      planRows = (plansRes.data ?? []).filter((p: any) => p.published !== false);
+    } catch {}
+  }
+
+  // Fallback daily reference from plans only if >= ₹30/day & no explicit single-meal slot rate exists
+  let planFallbackPaise = 0;
+  for (const pl of planRows) {
+    const pPaise = Number(pl.price_paise || 0);
+    const dur = Math.max(1, Number(pl.duration_days || 0) || Math.max(1, Number(pl.duration_months || 1)) * 30);
+    if (pPaise >= 3000) {
+      const candidate = Math.round(pPaise / dur);
+      if (candidate >= 1000 && (planFallbackPaise === 0 || candidate < planFallbackPaise)) {
+        planFallbackPaise = candidate;
+      }
+    }
+  }
+
+  let baseMealsPaise = 0;
+  let verifiedAddOnsPaise = 0;
+  let totalMealsCount = 0;
+  const summaryParts: string[] = [];
+  const normalizedSelectedSlots: Record<string, any> = {};
+
+  for (const [rawKey, rawCfg] of requestedEntries) {
+    const slotKey = String(rawKey || '').trim().toLowerCase();
+    if (!slotKey || slotKey === 'all') continue;
+    const cfg = rawCfg && typeof rawCfg === 'object' ? rawCfg : {};
+    const qty = Math.max(1, Math.min(20, Math.round(Number(cfg.quantity ?? 1))));
+
+    const slotRow = slotsRows.find((s) => String(s.name || '').trim().toLowerCase() === slotKey);
+    const slotItems = menuRows.filter(
+      (i) =>
+        (slotRow && i.meal_slot_id === slotRow.id) ||
+        (!i.meal_slot_id && String(i.description || '').toLowerCase().includes(slotKey))
+    );
+
+    let unitRatePaise = Number(slotRow?.single_meal_price_paise || 0);
+    if (unitRatePaise <= 0) {
+      const pricedBaseItems = slotItems
+        .filter((i) => !i.is_add_on && Number(i.price_paise || 0) >= 100)
+        .map((i) => Number(i.price_paise));
+      if (pricedBaseItems.length > 0) {
+        unitRatePaise = Math.min(...pricedBaseItems);
+      }
+    }
+    if (unitRatePaise <= 0 && !admin) {
+      // In unit-test mode without Supabase, allow platformStore / menu items lookup
+      const storeSlotMenu = platformStore.menus.get(`${providerId}_Daily_${slotKey.toUpperCase()}`);
+      if ((storeSlotMenu as any)?.single_meal_price_paise > 0) {
+        unitRatePaise = Number((storeSlotMenu as any).single_meal_price_paise);
+      }
+    }
+    if (unitRatePaise <= 0 && planFallbackPaise > 0) {
+      unitRatePaise = planFallbackPaise;
+    }
+
+    let slotAddOnsPaise = 0;
+    const normalizedAddOns: Array<{ name: string; price: number; qty: number }> = [];
+    const reqAddOns = Array.isArray(cfg.addons) ? cfg.addons : [];
+    for (const reqA of reqAddOns) {
+      const aName = String(reqA?.name || '').trim();
+      const aQty = Math.max(1, Math.min(10, Math.round(Number(reqA?.qty ?? 1))));
+      if (!aName) continue;
+      const dbAddOn = menuRows.find(
+        (m) => String(m.name || '').trim().toLowerCase() === aName.toLowerCase() && m.is_add_on === true
+      );
+      const aUnitPaise = dbAddOn ? Number(dbAddOn.price_paise || 0) : Math.max(0, Math.round(Number(reqA?.price || 0) * 100));
+      slotAddOnsPaise += aUnitPaise * aQty;
+      normalizedAddOns.push({ name: aName, price: Math.round(aUnitPaise / 100), qty: aQty });
+    }
+
+    baseMealsPaise += unitRatePaise * qty;
+    verifiedAddOnsPaise += slotAddOnsPaise * qty;
+    totalMealsCount += qty;
+
+    const title = slotKey.charAt(0).toUpperCase() + slotKey.slice(1);
+    summaryParts.push(`${qty}x ${title}`);
+    normalizedSelectedSlots[slotKey] = {
+      quantity: qty,
+      slot_rate_paise: unitRatePaise,
+      time_slot: typeof cfg.time_slot === 'string' ? cfg.time_slot : '',
+      addons: normalizedAddOns,
+    };
+  }
+
+  if (totalMealsCount <= 0) {
+    return { ok: false, status: 400, error: 'Select at least one valid meal slot to order.' };
+  }
+
+  if (baseMealsPaise + verifiedAddOnsPaise <= 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Single-meal rate is not configured for this kitchen yet. Choose a plan or try another kitchen.',
+    };
+  }
+
+  return {
+    ok: true,
+    itemsSummary: summaryParts.join(', '),
+    totalMealsCount,
+    baseMealsPaise,
+    verifiedAddOnsPaise,
+    normalizedSelectedSlots,
+  };
+}

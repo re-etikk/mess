@@ -598,8 +598,8 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
                 final pkp = (s['pickup_count'] as num?)?.toInt() ?? 0;
                 return Expanded(
                   child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                     decoration: BoxDecoration(
                       color: ThaliColors.card,
                       borderRadius: BorderRadius.circular(10),
@@ -607,12 +607,19 @@ class _PartnerOverviewTabState extends State<PartnerOverviewTab> {
                     ),
                     child: Column(
                       children: [
-                        Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: ThaliColors.muted)),
-                        const SizedBox(height: 2),
-                        Text('$plates', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
                         Text(
-                          '${pkp}P / ${dlv}D',
-                          style: const TextStyle(fontSize: 10, color: ThaliColors.muted),
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: ThaliColors.muted),
+                        ),
+                        const SizedBox(height: 2),
+                        Text('$plates', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ThaliColors.ink)),
+                        Text(
+                          '${pkp}P/${dlv}D',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 9.5, color: ThaliColors.muted),
                         ),
                       ],
                     ),

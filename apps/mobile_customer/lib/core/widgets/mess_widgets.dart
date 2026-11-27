@@ -543,23 +543,28 @@ class MessCoverVisual extends StatelessWidget {
   }
 
   Widget _fallbackArt() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF7C2D12), Color(0xFF27140A)],
-        ),
-      ),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.14),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+    return Image.asset(
+      'assets/images/ui/cover_default_kitchen.jpg',
+      fit: BoxFit.cover,
+      cacheWidth: 720,
+      errorBuilder: (_, __, ___) => Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF7C2D12), Color(0xFF27140A)],
           ),
-          child: const Icon(Icons.restaurant_menu_rounded, color: Colors.white, size: 28),
+        ),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+            ),
+            child: const Icon(Icons.restaurant_menu_rounded, color: Colors.white, size: 28),
+          ),
         ),
       ),
     );

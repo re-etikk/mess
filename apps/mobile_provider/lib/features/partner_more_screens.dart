@@ -663,6 +663,12 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
     'snacks': TextEditingController(text: '06:30 PM'),
     'dinner': TextEditingController(text: '10:30 PM'),
   };
+  final Map<String, TextEditingController> _priceCtrls = {
+    'breakfast': TextEditingController(),
+    'lunch': TextEditingController(),
+    'snacks': TextEditingController(),
+    'dinner': TextEditingController(),
+  };
 
   @override
   void initState() {
@@ -676,6 +682,9 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
       c.dispose();
     }
     for (final c in _endCtrls.values) {
+      c.dispose();
+    }
+    for (final c in _priceCtrls.values) {
       c.dispose();
     }
     super.dispose();
@@ -692,6 +701,8 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
           _enabled[slot] = cfg['enabled'] != false;
           if (cfg['start'] != null) _startCtrls[slot]!.text = cfg['start'].toString();
           if (cfg['end'] != null) _endCtrls[slot]!.text = cfg['end'].toString();
+          final rate = (cfg['single_meal_price_inr'] as num?)?.toInt();
+          _priceCtrls[slot]!.text = rate != null && rate > 0 ? '$rate' : '';
         }
       }
     } finally {
@@ -710,10 +721,11 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
               'enabled': _enabled[slot] == true,
               'start': _startCtrls[slot]!.text.trim(),
               'end': _endCtrls[slot]!.text.trim(),
+              'single_meal_price_inr': int.tryParse(_priceCtrls[slot]!.text.trim()) ?? 0,
             },
         },
       );
-      if (mounted) showPartnerNotice(context, 'Meal service hours updated.');
+      if (mounted) showPartnerNotice(context, 'Meal timings & rates updated.');
     } catch (e) {
       if (mounted) showPartnerNotice(context, ProviderApiService.friendlyError(e, action: 'save timings'), isError: true);
     } finally {
@@ -762,7 +774,7 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: ThaliColors.scaffold,
-      appBar: AppBar(title: const Text('Order & Meal Timings')),
+      appBar: AppBar(title: const Text('Meal Timings & Rates')),
       body: RefreshIndicator(
         color: ThaliColors.primary,
         onRefresh: _load,
@@ -870,13 +882,24 @@ class _OrderTimingsScreenState extends State<OrderTimingsScreen> {
                                 ),
                               ],
                             ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _priceCtrls[slot],
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Single-Meal Rate (₹, optional)',
+                                hintText: 'Leave blank for subscription plans only',
+                                prefixText: '₹ ',
+                                isDense: true,
+                              ),
+                            ),
                           ],
                         ),
                       ),
                     );
                   }),
                   const SizedBox(height: 8),
-                  PartnerActionButton(label: 'Save Service Timings', loading: _saving, onPressed: _save),
+                  PartnerActionButton(label: 'Save Timings & Rates', loading: _saving, onPressed: _save),
                 ],
               ),
       ),

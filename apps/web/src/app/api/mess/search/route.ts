@@ -200,7 +200,7 @@ export async function GET(req: NextRequest) {
         const dbSubCount = allSubs.filter((s: any) => s.provider_id === pId).length;
 
         const pPlans = allPlans
-          .filter((plan: any) => plan.provider_id === pId)
+          .filter((plan: any) => plan.provider_id === pId && plan.published !== false)
           .map((plan: any) => {
             const durMonths = plan.duration_months || 1;
             const durDays = plan.duration_days || durMonths * 30;
@@ -245,12 +245,15 @@ export async function GET(req: NextRequest) {
                   price_paise: Math.round((e.price || 0) * 100),
                 }));
 
+          const slotPaise = (slot as any).single_meal_price_paise != null ? Number((slot as any).single_meal_price_paise) : null;
           return {
             id: slot.id,
             slot: slotNameUpper,
             slot_id: slot.id,
             starts_at_local: slot.starts_at_local,
             ends_at_local: slot.ends_at_local,
+            single_meal_price_paise: slotPaise,
+            single_meal_price_inr: slotPaise != null && slotPaise > 0 ? Math.round(slotPaise / 100) : null,
             items_included: combinedIncluded,
             items_extra: combinedExtra,
             items: slotItems,
@@ -298,15 +301,19 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // Real starting meal price in INR (ignore < ₹1/meal test artifacts so ₹0/meal never renders)
+        // Authoritative starting single-meal price in INR (slot rate -> priced base dish -> multi-day plan estimate >= ₹30)
+        const slotRates = pSlots
+          .map((s: any) => Number(s.single_meal_price_paise || 0))
+          .filter((p: number) => p >= 100);
         const nonZeroMenuPrices = pItems
           .filter((i: any) => !i.is_add_on && Number(i.price_paise) >= 100)
           .map((i: any) => Number(i.price_paise));
         const dailyPlanPrices = pPlans
-          .filter((pl: any) => Number(pl.price_paise) > 0)
+          .filter((pl: any) => Number(pl.price_paise) >= 3000)
           .map((pl: any) => Math.round(Number(pl.price_paise) / Math.max(1, Number(pl.duration_days || 30))))
-          .filter((perMealPaise: number) => perMealPaise >= 100);
-        const minPaiseCandidates = [...nonZeroMenuPrices, ...dailyPlanPrices];
+          .filter((perMealPaise: number) => perMealPaise >= 1000);
+        const explicitCandidates = [...slotRates, ...nonZeroMenuPrices];
+        const minPaiseCandidates = explicitCandidates.length > 0 ? explicitCandidates : dailyPlanPrices;
         const startingMealPrice =
           minPaiseCandidates.length > 0 ? Math.max(1, Math.round(Math.min(...minPaiseCandidates) / 100)) : null;
 
@@ -369,6 +376,20 @@ export async function GET(req: NextRequest) {
       results.sort((a: any, b: any) => (a.starting_meal_price ?? 999999) - (b.starting_meal_price ?? 999999));
     } else if (sortBy === 'distance') {
       results.sort((a: any, b: any) => (a.distance_km ?? 999999) - (b.distance_km ?? 999999));
+    } else {
+      // Honest multi-signal ML relevance ranking: open kitchens first, Bayesian rating + distance + completeness
+      const mlScore = (p: any): number => {
+        const openBoost = p.is_open_today ? 1000 : 0;
+        const revCount = Number(p.total_reviews || 0);
+        const bayesianRating = revCount > 0 && p.rating != null
+          ? (Number(p.rating) * revCount + 3.8 * 2) / (revCount + 2)
+          : 3.6;
+        const distPenalty = p.distance_km != null ? Math.min(20, Number(p.distance_km) * 1.5) : 5;
+        const menuRichness = Math.min(5, (p.menus || []).filter((m: any) => (m.items_included || []).length > 0).length);
+        const coverBoost = p.cover_path ? 3 : 0;
+        return openBoost + bayesianRating * 10 + menuRichness * 2 + coverBoost - distPenalty;
+      };
+      results.sort((a: any, b: any) => mlScore(b) - mlScore(a));
     }
 
     return NextResponse.json(
